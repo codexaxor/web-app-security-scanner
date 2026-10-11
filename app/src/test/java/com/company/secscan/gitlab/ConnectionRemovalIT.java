@@ -14,8 +14,10 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Removing a connection never deletes repository rows: each is reassigned to another connection that still
@@ -37,6 +39,8 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
     GitlabConnectionRepository connections;
     @Autowired
     RepositoryRepository repositories;
+    @Autowired
+    JdbcTemplate jdbc;
 
     private GitLabWireMock gitlab;
 
@@ -142,10 +146,69 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
     }
 
     @Test
+    void reselectingADeactivatedRepositoryReattachesItToTheSelectingConnection() {
+        // Select via a project connection, then remove it with no replacement -> repo detached + inactive.
+        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        UUID projectConn = projectConnId();
+        repositoryService.select(projectConn, List.of(PROJECT_ID));
+        service.delete(projectConn);
+        Repository detached = onlyRepo();
+        assertThat(detached.isActive()).isFalse();
+        assertThat(detached.getConnectionId()).isNull();
+
+        // A new group connection exposes the project; selecting it reattaches the row (not a new one).
+        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        UUID groupConn = groupConnId();
+        repositoryService.select(groupConn, List.of(PROJECT_ID));
+
+        Repository repo = onlyRepo();
+        assertThat(repo.isActive()).isTrue();
+        assertThat(repo.getConnectionId()).isEqualTo(groupConn);
+        assertThat(repo.getInactiveReason()).isNull();
+        assertThat(repo.isProvisional()).isFalse();
+    }
+
+    @Test
+    void reassignmentTieBreakPrefersMostRecentlyVerifiedAndTreatsNullAsOldest() {
+        // Three group connections with the same namespace path (distinct ids). The owner A is removed; B and C
+        // are equally specific prefixes of the repo path, so the tie breaks on last_verified_at: C (set) beats
+        // B (null = oldest).
+        UUID a = insertGroupConnection(40L, "services", Instant.now().minusSeconds(3600));
+        UUID b = insertGroupConnection(41L, "services", null);
+        UUID c = insertGroupConnection(42L, "services", Instant.now());
+        insertActiveRepository(a, PROJECT_ID, "services/ib-keycloak");
+
+        var result = service.delete(a);
+
+        assertThat(result.reassigned()).isEqualTo(1);
+        Repository repo = onlyRepo();
+        assertThat(repo.getConnectionId()).isEqualTo(c);
+        assertThat(repo.getConnectionId()).isNotEqualTo(b);
+    }
+
+    @Test
     void deletingAMissingConnectionIsRejected() {
         assertThatThrownBy(() -> service.delete(UUID.randomUUID()))
                 .isInstanceOf(GitLabException.class)
                 .extracting(e -> ((GitLabException) e).getError())
                 .isEqualTo(GitLabError.CONNECTION_NOT_FOUND);
+    }
+
+    private UUID insertGroupConnection(long groupId, String fullPath, Instant lastVerifiedAt) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("insert into gitlab_connection "
+                        + "(id, workspace_id, base_url, target_type, group_full_path, gitlab_group_id, "
+                        + "token_ciphertext, last_verified_at) "
+                        + "values (?, ?, 'http://localhost', 'group', ?, ?, 'ct', ?)",
+                id, Workspace.DEFAULT_ID, fullPath, groupId,
+                lastVerifiedAt == null ? null : java.sql.Timestamp.from(lastVerifiedAt));
+        return id;
+    }
+
+    private void insertActiveRepository(UUID connectionId, long projectId, String pathWithNamespace) {
+        jdbc.update("insert into repository "
+                        + "(id, workspace_id, connection_id, gitlab_project_id, path_with_namespace, "
+                        + "default_branch) values (?, ?, ?, ?, ?, 'main')",
+                UUID.randomUUID(), Workspace.DEFAULT_ID, connectionId, projectId, pathWithNamespace);
     }
 }

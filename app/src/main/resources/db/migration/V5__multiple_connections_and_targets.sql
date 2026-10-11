@@ -20,6 +20,10 @@ alter table gitlab_connection
     alter column group_full_path drop not null,
     alter column gitlab_group_id drop not null;
 
+-- Existing (pre-M1b) connections predate last_verified_at; backfill their creation time so reassignment
+-- tie-breaks have a value. A still-null last_verified_at is treated as oldest when breaking a tie.
+update gitlab_connection set last_verified_at = created_at where last_verified_at is null;
+
 -- Exactly one target is populated, matching the mode.
 alter table gitlab_connection
     add constraint ck_gitlab_connection_target check (

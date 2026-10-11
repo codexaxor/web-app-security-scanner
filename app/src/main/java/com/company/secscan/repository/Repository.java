@@ -111,6 +111,16 @@ public class Repository {
         this.reassignedAt = Instant.now();
     }
 
+    /**
+     * Reattaches a detached or inactive repository to the connection that just selected it, clearing its
+     * inactive/provisional state. Used when a repository that lost its connection (or was deactivated) is
+     * selected again through a connection that can reach it.
+     */
+    public void reattachTo(UUID connectionId) {
+        this.connectionId = connectionId;
+        activate();
+    }
+
     /** Clears the provisional flag once a use has confirmed the connection can reach this repository. */
     public void confirmConnection() {
         this.reassignedAt = null;

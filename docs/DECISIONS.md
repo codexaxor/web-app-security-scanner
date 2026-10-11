@@ -28,7 +28,12 @@ connection never deletes repository rows: each is reassigned — to a project-mo
 repo path, newest-verified breaking a tie (offline, no GitLab call at delete time) — or, if none, detached
 (`connection_id` nullable) and deactivated with `inactive_reason = NO_ACCESSIBLE_CONNECTION`. A reassignment is
 provisional (`reassigned_at`): the next use of the new connection confirms it, or, on a 401/403/404,
-deactivates the repo. Reassignments/deactivations are logged (a persistent `triage_event` arrives with M3).
+deactivates the repo. First-wins dedup applies only while a repository is owned and active; a detached or
+inactive repository is reattached to the connection that next selects it (clearing the inactive/provisional
+state). The tie-break prefers the most-recently-verified connection and treats a null `last_verified_at` as
+oldest (existing rows are backfilled to `created_at` in V5). A concurrent duplicate `create` is caught via the
+partial unique index and returned as `CONNECTION_EXISTS`, not a 500. Reassignments/deactivations are logged (a
+persistent `triage_event` arrives with M3).
 Consequences: additive, reversible connection management; a repo can briefly point at a connection that cannot
 reach it, resolved on first use; delete works even with the VPN down or a token expired.
 

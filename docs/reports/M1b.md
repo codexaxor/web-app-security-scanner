@@ -17,8 +17,11 @@ automated proxies run the full flow against a mocked GitLab (WireMock + Testcont
 | A project-mode connection resolves one project (path or URL), verifies scopes, lists & selects it | `ProjectConnectionIT` — create/test, pasted URL, list-single, select-single, not-a-member (7) | PASS |
 | Project-mode errors map clearly (not found / missing scopes / expired) | `ProjectConnectionIT.projectNotFoundIsReported`/`missingScopeIsReported`/`expiredTokenIsReported`; `GitLabClientTest.missingProjectMapsToProjectNotFound`/`forbiddenProjectResolveMapsToMissingScopes` | PASS |
 | A group + a project connection coexist in one workspace; duplicates rejected | `MultiConnectionIT` (group+project coexist, list; duplicate project rejected) | PASS |
-| A project reachable via two connections is stored once; first connection keeps ownership | `DedupAcrossConnectionsIT.sameProjectSelectedViaTwoConnectionsIsStoredOnceAndKeepsFirstOwner` | PASS |
+| A project reachable via two connections is stored once; first connection keeps ownership (while owned+active) | `DedupAcrossConnectionsIT.sameProjectSelectedViaTwoConnectionsIsStoredOnceAndKeepsFirstOwner` | PASS |
+| Re-selecting a detached/inactive repository reattaches it to the selecting connection (active, reasons cleared) | `ConnectionRemovalIT.reselectingADeactivatedRepositoryReattachesItToTheSelectingConnection` | PASS |
 | Removing a connection reassigns its repos to a connection that still exposes them, else deactivates; rows kept (D-020) | `ConnectionRemovalIT` — reassign-to-group, deactivate-when-none, provisional-confirm, provisional-deactivate, missing-connection (5) | PASS |
+| Reassignment tie-break prefers most-recently-verified; a null `last_verified_at` is treated as oldest | `ConnectionRemovalIT.reassignmentTieBreakPrefersMostRecentlyVerifiedAndTreatsNullAsOldest` | PASS |
+| A concurrent duplicate `create` returns `CONNECTION_EXISTS` (no 500), leaving exactly one connection | `MultiConnectionIT.concurrentDuplicateCreateYieldsOneConnectionAndACleanError` | PASS |
 | Token rotation on an existing connection (same target) keeps selected repositories; different target rejected | `GitLabConnectionIT.updateRotatesTokenAndKeepsSelectedRepositories`/`updatingToADifferentTargetIsRejected`/`creatingTheSameGroupTwiceIsRejected` | PASS |
 | V5 applies to an empty DB; multiple connections allowed; target check enforced | `BaselineMigrationIT.workspaceSupportsManyConnectionsOfDifferentTargets`/`checkConstraintRejectsAGroupRowWithoutGroupColumns` | PASS |
 | Token stored only as ciphertext; never logged | `ProjectConnectionIT.createResolvesAndStoresTheProject` (ciphertext ≠ token), `GitLabConnectionIT.createEncryptsTokenAndStoresConnection`; no `log.*` statement references a token (verified) | PASS |
@@ -49,8 +52,10 @@ automated proxies run the full flow against a mocked GitLab (WireMock + Testcont
 - `app/.../repository/Repository.java` — `inactiveReason`, `reassignedAt`, nullable `connectionId`;
   `activate`/`deactivate(reason)`/`detachAndDeactivate(reason)`/`reassignTo`/`confirmConnection`/`isProvisional`.
 - `app/.../repository/RepositoryService.java` — per-connection `listProjects`/`select` (group projects, or the
-  single target project); dedup keeps the first connection's ownership; on each use, confirms or (on
-  401/403/404) deactivates provisionally reassigned repos.
+  single target project); dedup keeps the first connection's ownership **only while the repo is owned and
+  active** — a detached or inactive repo is reattached to the selecting connection; on each use, confirms or (on
+  401/403/404) deactivates provisionally reassigned repos. `create` runs outside a single transaction and uses
+  `saveAndFlush` so a unique-index race maps to `CONNECTION_EXISTS` rather than a 500.
 - `app/.../repository/RepositoryConnectionGuard.java` — `confirm`/`deactivate` in `REQUIRES_NEW` transactions so
   a provisional deactivation commits even when the triggering use then fails and rolls back.
 - `app/.../repository/RepositoryController.java` + `api/{RepositoryView,SelectRepositoriesRequest}.java` —
@@ -86,6 +91,10 @@ alter table gitlab_connection
 alter table gitlab_connection
     alter column group_full_path drop not null,
     alter column gitlab_group_id drop not null;
+
+-- Existing (pre-M1b) connections predate last_verified_at; backfill their creation time so reassignment
+-- tie-breaks have a value. A still-null last_verified_at is treated as oldest when breaking a tie.
+update gitlab_connection set last_verified_at = created_at where last_verified_at is null;
 
 -- Exactly one target is populated, matching the mode.
 alter table gitlab_connection
@@ -160,10 +169,10 @@ and `/projects` endpoints are removed (no aliases).**
 
 ## Evidence
 
-- `./gradlew test --rerun-tasks` (local): **88 tests run, 0 failed, 0 skipped** (core 7; app 81).
+- `./gradlew test --rerun-tasks` (local): **91 tests run, 0 failed, 0 skipped** (core 7; app 84).
   - core: `TokenCipherTest` 7.
   - app: `GitLabClientTest` 17, `GitLabConnectionIT` 10, `ProjectConnectionIT` 7, `GitLabProjectPathTest` 7,
-    `GitLabGroupPathTest` 6, `MultiConnectionIT` 2, `ConnectionRemovalIT` 5, `DedupAcrossConnectionsIT` 1,
+    `GitLabGroupPathTest` 6, `MultiConnectionIT` 3, `ConnectionRemovalIT` 7, `DedupAcrossConnectionsIT` 1,
     `RepositorySelectionIT` 5, `BaselineMigrationIT` 5, `GitLabHostPolicyTest` 5, `ApiSecurityIT` 2,
     `AdminBootstrapIT` 3, `AdminBootstrapTest` 4, `TokenCipherHolderTest` 2.
 - `cd ui && npm run build`: green (tsc + vite, 34 modules).
@@ -184,11 +193,9 @@ and `/projects` endpoints are removed (no aliases).**
 
 - **Real-GitLab Done-when unverified** — needs the token + VPN: connect a group **and** a single project, select
   from each, confirm both persist with the right `connection_id`, and confirm the ciphertext is not `glpat…`.
-- A concurrent duplicate-target `create` relies on the partial unique index as a backstop; the race loser
-  surfaces as a `DataIntegrityViolationException` (HTTP 500) rather than a clean `CONNECTION_EXISTS`. Harmless at
-  single-user local scale; tighten if it ever matters.
-- Carried from M1: GitLab I/O still runs inside `@Transactional` in `create`/`update`/`delete` (short network
-  calls hold a DB connection). `listProjects` is intentionally **not** transactional so a provisional
-  deactivation can commit. To be addressed with the M2 transaction-boundary cleanup.
+- Carried from M1: GitLab I/O still runs inside `@Transactional` in `update`/`delete` (short network calls hold
+  a DB connection). `create` and `listProjects` are intentionally **not** transactional (so a unique-index race
+  maps cleanly to `CONNECTION_EXISTS`, and a provisional deactivation can commit). To be addressed with the M2
+  transaction-boundary cleanup.
 - Reassignment/deactivation are logged, not persisted as events; a durable record waits for M3's `triage_event`.
 - Single workspace (default) throughout; multi-tenant auth is M10.

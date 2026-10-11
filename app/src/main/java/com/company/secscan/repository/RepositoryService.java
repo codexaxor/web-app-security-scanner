@@ -117,9 +117,15 @@ public class RepositoryService {
             List<String> languages = safeLanguages(conn, token, id);
             Repository repo = repositories.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, id)
                     .map(r -> {
-                        // First connection to select a project keeps ownership (dedup, D-020); re-selecting it
-                        // just reactivates and refreshes it.
-                        r.activate();
+                        if (r.getConnectionId() == null || !r.isActive()) {
+                            // Detached (its connection was removed) or inactive: the selecting connection takes
+                            // it over, clearing the inactive/provisional state (D-020).
+                            r.reattachTo(conn.getId());
+                        } else {
+                            // Owned and active: first connection keeps ownership (dedup); re-selecting just
+                            // refreshes it (and confirms any provisional reassignment onto its owner).
+                            r.activate();
+                        }
                         r.refreshFromGitlab(p.pathWithNamespace(), p.defaultBranch(), languages);
                         return r;
                     })

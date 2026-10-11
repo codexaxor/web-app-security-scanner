@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,9 +65,10 @@ public class GitLabConnectionService {
 
     /**
      * Tests then creates a new connection (encrypting the token). Rejects a duplicate of a group/project this
-     * workspace is already connected to. Requires the encryption key to be configured.
+     * workspace is already connected to. Requires the encryption key to be configured. Not wrapped in a single
+     * transaction: {@code saveAndFlush} must surface a unique-index violation here (a concurrent duplicate
+     * create) so it maps to {@code CONNECTION_EXISTS} rather than failing at an outer commit.
      */
-    @Transactional
     public ConnectionTestResult create(String baseUrl, String token, String targetType, String path) {
         Resolved r;
         try {
@@ -78,9 +80,7 @@ public class GitLabConnectionService {
                 ? connections.findByWorkspaceIdAndGitlabGroupId(WORKSPACE, r.id())
                 : connections.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, r.id());
         if (duplicate.isPresent()) {
-            return ConnectionTestResult.failure(GitLabError.CONNECTION_EXISTS.name(),
-                    "This workspace is already connected to " + r.targetType() + " '" + r.path()
-                            + "'. Edit that connection to rotate its token.");
+            return alreadyConnected(r);
         }
         String ciphertext = cipher.require().encrypt(token);
         String scopes = String.join(",", r.tokenInfo().scopes());
@@ -89,8 +89,19 @@ public class GitLabConnectionService {
                         r.tokenInfo().expiresAt())
                 : GitlabConnection.forProject(WORKSPACE, baseUrl, r.path(), r.id(), ciphertext, scopes,
                         r.tokenInfo().expiresAt());
-        connections.save(connection);
+        try {
+            connections.saveAndFlush(connection);
+        } catch (DataIntegrityViolationException e) {
+            // A concurrent create inserted the same target first; the partial unique index rejected this one.
+            return alreadyConnected(r);
+        }
         return toResult(r);
+    }
+
+    private static ConnectionTestResult alreadyConnected(Resolved r) {
+        return ConnectionTestResult.failure(GitLabError.CONNECTION_EXISTS.name(),
+                "This workspace is already connected to " + r.targetType() + " '" + r.path()
+                        + "'. Edit that connection to rotate its token.");
     }
 
     /**
@@ -187,6 +198,7 @@ public class GitLabConnectionService {
                         .thenComparing(byVerified()));
     }
 
+    /** Orders connections by when they were last verified; a null (never recorded) is treated as oldest. */
     private static Comparator<GitlabConnection> byVerified() {
         return Comparator.comparing(c -> c.getLastVerifiedAt() == null ? Instant.MIN : c.getLastVerifiedAt());
     }
