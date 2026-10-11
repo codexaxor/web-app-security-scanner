@@ -15,6 +15,8 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
 
     Page<Repository> findByWorkspaceId(UUID workspaceId, Pageable pageable);
 
+    List<Repository> findByWorkspaceId(UUID workspaceId);
+
     Optional<Repository> findByWorkspaceIdAndGitlabProjectId(UUID workspaceId, long gitlabProjectId);
 
     List<Repository> findByWorkspaceIdAndGitlabProjectIdIn(UUID workspaceId, List<Long> gitlabProjectIds);
