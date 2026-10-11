@@ -62,6 +62,12 @@ public final class GitLabWireMock {
         return this;
     }
 
+    /** Stub a group resolve with a custom JSON body (e.g. a different id, to exercise group-change rejection). */
+    public GitLabWireMock stubGroupBody(String urlEncodedPath, String body) {
+        server.stubFor(get(urlEqualTo("/api/v4/groups/" + urlEncodedPath)).willReturn(json(body)));
+        return this;
+    }
+
     public GitLabWireMock stubProjects(long groupId, String bodyJson) {
         server.stubFor(get(urlPathEqualTo("/api/v4/groups/" + groupId + "/projects"))
                 .willReturn(json(bodyJson).withHeader("x-next-page", "")));

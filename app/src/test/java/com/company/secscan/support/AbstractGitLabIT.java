@@ -38,6 +38,8 @@ public abstract class AbstractGitLabIT {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("SECSCAN_ENCRYPTION_KEY", () -> TEST_KEY_B64);
+        // The mock GitLab is served on http://localhost:<port>; allow it (loopback may use http, D-018).
+        registry.add("SECSCAN_GITLAB_ALLOWED_HOSTS", () -> "localhost");
     }
 
     @Autowired

@@ -36,11 +36,11 @@ export default function ConnectGitLab({ onConnected }: { onConnected: () => void
           <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
         </label>
         <label>
-          Group path
+          Group path or URL
           <input
             value={groupPath}
             onChange={(e) => setGroupPath(e.target.value)}
-            placeholder="e.g. services"
+            placeholder="e.g. celloscope/platform or a pasted group URL"
           />
         </label>
         <label>
@@ -99,6 +99,10 @@ function errorLabel(code: string | null): string {
       return "Group not found or not visible to this token";
     case "RATE_LIMITED":
       return "GitLab rate limit reached; try again shortly";
+    case "HOST_NOT_ALLOWED":
+      return "That GitLab host is not allowed";
+    case "CONNECTION_GROUP_MISMATCH":
+      return "Already connected to a different group";
     default:
       return "Connection failed";
   }

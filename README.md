@@ -114,3 +114,7 @@ GitLab tokens are encrypted at rest with `SECSCAN_ENCRYPTION_KEY` (AES-256-GCM).
 32 bytes (`openssl rand -base64 32`); an invalid key fails startup, and saving a connection without a key
 returns a clear error (tokens are never stored unencrypted). **Changing `SECSCAN_ENCRYPTION_KEY` makes already
 stored tokens unreadable — you must reconnect GitLab.** Key rotation is a later feature.
+
+Outbound GitLab calls are restricted to the hosts in `SECSCAN_GITLAB_ALLOWED_HOSTS` (comma-separated; empty =
+deny all) and must use `https` (loopback hosts may use `http` for a local or mock GitLab) — an SSRF guard
+(D-018). Set it to your GitLab host, e.g. `gitlab.celloscope.net`.

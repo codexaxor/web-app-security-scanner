@@ -35,15 +35,21 @@ public class GitLabClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(15);
     private static final int PER_PAGE = 100;
 
+    private final GitLabHostPolicy hostPolicy;
+
+    public GitLabClient(GitLabHostPolicy hostPolicy) {
+        this.hostPolicy = hostPolicy;
+    }
+
     public GitLabVersion version(String baseUrl, String token) {
         return call(() -> client(baseUrl, token).get().uri("/version").retrieve().body(GitLabVersion.class),
-                GitLabError.UNEXPECTED);
+                GitLabError.NOT_FOUND);
     }
 
     public GitLabTokenInfo tokenInfo(String baseUrl, String token) {
         return call(() -> client(baseUrl, token).get().uri("/personal_access_tokens/self")
                         .retrieve().body(GitLabTokenInfo.class),
-                GitLabError.UNEXPECTED);
+                GitLabError.NOT_FOUND);
     }
 
     /** Resolves a group by its full path (e.g. {@code services/backend}); 404 → {@link GitLabError#GROUP_NOT_FOUND}. */
@@ -83,7 +89,7 @@ public class GitLabClient {
                 page = Integer.parseInt(next.trim());
             }
             return all;
-        }, GitLabError.UNEXPECTED);
+        }, GitLabError.NOT_FOUND);
     }
 
     /** Project languages, most-used first (keys of {@code GET /projects/:id/languages}). */
@@ -100,12 +106,14 @@ public class GitLabClient {
                     .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                     .map(Map.Entry::getKey)
                     .toList();
-        }, GitLabError.UNEXPECTED);
+        }, GitLabError.NOT_FOUND);
     }
 
     // --- internals ---
 
     private RestClient client(String baseUrl, String token) {
+        // SSRF guard: require https and an allowed host before any outbound call (D-018).
+        hostPolicy.requireAllowed(baseUrl);
         SimpleClientHttpRequestFactory rf = new SimpleClientHttpRequestFactory();
         rf.setConnectTimeout(CONNECT_TIMEOUT);
         rf.setReadTimeout(READ_TIMEOUT);

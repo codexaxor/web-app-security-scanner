@@ -30,7 +30,7 @@ class GitLabClientTest {
 
     private WireMockServer server;
     private String baseUrl;
-    private final GitLabClient client = new GitLabClient();
+    private final GitLabClient client = new GitLabClient(new GitLabHostPolicy(java.util.Set.of("localhost")));
 
     @BeforeEach
     void start() {
@@ -107,6 +107,33 @@ class GitLabClientTest {
 
         assertThat(client.projectLanguages(baseUrl, TOKEN, 7))
                 .containsExactly("Java", "TypeScript", "JavaScript");
+    }
+
+    @Test
+    void notFoundOnNonGroupCallMapsToNotFound() {
+        // A 404 outside group resolve is NOT_FOUND, never GROUP_NOT_FOUND (point 5).
+        server.stubFor(get(urlEqualTo("/api/v4/projects/7/languages")).willReturn(aResponse().withStatus(404)));
+
+        assertThat(catchThrowableOfType(() -> client.projectLanguages(baseUrl, TOKEN, 7), GitLabException.class)
+                .getError()).isEqualTo(GitLabError.NOT_FOUND);
+    }
+
+    @Test
+    void rejectsDisallowedHostBeforeAnyCall() {
+        GitLabClient strict = new GitLabClient(new GitLabHostPolicy(java.util.Set.of("gitlab.example.com")));
+
+        assertThat(catchThrowableOfType(
+                () -> strict.version("https://evil.example.org", TOKEN), GitLabException.class).getError())
+                .isEqualTo(GitLabError.HOST_NOT_ALLOWED);
+    }
+
+    @Test
+    void rejectsNonHttpsForNonLoopbackHost() {
+        GitLabClient strict = new GitLabClient(new GitLabHostPolicy(java.util.Set.of("gitlab.example.com")));
+
+        assertThat(catchThrowableOfType(
+                () -> strict.version("http://gitlab.example.com", TOKEN), GitLabException.class).getError())
+                .isEqualTo(GitLabError.HOST_NOT_ALLOWED);
     }
 
     @Test

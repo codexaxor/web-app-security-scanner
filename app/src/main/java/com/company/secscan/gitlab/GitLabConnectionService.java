@@ -28,18 +28,20 @@ public class GitLabConnectionService {
     private final GitLabClient client;
     private final GitlabConnectionRepository connections;
     private final TokenCipherHolder cipher;
+    private final GitLabHostPolicy hostPolicy;
 
     public GitLabConnectionService(GitLabClient client, GitlabConnectionRepository connections,
-                                   TokenCipherHolder cipher) {
+                                   TokenCipherHolder cipher, GitLabHostPolicy hostPolicy) {
         this.client = client;
         this.connections = connections;
         this.cipher = cipher;
+        this.hostPolicy = hostPolicy;
     }
 
     /** Tests a connection without persisting anything. */
     public ConnectionTestResult test(String baseUrl, String token, String groupPath) {
         try {
-            return runTest(baseUrl, token, groupPath);
+            return runTest(baseUrl, token, GitLabGroupPath.normalize(groupPath, hostPolicy));
         } catch (GitLabException e) {
             return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
         }
@@ -55,9 +57,18 @@ public class GitLabConnectionService {
         GitLabGroup group;
         GitLabTokenInfo tokenInfo;
         try {
+            String path = GitLabGroupPath.normalize(groupPath, hostPolicy);
             tokenInfo = requireUsableToken(baseUrl, token);
             GitLabVersion version = client.version(baseUrl, token);
-            group = client.resolveGroup(baseUrl, token, groupPath);
+            group = client.resolveGroup(baseUrl, token, path);
+            // Re-saving the same group (e.g. token rotation) updates the row and keeps selected repositories.
+            // Pointing an existing connection at a different group is rejected for now (D-019).
+            Optional<GitlabConnection> existing = connections.findByWorkspaceId(Workspace.DEFAULT_ID);
+            if (existing.isPresent() && existing.get().getGitlabGroupId() != group.id()) {
+                throw new GitLabException(GitLabError.CONNECTION_GROUP_MISMATCH,
+                        "This workspace is already connected to group '" + existing.get().getGroupFullPath()
+                                + "'. Changing the group is not supported yet — remove the connection first.");
+            }
             result = ConnectionTestResult.success(version.version(), group.id(), group.fullPath(),
                     tokenInfo.scopes(), tokenInfo.expiresAt(), expiringSoon(tokenInfo.expiresAt()));
         } catch (GitLabException e) {

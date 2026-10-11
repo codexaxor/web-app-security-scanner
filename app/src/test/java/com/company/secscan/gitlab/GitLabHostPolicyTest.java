@@ -1,0 +1,53 @@
+package com.company.secscan.gitlab;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+
+import java.util.Set;
+import org.junit.jupiter.api.Test;
+
+/** The outbound-host allowlist (SSRF guard, D-018). */
+class GitLabHostPolicyTest {
+
+    @Test
+    void emptyListDeniesEverything() {
+        GitLabHostPolicy deny = new GitLabHostPolicy(Set.of());
+
+        assertThat(catchThrowableOfType(
+                () -> deny.requireAllowed("https://gitlab.celloscope.net"), GitLabException.class).getError())
+                .isEqualTo(GitLabError.HOST_NOT_ALLOWED);
+    }
+
+    @Test
+    void allowsHttpsAllowlistedHost() {
+        GitLabHostPolicy policy = new GitLabHostPolicy(Set.of("gitlab.celloscope.net"));
+
+        assertThatCode(() -> policy.requireAllowed("https://gitlab.celloscope.net")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsHttpForNonLoopbackEvenIfAllowlisted() {
+        GitLabHostPolicy policy = new GitLabHostPolicy(Set.of("gitlab.celloscope.net"));
+
+        assertThat(catchThrowableOfType(
+                () -> policy.requireAllowed("http://gitlab.celloscope.net"), GitLabException.class).getError())
+                .isEqualTo(GitLabError.HOST_NOT_ALLOWED);
+    }
+
+    @Test
+    void allowsHttpForAllowlistedLoopback() {
+        GitLabHostPolicy policy = new GitLabHostPolicy(Set.of("localhost"));
+
+        assertThatCode(() -> policy.requireAllowed("http://localhost:8080")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void parsesCommaSeparatedHostsCaseInsensitively() {
+        GitLabHostPolicy policy = new GitLabHostPolicy(" GitLab.Celloscope.NET , other.example.com ");
+
+        assertThat(policy.isAllowedHost("gitlab.celloscope.net")).isTrue();
+        assertThat(policy.isAllowedHost("other.example.com")).isTrue();
+        assertThat(policy.isAllowedHost("nope.example.com")).isFalse();
+    }
+}

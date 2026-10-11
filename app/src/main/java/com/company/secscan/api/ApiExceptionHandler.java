@@ -31,7 +31,9 @@ public class ApiExceptionHandler {
         return switch (error) {
             case INVALID_TOKEN, TOKEN_EXPIRED -> HttpStatus.UNAUTHORIZED;
             case MISSING_SCOPES -> HttpStatus.FORBIDDEN;
-            case GROUP_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case GROUP_NOT_FOUND, NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case HOST_NOT_ALLOWED -> HttpStatus.BAD_REQUEST;
+            case CONNECTION_GROUP_MISMATCH -> HttpStatus.CONFLICT;
             case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
             case UNREACHABLE, UNEXPECTED -> HttpStatus.BAD_GATEWAY;
         };

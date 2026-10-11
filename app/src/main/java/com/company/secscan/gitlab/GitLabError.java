@@ -15,8 +15,14 @@ public enum GitLabError {
     TOKEN_EXPIRED,
     /** 429: rate limited; honor Retry-After and try again later. */
     RATE_LIMITED,
-    /** The requested group was not found or the token cannot see it. */
+    /** The requested group was not found or the token cannot see it (group resolve only). */
     GROUP_NOT_FOUND,
+    /** 404 on a non-group call: the resource was not found. */
+    NOT_FOUND,
+    /** The target host is not https or is not in the allowed-hosts list (SSRF guard, D-018). */
+    HOST_NOT_ALLOWED,
+    /** A connection already exists for a different group; changing the group is not supported yet. */
+    CONNECTION_GROUP_MISMATCH,
     /** Any other unexpected GitLab/HTTP error. */
     UNEXPECTED
 }
