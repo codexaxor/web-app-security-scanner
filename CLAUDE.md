@@ -6,7 +6,7 @@ deduplicated, prioritized issue feed. It is modelled on Aikido's repository scan
 
 Read these before any work:
 - `docs/SPEC.md` — what to build (read the section for your milestone)
-- `docs/WORKFLOW.md` — branches, commits, PRs
+- `docs/WORKFLOW.md` — branches, commits, local merges
 - `docs/DECISIONS.md` — decisions already made; do not undo them
 
 If the spec, this file and a decision disagree, stop and ask.
@@ -47,7 +47,8 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 ## Commands
 
 ```
-docker compose up -d postgres
+docker compose up --build          # full stack: postgres + api + worker + ui
+docker compose up -d postgres      # just the DB, for the dev loop below
 ./gradlew build
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
@@ -89,11 +90,12 @@ Update this section whenever a command changes.
 
 ## Git rules — never break
 
-- Never commit or push to `main` or `develop` directly. Work on `feature/m<N>-<slug>` (or `fix/…`, `docs/…`)
+- Never commit to, merge into, or push `main` or `develop`. Work on `feature/m<N>-<slug>` (or `fix/…`, `docs/…`)
   branched from `develop`. Details in `docs/WORKFLOW.md`.
 - Small commits in Conventional Commits format: `feat(core): add SCA fingerprint`, `test(app): …`, `fix(…)`.
-- Never force-push a shared branch, never rewrite history on `develop`/`main`.
-- Open a PR into `develop` when the milestone is done; never merge it yourself.
+- Push the feature branch as a backup (`git push -u origin HEAD`).
+- Never force-push or rewrite history.
+- Merging is done by the human locally after review; Claude Code never merges.
 
 ## How to work
 
@@ -104,12 +106,12 @@ Update this section whenever a command changes.
 5. Scanner output parsing: save a real sample under `app/src/test/resources/samples/<tool>/` and test against it.
 6. New dependency, service or tool → one-line entry in `docs/DECISIONS.md`.
 7. Anything the spec doesn't cover → ask, or record your choice in `docs/DECISIONS.md` and flag it in the report.
-8. Finish with `/finish-milestone M<N>`: write the report in `docs/reports/`, open the PR.
+8. `/finish-milestone M<N>`: build, report, commit, push the feature branch. No PR.
 9. Don't start the next milestone in the same session.
 
 ## Definition of done
 
-- `./gradlew build` passes (including Testcontainers); `npm run build` passes if `ui/` changed.
+- Local `./gradlew build` passes (including Testcontainers); `npm run build` passes if `ui/` changed.
 - Migrations apply to an empty database.
 - The milestone's "Done when" is proven by a named test or a documented manual check.
 - `docs/reports/M<N>.md` written; README/CLAUDE.md/SPEC updated if behavior or commands changed.

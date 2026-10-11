@@ -333,11 +333,12 @@ code and treats its own database as sensitive.
 
 ## Milestone backlog
 
-Do them in order; don't start the next until "Done when" passes and the milestone report is reviewed.
+Do them in order; don't start the next until "Done when" passes, the report is reviewed, and the branch is merged
+locally.
 
 | # | Milestone | Builds | Done when |
 | --- | --- | --- | --- |
-| M0 | Skeleton | Gradle multi-module (`core`, `app`), Spring Boot app with `api`/`worker` profiles, Postgres in Compose, Flyway baseline (`workspace`, `app_user`), React shell, GitHub Actions CI (build + tests) | `docker compose up` runs everything; a Testcontainers test passes; CI green |
+| M0 | Skeleton | Gradle multi-module (`core`, `app`), Spring Boot app with `api`/`worker` profiles, Postgres in Compose, Flyway baseline (`workspace`, `app_user`), React shell | `docker compose up` runs everything; a Testcontainers test passes; local `./gradlew build` green |
 | M1 | GitLab connection | Token encryption, connection test, project listing, repository selection API + 2 screens | A real GitLab group connects and selected repos are stored |
 | M2 | Scan engine | `scan`, `scan_job`, `scan_task`; queue claim; scanner image with git + Gitleaks; hardened docker-java launcher; parser | Start Scan on a fixture with a fake AWS key stores a finding; container is gone afterwards |
 | M3 | Issue model | Fingerprints, `issue_group`/`sub_issue`, reconcile (new, solved, reopened), `triage_event` | Removing the key and rescanning marks it solved; re-adding reopens it; a failed scanner closes nothing |

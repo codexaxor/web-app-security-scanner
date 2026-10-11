@@ -14,7 +14,34 @@ Consequences: what this implies / what we gave up.
 
 ---
 
-## D-008 Branching model: main / develop / feature (2026-10-11, accepted)
+## D-012 Local mode: no PRs or CI until we deploy (2026-10-11, accepted)
+Context: everything runs locally; nothing is deployed.
+Decision: the local `./gradlew build` is the gate; milestones are reviewed (`/review-pr`) and merged locally by a
+human with `--no-ff`; GitHub is a backup remote.
+Consequences: no automated gate — the review step must not be skipped; re-enable CI and PRs when we deploy.
+
+## D-011 Bootstrap admin from env, seed workspace via migration (2026-10-11, accepted)
+Context: We need a usable login in single-tenant mode without putting any password in git.
+Decision: `V2__default_workspace.sql` seeds one workspace (fixed UUID, name "Default") — real data every
+table needs in single-tenant mode. The admin user is NOT seeded by migration; on startup (api profile), if
+`app_user` is empty and `SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set, create
+one admin (bcrypt) in the default workspace. Log the email, never the password.
+Consequences: no secrets in migrations; first run is reproducible; roles still deferred to M10.
+
+## D-010 Minimal Spring Security in M0 (2026-10-11, accepted)
+Context: The app must boot and be reachable, but real auth/roles are M10 and M1 must not be blocked.
+Decision: `/actuator/health` public; `/api/**` requires HTTP Basic against `app_user` (bcrypt). No roles yet.
+No Spring default generated password or default login page.
+Consequences: M1 can call `/api/**` with Basic auth; role-based authorization added in M10.
+
+## D-009 Build toolchain: Gradle wrapper 8.10.2, Java 21, version catalog (2026-10-11, accepted)
+Context: System Gradle is 6.9.4 (too old for Spring Boot 3); default JDK on the host is 25, but we target Java 21.
+Decision: Commit a Gradle wrapper pinned to 8.10.2; pin a Java 21 toolchain in Gradle; keep dependency versions
+in `gradle/libs.versions.toml`; one Docker image serves both profiles, selected by `SPRING_PROFILES_ACTIVE`;
+the worker does not mount the Docker socket in M0 (that arrives in M2).
+Consequences: reproducible builds regardless of host JDK; `./gradlew` is the only supported build entrypoint.
+
+## D-008 Branching model: main / develop / feature (2026-10-11, accepted, superseded in part by D-012 (no PRs))
 Context: Work is done by an AI agent; we need reviewable, reversible units.
 Decision: `main` (stable, tagged per milestone), `develop` (integration), `feature/m<N>-<slug>` per milestone.
 No direct commits to `main`/`develop`. See `docs/WORKFLOW.md`.

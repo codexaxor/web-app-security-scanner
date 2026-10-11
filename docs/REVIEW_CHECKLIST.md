@@ -1,7 +1,7 @@
-# PR review checklist
+# Milestone review checklist
 
-Use for every milestone PR. A reviewer (human or a strong model in a fresh session) checks the diff, not the
-summary.
+Used before every local merge into `develop`. The reviewer (human or a strong model in a fresh session) checks
+`git diff develop...feature/m<N>-<slug>`, not the summary.
 
 ## Scope
 - [ ] Only the milestone's scope from `docs/SPEC.md`; nothing from later milestones
@@ -21,6 +21,7 @@ summary.
 - [ ] No real secrets or company code committed; fixtures obviously fake
 
 ## Tests
+- [ ] `./gradlew build` green locally (and `npm run build` if `ui/` changed)
 - [ ] "Done when" is a named, passing test (or documented manual check)
 - [ ] No test weakened, skipped or deleted without explanation
 - [ ] Parser tests use real saved scanner output
@@ -31,5 +32,5 @@ summary.
 - [ ] Indexes on foreign keys and on `(repository_id, fingerprint)`
 
 ## Hygiene
-- [ ] Conventional commits; branch `feature/m<N>-…` → `develop`
+- [ ] Conventional commits on `feature/m<N>-…`; nothing committed to `main`/`develop`
 - [ ] README / CLAUDE.md commands still accurate
