@@ -44,19 +44,35 @@ docs/            spec, workflow, decisions, milestone reports, UI reference
 .claude/         Claude Code project commands
 ```
 
-## Quick start (available after M0)
+## Quick start
 
-Prerequisites: JDK 21, Docker, Node 20+.
+Prerequisites: JDK 21, Docker, Node 20+. Build with the committed Gradle wrapper (`./gradlew`); the host's
+own Gradle/JDK version does not matter.
 
 ```bash
 cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY: openssl rand -base64 32
+```
+
+**Run everything (postgres + api + worker + ui) in containers:**
+
+```bash
+docker compose up --build        # ui on :5173, api on :8080, worker on :8081
+```
+
+**Dev loop (hot reload, Postgres in a container, app and UI on the host):**
+
+```bash
 docker compose up -d postgres
-./gradlew build
-docker build -t secscan-scanner scanner-image/
+./gradlew build                  # compiles + runs tests (Testcontainers needs Docker)
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
 cd ui && npm ci && npm run dev
 ```
+
+The first admin is created on first `api` startup when `app_user` is empty and
+`SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set (see `.env.example`).
+`/actuator/health` is public; `/api/**` requires HTTP Basic. The scanner image (`secscan-scanner`) arrives
+in M2.
 
 ## Contributing
 

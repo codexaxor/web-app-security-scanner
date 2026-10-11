@@ -47,7 +47,8 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 ## Commands
 
 ```
-docker compose up -d postgres
+docker compose up --build          # full stack: postgres + api + worker + ui
+docker compose up -d postgres      # just the DB, for the dev loop below
 ./gradlew build
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
