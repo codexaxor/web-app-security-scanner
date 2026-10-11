@@ -20,6 +20,7 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.wiremock)
 }
 
 // Spring Boot manages the JUnit platform launcher versions; keep AssertJ from the BOM.

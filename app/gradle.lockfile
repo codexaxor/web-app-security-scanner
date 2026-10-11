@@ -125,6 +125,7 @@ org.testcontainers:jdbc:1.19.8=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:junit-jupiter:1.20.3=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:postgresql:1.20.3=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:testcontainers:1.19.8=testCompileClasspath,testRuntimeClasspath
+org.wiremock:wiremock-standalone:3.9.2=testCompileClasspath,testRuntimeClasspath
 org.xmlunit:xmlunit-core:2.9.1=testCompileClasspath,testRuntimeClasspath
 org.yaml:snakeyaml:2.2=compileClasspath,productionRuntimeClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 empty=annotationProcessor,developmentOnly,testAndDevelopmentOnly,testAnnotationProcessor

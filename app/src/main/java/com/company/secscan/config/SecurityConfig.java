@@ -3,11 +3,13 @@ package com.company.secscan.config;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.Customizer;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -32,8 +34,18 @@ public class SecurityConfig {
                 // by default (the UI is same-origin via the nginx/Vite proxy); revisit if that changes.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .httpBasic(Customizer.withDefaults());
+                // HTTP Basic, but with a JSON 401 that omits WWW-Authenticate so the browser's native
+                // credential popup never appears — the SPA renders its own "wrong email or password".
+                .httpBasic(basic -> basic.authenticationEntryPoint(jsonUnauthorizedEntryPoint()));
         return http.build();
+    }
+
+    private static AuthenticationEntryPoint jsonUnauthorizedEntryPoint() {
+        return (request, response, authException) -> {
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write("{\"error\":\"UNAUTHORIZED\",\"message\":\"Authentication required.\"}");
+        };
     }
 
     @Bean

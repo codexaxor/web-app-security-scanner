@@ -4,7 +4,7 @@ Self-hosted code security scanner for our GitLab repositories, modelled on Aikid
 It finds vulnerable open-source dependencies, leaked secrets, insecure code patterns (SAST), infrastructure-as-code
 misconfigurations and end-of-life runtimes, then shows one deduplicated, prioritized issue feed.
 
-> Status: **planning complete, M0 (skeleton) next.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
+> Status: **M0 (skeleton) done; M1 (GitLab connection) implemented.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
 
 ## What it scans
 
@@ -109,3 +109,12 @@ This repo is built milestone by milestone with Claude Code. Rules for the agent 
 
 This tool holds read access to source code and a list of its weaknesses. Never commit tokens or `.env`.
 Report problems in this project privately to the maintainers, not as public issues.
+
+GitLab tokens are encrypted at rest with `SECSCAN_ENCRYPTION_KEY` (AES-256-GCM). The key must base64-decode to
+32 bytes (`openssl rand -base64 32`); an invalid key fails startup, and saving a connection without a key
+returns a clear error (tokens are never stored unencrypted). **Changing `SECSCAN_ENCRYPTION_KEY` makes already
+stored tokens unreadable — you must reconnect GitLab.** Key rotation is a later feature.
+
+Outbound GitLab calls are restricted to the hosts in `SECSCAN_GITLAB_ALLOWED_HOSTS` (comma-separated; empty =
+deny all) and must use `https` (loopback hosts may use `http` for a local or mock GitLab) — an SSRF guard
+(D-018). Set it to your GitLab host, e.g. `gitlab.celloscope.net`.
