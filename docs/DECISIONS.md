@@ -14,6 +14,24 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-019 Repository dedup and connection ownership (2026-10-12, accepted)
+Context: Multiple connections (M1b) could surface the same GitLab project; a repository must exist once per
+workspace, and we must know which connection to use to clone it.
+Decision: A repository is unique per workspace on `gitlab_project_id` (already enforced by
+`uq_repository_workspace_project`). `repository.connection_id` records the connection used to clone it. When a
+connection is removed, its repositories are reassigned to another connection that exposes the same project, or
+deactivated if none does. Changing an existing connection's group is rejected for now (M1); the reassign/
+deactivate behavior is implemented in M1b.
+Consequences: no duplicate repositories; clone credentials always resolve to a real connection.
+
+## D-018 Outbound GitLab host allowlist (2026-10-12, accepted)
+Context: The server makes outbound calls to a user-supplied GitLab base URL — an SSRF risk if unconstrained.
+Decision: `SECSCAN_GITLAB_ALLOWED_HOSTS` (comma-separated, empty = deny all) lists the hosts the app may call.
+Every outbound GitLab call requires `https` and an allowlisted host before the request is made; loopback hosts
+may use `http` (for a local/mock GitLab) but must still be allowlisted. A disallowed host or scheme fails with a
+clear `HOST_NOT_ALLOWED` error. A pasted group URL for a non-allowlisted host is rejected the same way.
+Consequences: the base URL cannot be pointed at arbitrary internal services; operators opt hosts in explicitly.
+
 ## D-017 Encryption key handling (2026-10-12, accepted)
 Context: GitLab tokens are encrypted with `SECSCAN_ENCRYPTION_KEY`; we must fail safe, never store plaintext.
 Decision: If the key is present it must base64-decode to exactly 32 bytes, validated at startup — an invalid
