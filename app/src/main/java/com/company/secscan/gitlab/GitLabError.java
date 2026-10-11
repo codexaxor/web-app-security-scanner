@@ -17,14 +17,20 @@ public enum GitLabError {
     RATE_LIMITED,
     /** The requested group was not found or the token cannot see it (group resolve only). */
     GROUP_NOT_FOUND,
+    /** The requested project was not found or the token cannot see it (project resolve only). */
+    PROJECT_NOT_FOUND,
     /** 404 on a non-group call: the resource was not found. */
     NOT_FOUND,
     /** The target host is not https or is not in the allowed-hosts list (SSRF guard, D-018). */
     HOST_NOT_ALLOWED,
-    /** The group path/URL entered is blank or could not be parsed (user input validation). */
+    /** The group/project path/URL entered is blank or could not be parsed (user input validation). */
     INVALID_GROUP_PATH,
-    /** A connection already exists for a different group; changing the group is not supported yet. */
-    CONNECTION_GROUP_MISMATCH,
+    /** A connection to the same group/project already exists in this workspace (create would duplicate it). */
+    CONNECTION_EXISTS,
+    /** An update (token rotation) resolved a different target than the connection it was applied to. */
+    CONNECTION_TARGET_MISMATCH,
+    /** The connection id was not found in this workspace. */
+    CONNECTION_NOT_FOUND,
     /** GitLab answered with a 3xx redirect; we never follow redirects (a token must not leak to another host). */
     UNEXPECTED_REDIRECT,
     /** Any other unexpected GitLab/HTTP error. */

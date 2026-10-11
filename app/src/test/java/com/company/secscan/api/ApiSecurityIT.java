@@ -22,7 +22,7 @@ class ApiSecurityIT extends AbstractGitLabIT {
 
     @Test
     void unauthenticatedApiCallReturnsJson401WithoutWwwAuthenticate() throws Exception {
-        mvc.perform(get("/api/v1/gitlab/connection"))
+        mvc.perform(get("/api/v1/gitlab/connections"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().doesNotExist("WWW-Authenticate"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))

@@ -1,0 +1,7 @@
+{
+  "id": 102,
+  "path_with_namespace": "services/ib-keycloak",
+  "default_branch": "master",
+  "archived": false,
+  "empty_repo": false
+}

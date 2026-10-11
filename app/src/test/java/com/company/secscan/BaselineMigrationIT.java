@@ -55,6 +55,41 @@ class BaselineMigrationIT {
     }
 
     @Test
+    void workspaceSupportsManyConnectionsOfDifferentTargets() {
+        // V5 dropped the one-connection-per-workspace constraint: a group and a project may coexist.
+        insertGroupConnection(42L, "services");
+        insertProjectConnection(102L, "services/ib-keycloak");
+
+        Integer count = jdbc.queryForObject(
+                "select count(*) from gitlab_connection where workspace_id = ?", Integer.class,
+                Workspace.DEFAULT_ID);
+        assertThat(count).isEqualTo(2);
+    }
+
+    @Test
+    void checkConstraintRejectsAGroupRowWithoutGroupColumns() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update(
+                "insert into gitlab_connection (id, workspace_id, base_url, target_type, token_ciphertext) "
+                        + "values (?, ?, 'http://localhost', 'group', 'ct')",
+                java.util.UUID.randomUUID(), Workspace.DEFAULT_ID))
+                .hasMessageContaining("ck_gitlab_connection_target");
+    }
+
+    private void insertGroupConnection(long groupId, String fullPath) {
+        jdbc.update("insert into gitlab_connection "
+                        + "(id, workspace_id, base_url, target_type, group_full_path, gitlab_group_id, "
+                        + "token_ciphertext) values (?, ?, 'http://localhost', 'group', ?, ?, 'ct')",
+                java.util.UUID.randomUUID(), Workspace.DEFAULT_ID, fullPath, groupId);
+    }
+
+    private void insertProjectConnection(long projectId, String fullPath) {
+        jdbc.update("insert into gitlab_connection "
+                        + "(id, workspace_id, base_url, target_type, gitlab_project_id, project_full_path, "
+                        + "token_ciphertext) values (?, ?, 'http://localhost', 'project', ?, ?, 'ct')",
+                java.util.UUID.randomUUID(), Workspace.DEFAULT_ID, projectId, fullPath);
+    }
+
+    @Test
     void workspaceRoundTrips() {
         Workspace saved = workspaces.saveAndFlush(new Workspace("Acme"));
         assertThat(saved.getId()).isNotNull();

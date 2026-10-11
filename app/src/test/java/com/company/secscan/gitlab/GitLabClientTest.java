@@ -86,6 +86,38 @@ class GitLabClientTest {
     }
 
     @Test
+    void resolvesProjectByUrlEncodedPath() throws IOException {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/services%2Fib-keycloak"))
+                .willReturn(json(sample("project.json"))));
+
+        GitLabProject p = client.resolveProject(baseUrl, TOKEN, "services/ib-keycloak");
+
+        assertThat(p.id()).isEqualTo(102L);
+        assertThat(p.pathWithNamespace()).isEqualTo("services/ib-keycloak");
+        assertThat(p.defaultBranch()).isEqualTo("master");
+    }
+
+    @Test
+    void missingProjectMapsToProjectNotFound() {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/nope%2Fgone"))
+                .willReturn(aResponse().withStatus(404)));
+
+        assertThat(catchThrowableOfType(
+                () -> client.resolveProject(baseUrl, TOKEN, "nope/gone"), GitLabException.class).getError())
+                .isEqualTo(GitLabError.PROJECT_NOT_FOUND);
+    }
+
+    @Test
+    void forbiddenProjectResolveMapsToMissingScopes() {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/services%2Fib-keycloak"))
+                .willReturn(aResponse().withStatus(403)));
+
+        assertThat(catchThrowableOfType(
+                () -> client.resolveProject(baseUrl, TOKEN, "services/ib-keycloak"), GitLabException.class)
+                .getError()).isEqualTo(GitLabError.MISSING_SCOPES);
+    }
+
+    @Test
     void listGroupProjectsFollowsPagination() {
         server.stubFor(get(urlPathEqualTo("/api/v4/groups/42/projects"))
                 .withQueryParam("page", equalTo("1"))

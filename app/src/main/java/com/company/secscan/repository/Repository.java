@@ -28,7 +28,7 @@ public class Repository {
     @Column(name = "workspace_id", nullable = false)
     private UUID workspaceId;
 
-    @Column(name = "connection_id", nullable = false)
+    @Column(name = "connection_id")
     private UUID connectionId;
 
     @Column(name = "gitlab_project_id", nullable = false)
@@ -56,6 +56,12 @@ public class Repository {
     @Column(name = "last_scanned_sha")
     private String lastScannedSha;
 
+    @Column(name = "inactive_reason")
+    private String inactiveReason;
+
+    @Column(name = "reassigned_at")
+    private Instant reassignedAt;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -73,8 +79,45 @@ public class Repository {
         this.languages = languages == null ? new ArrayList<>() : new ArrayList<>(languages);
     }
 
-    public void setActive(boolean active) {
-        this.active = active;
+    /** Marks the repository active and clears any inactivity / provisional-reassignment state. */
+    public void activate() {
+        this.active = true;
+        this.inactiveReason = null;
+        this.reassignedAt = null;
+    }
+
+    /** Marks the repository inactive with a reason code (e.g. {@code NO_ACCESSIBLE_CONNECTION}). */
+    public void deactivate(String reason) {
+        this.active = false;
+        this.inactiveReason = reason;
+        this.reassignedAt = null;
+    }
+
+    /**
+     * Detaches the repository from any connection and deactivates it: used when the last connection that could
+     * reach it is removed with no replacement. The row is kept (scan history hangs off it from M2).
+     */
+    public void detachAndDeactivate(String reason) {
+        this.connectionId = null;
+        deactivate(reason);
+    }
+
+    /**
+     * Provisionally moves the repository to another connection (connection removal, D-020). It stays active
+     * until the next use confirms or refutes access.
+     */
+    public void reassignTo(UUID connectionId) {
+        this.connectionId = connectionId;
+        this.reassignedAt = Instant.now();
+    }
+
+    /** Clears the provisional flag once a use has confirmed the connection can reach this repository. */
+    public void confirmConnection() {
+        this.reassignedAt = null;
+    }
+
+    public boolean isProvisional() {
+        return reassignedAt != null;
     }
 
     public void refreshFromGitlab(String pathWithNamespace, String defaultBranch, List<String> languages) {
@@ -125,6 +168,14 @@ public class Repository {
 
     public String getLastScannedSha() {
         return lastScannedSha;
+    }
+
+    public String getInactiveReason() {
+        return inactiveReason;
+    }
+
+    public Instant getReassignedAt() {
+        return reassignedAt;
     }
 
     public Instant getCreatedAt() {

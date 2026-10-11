@@ -68,6 +68,22 @@ public final class GitLabWireMock {
         return this;
     }
 
+    /** Stub {@code GET /projects/:url-encoded-path} with the single-project sample (id 102, services/ib-keycloak). */
+    public GitLabWireMock stubProject(String urlEncodedPath) {
+        return stubProjectBody(urlEncodedPath, sample("project.json"));
+    }
+
+    public GitLabWireMock stubProjectBody(String urlEncodedPath, String body) {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/" + urlEncodedPath)).willReturn(json(body)));
+        return this;
+    }
+
+    public GitLabWireMock stubProjectStatus(String urlEncodedPath, int status) {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/" + urlEncodedPath))
+                .willReturn(aResponse().withStatus(status)));
+        return this;
+    }
+
     public GitLabWireMock stubProjects(long groupId, String bodyJson) {
         server.stubFor(get(urlPathEqualTo("/api/v4/groups/" + groupId + "/projects"))
                 .willReturn(json(bodyJson).withHeader("x-next-page", "")));
@@ -76,6 +92,12 @@ public final class GitLabWireMock {
 
     public GitLabWireMock stubProjectsFromSample(long groupId) {
         return stubProjects(groupId, sample("projects-special.json"));
+    }
+
+    public GitLabWireMock stubProjectsStatus(long groupId, int status) {
+        server.stubFor(get(urlPathEqualTo("/api/v4/groups/" + groupId + "/projects"))
+                .willReturn(aResponse().withStatus(status)));
+        return this;
     }
 
     public GitLabWireMock stubLanguages(long projectId, String bodyJson) {
