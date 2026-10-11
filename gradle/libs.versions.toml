@@ -1,0 +1,19 @@
+[versions]
+springBoot = "3.3.5"
+springDependencyManagement = "1.1.6"
+postgresql = "42.7.4"
+testcontainers = "1.20.3"
+junit = "5.11.3"
+assertj = "3.26.3"
+
+[libraries]
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }
