@@ -1,0 +1,4 @@
+# Worker process: later claims scan_job rows and launches scanner containers. In M0 it only proves the
+# profile split and shares the same schema. A separate port lets api and worker run side by side locally.
+server:
+  port: ${SECSCAN_WORKER_PORT:8081}
