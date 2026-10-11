@@ -56,8 +56,11 @@ cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY: openssl rand -base
 **Run everything (postgres + api + worker + ui) in containers:**
 
 ```bash
-docker compose up --build        # ui on :5173, api on :8080, worker on :8081
+docker compose up --build        # ui on :5173, api on :8080; worker is non-web (no port)
 ```
+
+If a system Postgres already owns host port 5432, set `POSTGRES_HOST_PORT` in `.env` (e.g. `15432`) before
+`docker compose up`; the app containers still reach Postgres at `postgres:5432` inside the compose network.
 
 **Dev loop (hot reload, Postgres in a container, app and UI on the host):**
 
@@ -76,10 +79,11 @@ in M2.
 
 ## Contributing
 
-- Branches: `main` (stable, tagged per milestone) ← `develop` (integration) ← `feature/m<N>-<slug>`.
-  Never commit to `main` or `develop` directly. Details: [docs/WORKFLOW.md](docs/WORKFLOW.md).
+- Branches: `main` (stable, tagged per milestone) ← `develop` (integration) ← `feature/m<N>-<slug>`, merged
+  locally by a human after review. No pull requests or CI for now — the local `./gradlew build` is the gate and
+  GitHub is only a backup. Details: [docs/WORKFLOW.md](docs/WORKFLOW.md).
 - Commits: Conventional Commits (`feat(core): …`).
-- Every PR: milestone report in `docs/reports/`, green CI, [review checklist](docs/REVIEW_CHECKLIST.md).
+- Every milestone: report in `docs/reports/`, local `./gradlew build` green, [review checklist](docs/REVIEW_CHECKLIST.md).
 - Decisions: [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Working with Claude Code
@@ -89,15 +93,15 @@ This repo is built milestone by milestone with Claude Code. Rules for the agent 
 | Command | Does |
 | --- | --- |
 | `/start-milestone M<N>` | Creates the feature branch, reads the spec, proposes a plan, waits for approval |
-| `/finish-milestone M<N>` | Builds, self-reviews, writes `docs/reports/M<N>.md`, pushes, opens PR to `develop` |
-| `/review-pr M<N>` | Independent review of the branch against spec and checklist (run with the strongest model) |
+| `/finish-milestone M<N>` | Builds, self-reviews, writes `docs/reports/M<N>.md`, commits and pushes the feature branch |
+| `/review-pr M<N>` | Independent review before local merge (run with the strongest model) |
 
 ## Documentation
 
 - [docs/SPEC.md](docs/SPEC.md) — full MVP specification and milestones
-- [docs/WORKFLOW.md](docs/WORKFLOW.md) — branching, commits, PRs, GitHub settings
+- [docs/WORKFLOW.md](docs/WORKFLOW.md) — branching, commits, local merges
 - [docs/DECISIONS.md](docs/DECISIONS.md) — decision log and open decisions
-- [docs/REVIEW_CHECKLIST.md](docs/REVIEW_CHECKLIST.md) — what every PR is checked against
+- [docs/REVIEW_CHECKLIST.md](docs/REVIEW_CHECKLIST.md) — what every milestone is checked against before a local merge
 - [docs/MILESTONE_REPORT_TEMPLATE.md](docs/MILESTONE_REPORT_TEMPLATE.md) — report format
 - [docs/reference/](docs/reference/) — UI reference screenshots
 

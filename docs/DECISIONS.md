@@ -14,6 +14,12 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-012 Local mode: no PRs or CI until we deploy (2026-10-11, accepted)
+Context: everything runs locally; nothing is deployed.
+Decision: the local `./gradlew build` is the gate; milestones are reviewed (`/review-pr`) and merged locally by a
+human with `--no-ff`; GitHub is a backup remote.
+Consequences: no automated gate — the review step must not be skipped; re-enable CI and PRs when we deploy.
+
 ## D-011 Bootstrap admin from env, seed workspace via migration (2026-10-11, accepted)
 Context: We need a usable login in single-tenant mode without putting any password in git.
 Decision: `V2__default_workspace.sql` seeds one workspace (fixed UUID, name "Default") — real data every
@@ -35,7 +41,7 @@ in `gradle/libs.versions.toml`; one Docker image serves both profiles, selected 
 the worker does not mount the Docker socket in M0 (that arrives in M2).
 Consequences: reproducible builds regardless of host JDK; `./gradlew` is the only supported build entrypoint.
 
-## D-008 Branching model: main / develop / feature (2026-10-11, accepted)
+## D-008 Branching model: main / develop / feature (2026-10-11, accepted, superseded in part by D-012 (no PRs))
 Context: Work is done by an AI agent; we need reviewable, reversible units.
 Decision: `main` (stable, tagged per milestone), `develop` (integration), `feature/m<N>-<slug>` per milestone.
 No direct commits to `main`/`develop`. See `docs/WORKFLOW.md`.
