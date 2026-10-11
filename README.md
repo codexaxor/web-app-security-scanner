@@ -4,7 +4,7 @@ Self-hosted code security scanner for our GitLab repositories, modelled on Aikid
 It finds vulnerable open-source dependencies, leaked secrets, insecure code patterns (SAST), infrastructure-as-code
 misconfigurations and end-of-life runtimes, then shows one deduplicated, prioritized issue feed.
 
-> Status: **planning complete, M0 (skeleton) next.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
+> Status: **M0 (skeleton) done; M1 (GitLab connection) implemented.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
 
 ## What it scans
 
