@@ -6,6 +6,7 @@ import com.company.secscan.gitlab.dto.GitLabTokenInfo;
 import com.company.secscan.gitlab.dto.GitLabVersion;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -14,8 +15,9 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -114,13 +116,23 @@ public class GitLabClient {
     private RestClient client(String baseUrl, String token) {
         // SSRF guard: require https and an allowed host before any outbound call (D-018).
         hostPolicy.requireAllowed(baseUrl);
-        SimpleClientHttpRequestFactory rf = new SimpleClientHttpRequestFactory();
-        rf.setConnectTimeout(CONNECT_TIMEOUT);
+        // Never follow redirects: a 3xx to another host must not replay the PRIVATE-TOKEN header elsewhere.
+        HttpClient httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+        JdkClientHttpRequestFactory rf = new JdkClientHttpRequestFactory(httpClient);
         rf.setReadTimeout(READ_TIMEOUT);
         return RestClient.builder()
                 .baseUrl(apiBase(baseUrl))
                 .defaultHeader("PRIVATE-TOKEN", token)
                 .requestFactory(rf)
+                // A redirect is surfaced as a clear error, never followed.
+                .defaultStatusHandler(HttpStatusCode::is3xxRedirection, (request, response) -> {
+                    throw new GitLabException(GitLabError.UNEXPECTED_REDIRECT,
+                            "GitLab returned a redirect (" + response.getStatusCode().value()
+                                    + "); redirects are not followed.");
+                })
                 .build();
     }
 

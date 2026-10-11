@@ -119,6 +119,26 @@ class GitLabClientTest {
     }
 
     @Test
+    void redirectIsNotFollowedToAnotherHostAndTokenNeverLeaks() {
+        WireMockServer other = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        other.start();
+        try {
+            // The primary host 302-redirects to the other host; we must not follow it.
+            server.stubFor(get(urlEqualTo("/api/v4/version")).willReturn(aResponse().withStatus(302)
+                    .withHeader("Location", "http://localhost:" + other.port() + "/api/v4/version")));
+
+            GitLabException ex = catchThrowableOfType(
+                    () -> client.version(baseUrl, TOKEN), GitLabException.class);
+
+            assertThat(ex.getError()).isEqualTo(GitLabError.UNEXPECTED_REDIRECT);
+            // No request reached the redirect target, so the PRIVATE-TOKEN header never leaked there.
+            assertThat(other.getAllServeEvents()).isEmpty();
+        } finally {
+            other.stop();
+        }
+    }
+
+    @Test
     void rejectsDisallowedHostBeforeAnyCall() {
         GitLabClient strict = new GitLabClient(new GitLabHostPolicy(java.util.Set.of("gitlab.example.com")));
 

@@ -15,7 +15,7 @@ public final class GitLabGroupPath {
 
     public static String normalize(String input, GitLabHostPolicy policy) {
         if (input == null || input.isBlank()) {
-            throw new GitLabException(GitLabError.GROUP_NOT_FOUND, "Enter a group path or a GitLab group URL.");
+            throw new GitLabException(GitLabError.INVALID_GROUP_PATH, "Enter a group path or a GitLab group URL.");
         }
         String s = input.strip();
         if (s.contains("://")) {
@@ -23,7 +23,8 @@ public final class GitLabGroupPath {
             try {
                 uri = new URI(s);
             } catch (URISyntaxException e) {
-                throw new GitLabException(GitLabError.GROUP_NOT_FOUND, "That does not look like a valid GitLab URL.");
+                throw new GitLabException(GitLabError.INVALID_GROUP_PATH,
+                        "That does not look like a valid GitLab URL.");
             }
             String host = uri.getHost();
             if (host == null || !policy.isAllowedHost(host)) {
@@ -43,7 +44,7 @@ public final class GitLabGroupPath {
         }
         s = stripSlashes(s);
         if (s.isEmpty()) {
-            throw new GitLabException(GitLabError.GROUP_NOT_FOUND, "No group path found in that input.");
+            throw new GitLabException(GitLabError.INVALID_GROUP_PATH, "No group path found in that input.");
         }
         return s;
     }

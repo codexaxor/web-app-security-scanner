@@ -45,8 +45,8 @@ class GitLabGroupPathTest {
     }
 
     @Test
-    void rejectsBlankInput() {
+    void rejectsBlankInputAsInvalidGroupPath() {
         assertThat(catchThrowableOfType(() -> GitLabGroupPath.normalize("   ", policy), GitLabException.class)
-                .getError()).isEqualTo(GitLabError.GROUP_NOT_FOUND);
+                .getError()).isEqualTo(GitLabError.INVALID_GROUP_PATH);
     }
 }

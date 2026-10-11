@@ -10,7 +10,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +55,8 @@ public class GitLabConnectionService {
         ConnectionTestResult result;
         GitLabGroup group;
         GitLabTokenInfo tokenInfo;
+        // Look the existing connection up once and reuse it for both the group-change check and the upsert.
+        Optional<GitlabConnection> existing = connections.findByWorkspaceId(Workspace.DEFAULT_ID);
         try {
             String path = GitLabGroupPath.normalize(groupPath, hostPolicy);
             tokenInfo = requireUsableToken(baseUrl, token);
@@ -63,7 +64,6 @@ public class GitLabConnectionService {
             group = client.resolveGroup(baseUrl, token, path);
             // Re-saving the same group (e.g. token rotation) updates the row and keeps selected repositories.
             // Pointing an existing connection at a different group is rejected for now (D-019).
-            Optional<GitlabConnection> existing = connections.findByWorkspaceId(Workspace.DEFAULT_ID);
             if (existing.isPresent() && existing.get().getGitlabGroupId() != group.id()) {
                 throw new GitLabException(GitLabError.CONNECTION_GROUP_MISMATCH,
                         "This workspace is already connected to group '" + existing.get().getGroupFullPath()
@@ -77,16 +77,14 @@ public class GitLabConnectionService {
 
         // Only reached on success. Encrypt the token (clear error if the key is missing — never store plaintext).
         String ciphertext = cipher.require().encrypt(token);
-        UUID workspaceId = Workspace.DEFAULT_ID;
         String scopes = String.join(",", tokenInfo.scopes());
-        GitlabConnection connection = connections.findByWorkspaceId(workspaceId)
-                .map(existing -> {
-                    existing.updateGroup(baseUrl, group.fullPath(), group.id());
-                    existing.updateToken(ciphertext, scopes, tokenInfo.expiresAt());
-                    return existing;
-                })
-                .orElseGet(() -> new GitlabConnection(workspaceId, baseUrl, group.fullPath(), group.id(),
+        GitlabConnection connection = existing.orElseGet(
+                () -> new GitlabConnection(Workspace.DEFAULT_ID, baseUrl, group.fullPath(), group.id(),
                         ciphertext, scopes, tokenInfo.expiresAt()));
+        if (existing.isPresent()) {
+            connection.updateGroup(baseUrl, group.fullPath(), group.id());
+            connection.updateToken(ciphertext, scopes, tokenInfo.expiresAt());
+        }
         connections.save(connection);
         return result;
     }

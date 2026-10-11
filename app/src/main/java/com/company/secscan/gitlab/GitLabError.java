@@ -21,8 +21,12 @@ public enum GitLabError {
     NOT_FOUND,
     /** The target host is not https or is not in the allowed-hosts list (SSRF guard, D-018). */
     HOST_NOT_ALLOWED,
+    /** The group path/URL entered is blank or could not be parsed (user input validation). */
+    INVALID_GROUP_PATH,
     /** A connection already exists for a different group; changing the group is not supported yet. */
     CONNECTION_GROUP_MISMATCH,
+    /** GitLab answered with a 3xx redirect; we never follow redirects (a token must not leak to another host). */
+    UNEXPECTED_REDIRECT,
     /** Any other unexpected GitLab/HTTP error. */
     UNEXPECTED
 }
