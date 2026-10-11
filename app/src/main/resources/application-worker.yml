@@ -3,3 +3,6 @@
 spring:
   main:
     web-application-type: none
+    # A non-web app with no non-daemon threads would exit right after startup. keep-alive holds it up until the
+    # job-claiming loop (M2) provides its own long-running work. (Spring Boot 3.2+.)
+    keep-alive: true
