@@ -1,0 +1,8 @@
+{
+  "id": 9,
+  "name": "secscan-expired",
+  "revoked": false,
+  "active": false,
+  "scopes": ["read_api", "read_repository"],
+  "expires_at": "2020-01-01"
+}

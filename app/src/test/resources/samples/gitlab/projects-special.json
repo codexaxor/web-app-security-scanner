@@ -1,0 +1,59 @@
+[
+  {
+    "id": 101,
+    "path_with_namespace": "services/backend/payments/billing-api",
+    "default_branch": "main",
+    "archived": false,
+    "empty_repo": false
+  },
+  {
+    "id": 102,
+    "path_with_namespace": "services/ib-keycloak",
+    "default_branch": "master",
+    "archived": false,
+    "empty_repo": false
+  },
+  {
+    "id": 103,
+    "path_with_namespace": "services/web-portal",
+    "default_branch": "develop",
+    "archived": false,
+    "empty_repo": false
+  },
+  {
+    "id": 104,
+    "path_with_namespace": "services/payments-dotnet",
+    "default_branch": "main",
+    "archived": false,
+    "empty_repo": false
+  },
+  {
+    "id": 105,
+    "path_with_namespace": "services/js-tools",
+    "default_branch": "main",
+    "archived": false,
+    "empty_repo": false
+  },
+  {
+    "id": 106,
+    "path_with_namespace": "services/legacy-archived",
+    "default_branch": "main",
+    "archived": true,
+    "empty_repo": false
+  },
+  {
+    "id": 107,
+    "path_with_namespace": "services/to-be-deleted",
+    "default_branch": "main",
+    "archived": false,
+    "empty_repo": false,
+    "marked_for_deletion_on": "2026-10-01"
+  },
+  {
+    "id": 108,
+    "path_with_namespace": "services/empty-svc",
+    "default_branch": null,
+    "archived": false,
+    "empty_repo": true
+  }
+]
