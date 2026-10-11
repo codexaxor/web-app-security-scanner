@@ -81,8 +81,9 @@ Update this section whenever a command changes.
 - Never execute code from scanned repositories (no `mvn`, `gradle`, `dotnet restore`, `npm install` on them).
 - Scanner containers: non-root, read-only root FS, `--cap-drop=ALL`, `no-new-privileges`, CPU/memory/PID limits,
   hard timeout. Never mount the Docker socket into the scanner container.
-- GitLab tokens: AES-256-GCM at rest, decrypted only in the worker, passed via a one-time file — never env vars,
-  URLs or logs.
+- GitLab tokens: AES-256-GCM at rest. Decrypted in-memory only where needed — the api (connection test, project
+  listing, commit polling) and the worker — never logged, and never in env vars or URLs. The scanner container
+  only ever receives the token via a one-time file, never an env var (D-014).
 - Secret findings: SHA-256 hash + masked preview (first 4 chars). Never store the value.
 - GitLab access is read-only (`read_api`, `read_repository`) unless `docs/DECISIONS.md` says otherwise.
 - Never commit real tokens, real company code or `.env` files. Fixtures are synthetic; fake keys must be

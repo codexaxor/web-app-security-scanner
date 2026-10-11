@@ -14,6 +14,44 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-017 Encryption key handling (2026-10-12, accepted)
+Context: GitLab tokens are encrypted with `SECSCAN_ENCRYPTION_KEY`; we must fail safe, never store plaintext.
+Decision: If the key is present it must base64-decode to exactly 32 bytes, validated at startup — an invalid
+key fails startup with a clear message. If absent, the app still starts and saving/using a connection returns a
+clear "encryption key not configured" error (never a plaintext fallback). Changing the key makes stored tokens
+unreadable, so you must reconnect; key rotation is a later feature.
+Consequences: safe-by-default; a documented reconnect step if the key changes.
+
+## D-016 GitLab group resolution and single connection (2026-10-12, accepted)
+Context: Project listing needs a group; paths can be renamed.
+Decision: Resolve the group with `GET /groups/:url-encoded-path` and store its numeric `gitlab_group_id` plus
+`full_path`; use the id for all later calls. One connection per workspace in M1, with a clear error when the
+group is not found or not visible. The data model stays open to more connections/groups later (no UI for that
+now). This extends the spec's `gitlab_connection` columns with `group_full_path` and `gitlab_group_id`.
+Consequences: stable against group renames; multi-connection is a later, additive change.
+
+## D-015 GitLab client = Spring RestClient; WireMock for tests (2026-10-12, accepted)
+Decision: Use Spring `RestClient` (sync) for GitLab REST v4 with explicit connect/read timeouts; test it with
+WireMock (dep `org.wiremock:wiremock-standalone`). TLS verification is never disabled.
+Consequences: a new test dependency; real-GitLab verification is a manual step.
+
+## D-014 Token decrypted in-memory in api and worker (2026-10-12, accepted)
+Context: The api needs the token for the connection test, project listing and commit polling; a worker-only
+decrypt would force a job round-trip onto synchronous UI actions.
+Decision: Decrypt the token in-memory in whichever process needs it — the api (test/listing/polling) and the
+worker (scanner clone hand-off via a one-time file). Never logged, never in env vars or URLs. The scanner
+container only ever sees the token via a one-time file. This reclarifies the earlier "decrypted only in the
+worker" wording in CLAUDE.md.
+Consequences: simpler synchronous UX; the "worker-only" rule now means "the scanner container, not the api."
+
+## D-013 GitLab instance (resolves OD-4) (2026-10-12, accepted)
+Context: We need the target GitLab to build M1 against.
+Decision: Self-managed GitLab at `https://gitlab.celloscope.net`, reached over VPN, with a valid public TLS
+certificate and reachable from inside Docker containers (no custom CA or DNS). TLS verification is never
+disabled. The GitLab version is read from `/version` at connect time rather than pinned.
+Consequences: OD-4 is resolved except the version (runtime). No token yet, so M1 is built/tested against a
+mocked GitLab (WireMock); the real-GitLab connect is a manual check.
+
 ## D-012 Local mode: no PRs or CI until we deploy (2026-10-11, accepted)
 Context: everything runs locally; nothing is deployed.
 Decision: the local `./gradlew build` is the gate; milestones are reviewed (`/review-pr`) and merged locally by a
@@ -83,6 +121,6 @@ Decision: `workspace_id` on every business table from day one.
 - OD-1 Gradle repos without lockfiles — needed before M4
 - OD-2 .NET repos without `packages.lock.json` — needed before M4
 - OD-3 Private package registries — needed before M4
-- OD-4 GitLab instance, version and groups — needed before M1
+- OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name

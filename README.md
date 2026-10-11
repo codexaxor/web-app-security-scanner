@@ -109,3 +109,8 @@ This repo is built milestone by milestone with Claude Code. Rules for the agent 
 
 This tool holds read access to source code and a list of its weaknesses. Never commit tokens or `.env`.
 Report problems in this project privately to the maintainers, not as public issues.
+
+GitLab tokens are encrypted at rest with `SECSCAN_ENCRYPTION_KEY` (AES-256-GCM). The key must base64-decode to
+32 bytes (`openssl rand -base64 32`); an invalid key fails startup, and saving a connection without a key
+returns a clear error (tokens are never stored unencrypted). **Changing `SECSCAN_ENCRYPTION_KEY` makes already
+stored tokens unreadable — you must reconnect GitLab.** Key rotation is a later feature.
