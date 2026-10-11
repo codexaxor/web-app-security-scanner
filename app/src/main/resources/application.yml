@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: secscan
+  datasource:
+    url: ${SECSCAN_DB_URL:jdbc:postgresql://localhost:5432/secscan}
+    username: ${SECSCAN_DB_USER:secscan}
+    password: ${SECSCAN_DB_PASSWORD:secscan}
+  jpa:
+    hibernate:
+      # The schema is owned by Flyway; Hibernate only validates that entities match it.
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Health only in M0; more endpoints and security come in M10.
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO

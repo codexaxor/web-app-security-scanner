@@ -1,0 +1,8 @@
+# Worker process: later claims scan_job rows and launches scanner containers. It does not serve HTTP, so it runs
+# as a non-web application; it shares the same schema as the api.
+spring:
+  main:
+    web-application-type: none
+    # A non-web app with no non-daemon threads would exit right after startup. keep-alive holds it up until the
+    # job-claiming loop (M2) provides its own long-running work. (Spring Boot 3.2+.)
+    keep-alive: true

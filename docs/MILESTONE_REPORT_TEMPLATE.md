@@ -1,6 +1,6 @@
 # Milestone report: M<N> <name>
 
-Branch: `feature/m<N>-<slug>` · PR: #<number> · Date: <YYYY-MM-DD> · Model(s) used: <e.g. Opus plan, Sonnet build>
+Branch: `feature/m<N>-<slug>` · Commit: <short sha> · Date: <YYYY-MM-DD> · Model(s) used: <…>
 
 ## Done-when check
 | Criterion (from SPEC) | Proven by (test name or manual step) | Result |
@@ -26,7 +26,7 @@ Branch: `feature/m<N>-<slug>` · PR: #<number> · Date: <YYYY-MM-DD> · Model(s)
 - D-xxx …
 
 ## Evidence
-- `./gradlew build`: <tests run / failed / skipped>
+- `./gradlew build` (local): <tests run / failed / skipped>
 - For scan milestones — findings per fixture:
 
 | Fixture | Type | Expected | Found |
