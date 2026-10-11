@@ -14,6 +14,24 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-020 Multiple connections, project-mode targets, and reassignment on removal (2026-10-12, accepted)
+Context: M1b lets a workspace connect a whole group and/or several single projects; removing a connection must
+not lose repositories (scan history hangs off them from M2) and must keep a clone path resolvable.
+Decision: `gitlab_connection` gains `target_type` (`group`|`project`), `gitlab_project_id`, `project_full_path`
+and `last_verified_at` (V5); the one-per-workspace unique is dropped and replaced by partial unique indexes
+per group and per project. A connection is tested/created via `POST /connections` and its token rotated via
+`PUT /connections/{id}` (same target only; a different target means a new connection); the old singular
+`/connection` endpoints are removed. Project mode resolves `GET /projects/:url-encoded-path`, reusing the same
+allowed-hosts check, no-redirect client, scope/expiry checks and pasted-URL support as group mode. Removing a
+connection never deletes repository rows: each is reassigned — to a project-mode connection for the same
+`gitlab_project_id`, else the group connection whose `group_full_path` is the longest namespace prefix of the
+repo path, newest-verified breaking a tie (offline, no GitLab call at delete time) — or, if none, detached
+(`connection_id` nullable) and deactivated with `inactive_reason = NO_ACCESSIBLE_CONNECTION`. A reassignment is
+provisional (`reassigned_at`): the next use of the new connection confirms it, or, on a 401/403/404,
+deactivates the repo. Reassignments/deactivations are logged (a persistent `triage_event` arrives with M3).
+Consequences: additive, reversible connection management; a repo can briefly point at a connection that cannot
+reach it, resolved on first use; delete works even with the VPN down or a token expired.
+
 ## D-019 Repository dedup and connection ownership (2026-10-12, accepted)
 Context: Multiple connections (M1b) could surface the same GitLab project; a repository must exist once per
 workspace, and we must know which connection to use to clone it.
