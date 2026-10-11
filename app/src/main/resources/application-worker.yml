@@ -1,4 +1,5 @@
-# Worker process: later claims scan_job rows and launches scanner containers. In M0 it only proves the
-# profile split and shares the same schema. A separate port lets api and worker run side by side locally.
-server:
-  port: ${SECSCAN_WORKER_PORT:8081}
+# Worker process: later claims scan_job rows and launches scanner containers. It does not serve HTTP, so it runs
+# as a non-web application; it shares the same schema as the api.
+spring:
+  main:
+    web-application-type: none

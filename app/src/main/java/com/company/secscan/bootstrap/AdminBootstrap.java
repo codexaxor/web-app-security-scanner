@@ -12,6 +12,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Locale;
+
 /**
  * Creates the first admin on startup when {@code app_user} is empty and the bootstrap env vars are set (D-011).
  * The password is never logged or stored in plaintext; only the email is logged.
@@ -22,6 +24,9 @@ import org.springframework.util.StringUtils;
 public class AdminBootstrap implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);
+
+    /** Reject obviously weak bootstrap passwords. */
+    static final int MIN_PASSWORD_LENGTH = 12;
 
     private final AppUserRepository users;
     private final PasswordEncoder passwordEncoder;
@@ -44,15 +49,22 @@ public class AdminBootstrap implements ApplicationRunner {
             return;
         }
         if (!StringUtils.hasText(bootstrapEmail) || !StringUtils.hasText(bootstrapPassword)) {
-            log.info("No admin user exists and SECSCAN_BOOTSTRAP_ADMIN_* not set; skipping admin bootstrap.");
+            log.warn("No admin user exists and SECSCAN_BOOTSTRAP_ADMIN_EMAIL/PASSWORD are not both set; "
+                    + "no admin was created. Set both to bootstrap the first admin.");
             return;
         }
+        if (bootstrapPassword.length() < MIN_PASSWORD_LENGTH) {
+            log.warn("Admin bootstrap password is shorter than {} characters; refusing to create the admin.",
+                    MIN_PASSWORD_LENGTH);
+            return;
+        }
+        String normalizedEmail = bootstrapEmail.trim().toLowerCase(Locale.ROOT);
         AppUser admin = new AppUser(
                 Workspace.DEFAULT_ID,
-                bootstrapEmail,
+                normalizedEmail,
                 passwordEncoder.encode(bootstrapPassword),
                 "admin");
         users.save(admin);
-        log.info("Bootstrapped admin user {} in the default workspace.", bootstrapEmail);
+        log.info("Bootstrapped admin user {} in the default workspace.", normalizedEmail);
     }
 }

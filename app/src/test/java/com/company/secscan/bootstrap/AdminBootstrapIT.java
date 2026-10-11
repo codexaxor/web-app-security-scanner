@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -19,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Proves D-011: the admin is bootstrapped from env vars, exactly once, and only when {@code app_user} is empty.
+ * Also proves the email is normalized to lowercase and login is case-insensitive (V3).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -26,7 +29,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class AdminBootstrapIT {
 
-    static final String ADMIN_EMAIL = "admin@example.com";
+    // Deliberately mixed-case to prove normalization; stored value must be lowercase.
+    static final String ADMIN_EMAIL_INPUT = "Admin@Example.com";
+    static final String ADMIN_EMAIL_NORMALIZED = "admin@example.com";
+    static final String ADMIN_PASSWORD = "sufficiently-long-pw"; // >= 12 chars
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
@@ -36,8 +42,8 @@ class AdminBootstrapIT {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
-        registry.add("SECSCAN_BOOTSTRAP_ADMIN_EMAIL", () -> ADMIN_EMAIL);
-        registry.add("SECSCAN_BOOTSTRAP_ADMIN_PASSWORD", () -> "s3cret-pw");
+        registry.add("SECSCAN_BOOTSTRAP_ADMIN_EMAIL", () -> ADMIN_EMAIL_INPUT);
+        registry.add("SECSCAN_BOOTSTRAP_ADMIN_PASSWORD", () -> ADMIN_PASSWORD);
     }
 
     @Autowired
@@ -49,23 +55,33 @@ class AdminBootstrapIT {
     @Autowired
     AdminBootstrap adminBootstrap;
 
+    @Autowired
+    UserDetailsService userDetailsService;
+
     @Test
-    void bootstrapCreatesExactlyOneAdminInDefaultWorkspace() {
+    void bootstrapCreatesExactlyOneAdminInDefaultWorkspaceWithLowercasedEmail() {
         // The runner already ran at startup.
         assertThat(users.count()).isEqualTo(1);
 
-        AppUser admin = users.findByEmail(ADMIN_EMAIL).orElseThrow();
+        AppUser admin = users.findByEmail(ADMIN_EMAIL_NORMALIZED).orElseThrow();
+        assertThat(admin.getEmail()).isEqualTo(ADMIN_EMAIL_NORMALIZED);
         assertThat(admin.getRole()).isEqualTo("admin");
         assertThat(admin.getWorkspaceId()).isEqualTo(Workspace.DEFAULT_ID);
         // Stored as a bcrypt hash, never the plaintext.
-        assertThat(admin.getPasswordHash()).isNotEqualTo("s3cret-pw");
-        assertThat(passwordEncoder.matches("s3cret-pw", admin.getPasswordHash())).isTrue();
+        assertThat(admin.getPasswordHash()).isNotEqualTo(ADMIN_PASSWORD);
+        assertThat(passwordEncoder.matches(ADMIN_PASSWORD, admin.getPasswordHash())).isTrue();
+    }
+
+    @Test
+    void loginIsCaseInsensitive() {
+        UserDetails byUpper = userDetailsService.loadUserByUsername("ADMIN@EXAMPLE.COM");
+        assertThat(byUpper.getUsername()).isEqualTo(ADMIN_EMAIL_NORMALIZED);
+        assertThat(passwordEncoder.matches(ADMIN_PASSWORD, byUpper.getPassword())).isTrue();
     }
 
     @Test
     void bootstrapIsNoOpWhenUsersAlreadyExist() {
-        long before = users.count();
-        assertThat(before).isEqualTo(1);
+        assertThat(users.count()).isEqualTo(1);
 
         // Running again must not add a second admin.
         adminBootstrap.run(null);
