@@ -165,3 +165,8 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
+
+## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted)
+Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
+Decision: Merge M1b without its manual real-GitLab check; run it as part of the M2 manual run.
+Consequences: M2's report must include the M1b project-connection check (group + project, dedup, reassignment).
