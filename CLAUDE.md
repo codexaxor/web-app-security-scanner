@@ -52,7 +52,7 @@ docker compose up -d postgres      # just the DB, for the dev loop below
 ./gradlew build
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
-docker build -t secscan-scanner scanner-image/
+docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag must match ScannerProperties.image
 cd ui && npm ci && npm run dev
 ```
 

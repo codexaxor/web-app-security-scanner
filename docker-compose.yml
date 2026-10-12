@@ -54,7 +54,23 @@ services:
       SECSCAN_DB_USER: ${POSTGRES_USER:-secscan}
       SECSCAN_DB_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
       SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY:-}
+      # Scan work root — see the bind below; MUST be the same absolute path on host and in the worker.
+      SECSCAN_SCANNER_WORK_ROOT: ${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}
     # The worker runs non-web (no HTTP server), so it publishes no port.
+    # NOTE: the scanner image must exist on the host daemon first:
+    #   docker build -t secscan-scanner:8.21.2 scanner-image/
+    volumes:
+      # D-026: the Docker socket is mounted into the WORKER ONLY (never a scanner container). This is
+      # host-root-equivalent; accepted for local mode, revisit before deploy.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The worker asks the host daemon to bind the per-scan token file and /out into sibling scanner
+      # containers, so the work root must resolve to the SAME absolute path on the host and in the worker
+      # (point 3 / D-022).
+      - ${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}:${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}
+    group_add:
+      # The non-root worker (uid 10001) needs access to the Docker socket; set DOCKER_GID to the host's
+      # docker group id (`getent group docker | cut -d: -f3`).
+      - "${DOCKER_GID:-999}"
     depends_on:
       postgres:
         condition: service_healthy
