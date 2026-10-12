@@ -1,0 +1,184 @@
+package com.company.secscan.scan;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * A raw normalized finding from one scanner (D-024, pipeline step 7). Stored per scan with no dedup or
+ * reconcile — M3 turns these into {@code issue_group}/{@code sub_issue} with stable fingerprints. A secret
+ * finding carries only {@code secretHash} (SHA-256) and {@code secretPreview} (first 4 chars); the raw value is
+ * never stored (CLAUDE.md security rules).
+ */
+@Entity
+@Table(name = "scan_finding")
+public class ScanFinding {
+
+    public static final String TYPE_SCA = "sca";
+    public static final String TYPE_SAST = "sast";
+    public static final String TYPE_SECRET = "secret";
+    public static final String TYPE_IAC = "iac";
+    public static final String TYPE_EOL = "eol";
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
+    @Column(name = "scan_id", nullable = false)
+    private UUID scanId;
+
+    @Column(name = "repository_id", nullable = false)
+    private UUID repositoryId;
+
+    @Column(name = "type", nullable = false)
+    private String type;
+
+    @Column(name = "scanner", nullable = false)
+    private String scanner;
+
+    @Column(name = "rule_id")
+    private String ruleId;
+
+    @Column(name = "vuln_id")
+    private String vulnId;
+
+    @Column(name = "package")
+    private String packageName;
+
+    @Column(name = "installed_version")
+    private String installedVersion;
+
+    @Column(name = "fixed_version")
+    private String fixedVersion;
+
+    @Column(name = "file_path")
+    private String filePath;
+
+    @Column(name = "line")
+    private Integer line;
+
+    @Column(name = "snippet_hash")
+    private String snippetHash;
+
+    @Column(name = "secret_hash")
+    private String secretHash;
+
+    @Column(name = "secret_preview")
+    private String secretPreview;
+
+    @Column(name = "tool_severity")
+    private String toolSeverity;
+
+    @Column(name = "created_at", insertable = false, updatable = false)
+    private Instant createdAt;
+
+    protected ScanFinding() {
+        // for JPA
+    }
+
+    private ScanFinding(UUID workspaceId, UUID scanId, UUID repositoryId, String type, String scanner) {
+        this.workspaceId = workspaceId;
+        this.scanId = scanId;
+        this.repositoryId = repositoryId;
+        this.type = type;
+        this.scanner = scanner;
+    }
+
+    /**
+     * A secret finding. {@code secretHash} is the SHA-256 of the secret value and {@code secretPreview} its
+     * first 4 characters — the value itself is never passed in or stored.
+     */
+    public static ScanFinding secret(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
+                                     String filePath, Integer line, String secretHash, String secretPreview,
+                                     String toolSeverity) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_SECRET,
+                ScanTask.SCANNER_SECRET);
+        f.ruleId = ruleId;
+        f.filePath = filePath;
+        f.line = line;
+        f.secretHash = secretHash;
+        f.secretPreview = secretPreview;
+        f.toolSeverity = toolSeverity;
+        return f;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public UUID getScanId() {
+        return scanId;
+    }
+
+    public UUID getRepositoryId() {
+        return repositoryId;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public String getScanner() {
+        return scanner;
+    }
+
+    public String getRuleId() {
+        return ruleId;
+    }
+
+    public String getVulnId() {
+        return vulnId;
+    }
+
+    public String getPackageName() {
+        return packageName;
+    }
+
+    public String getInstalledVersion() {
+        return installedVersion;
+    }
+
+    public String getFixedVersion() {
+        return fixedVersion;
+    }
+
+    public String getFilePath() {
+        return filePath;
+    }
+
+    public Integer getLine() {
+        return line;
+    }
+
+    public String getSnippetHash() {
+        return snippetHash;
+    }
+
+    public String getSecretHash() {
+        return secretHash;
+    }
+
+    public String getSecretPreview() {
+        return secretPreview;
+    }
+
+    public String getToolSeverity() {
+        return toolSeverity;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+}
