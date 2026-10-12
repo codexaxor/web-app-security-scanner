@@ -18,8 +18,8 @@ export default function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
     setBusy(true);
     setCredentials(email, password);
     try {
-      // 200 or 404 (no connection yet) both mean the credentials are accepted; 401 throws.
-      await api.getConnection();
+      // A 200 from a protected endpoint means the credentials are accepted (empty list is fine); 401 throws.
+      await api.listConnections(0, 1);
       onSignedIn();
     } catch (err) {
       clearCredentials();

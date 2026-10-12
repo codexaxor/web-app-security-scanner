@@ -4,7 +4,7 @@ Self-hosted code security scanner for our GitLab repositories, modelled on Aikid
 It finds vulnerable open-source dependencies, leaked secrets, insecure code patterns (SAST), infrastructure-as-code
 misconfigurations and end-of-life runtimes, then shows one deduplicated, prioritized issue feed.
 
-> Status: **M0 (skeleton) done; M1 (GitLab connection) implemented.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
+> Status: **M0 (skeleton) and M1 (GitLab connection) done; M1b (project-mode & multiple connections) implemented.** See [docs/SPEC.md](docs/SPEC.md) for the milestone plan.
 
 ## What it scans
 
@@ -20,7 +20,8 @@ plus CISA KEV, FIRST EPSS and endoflife.date data.
 
 ## How it works
 
-1. Connect a GitLab group with a **read-only** group access token (`read_api`, `read_repository`).
+1. Connect one or more GitLab targets — a whole group or a single project — with a **read-only** access token
+   (`read_api`, `read_repository`).
 2. Pick repositories. They are scanned daily, on new commits (polled every 15 min), or on demand.
 3. Each scan runs in a throwaway, hardened container; only findings are kept, never the code.
 4. Findings are normalized, scored 0–100, auto-triaged with visible reasons, and grouped into issues that open,

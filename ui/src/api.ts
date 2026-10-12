@@ -1,12 +1,17 @@
-// Minimal API client for M1. /api is same-origin (Vite dev proxy / nginx in the container).
+// Minimal API client for M1/M1b. /api is same-origin (Vite dev proxy / nginx in the container).
 // Auth: M0 protects /api/** with HTTP Basic; until there is a login screen (later milestone) we keep the
 // admin credentials in memory and attach them. They are never written to storage.
 
+export type TargetType = "group" | "project";
+
 export interface ConnectionTestResult {
   ok: boolean;
+  targetType: TargetType | null;
   gitlabVersion: string | null;
   groupId: number | null;
   groupFullPath: string | null;
+  projectId: number | null;
+  projectFullPath: string | null;
   tokenScopes: string[] | null;
   tokenExpiresAt: string | null;
   expiringSoon: boolean;
@@ -15,11 +20,20 @@ export interface ConnectionTestResult {
 }
 
 export interface ConnectionView {
+  id: string;
+  targetType: TargetType;
   baseUrl: string;
-  groupFullPath: string;
-  gitlabGroupId: number;
+  gitlabGroupId: number | null;
+  groupFullPath: string | null;
+  gitlabProjectId: number | null;
+  projectFullPath: string | null;
   tokenScopes: string[];
   tokenExpiresAt: string | null;
+}
+
+export interface ConnectionRemovalResult {
+  reassigned: number;
+  deactivated: number;
 }
 
 export interface ProjectView {
@@ -41,6 +55,10 @@ export interface RepositoryView {
   languages: string[];
   active: boolean;
   sensitivity: string;
+  connectionId: string | null;
+  connectionTargetType: TargetType | null;
+  connectionLabel: string | null;
+  inactiveReason: string | null;
 }
 
 export interface Paged<T> {
@@ -54,7 +72,14 @@ export interface Paged<T> {
 export interface ConnectionRequest {
   baseUrl: string;
   token: string;
-  groupPath: string;
+  targetType: TargetType;
+  path: string;
+}
+
+export interface UpdateConnectionRequest {
+  baseUrl: string;
+  token: string;
+  path: string;
 }
 
 export class AuthRequiredError extends Error {}
@@ -108,21 +133,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   testConnection: (req: ConnectionRequest) =>
-    request<ConnectionTestResult>("POST", "/api/v1/gitlab/connection/test", req),
-  saveConnection: (req: ConnectionRequest) =>
-    request<ConnectionTestResult>("POST", "/api/v1/gitlab/connection", req),
-  getConnection: async (): Promise<ConnectionView | null> => {
-    try {
-      return await request<ConnectionView>("GET", "/api/v1/gitlab/connection");
-    } catch (e) {
-      if (e instanceof ApiError) return null; // 404 when none configured
-      throw e;
-    }
-  },
-  listProjects: (page: number, size: number) =>
-    request<Paged<ProjectView>>("GET", `/api/v1/gitlab/projects?page=${page}&size=${size}`),
-  selectRepositories: (gitlabProjectIds: number[]) =>
-    request<RepositoryView[]>("POST", "/api/v1/repositories", { gitlabProjectIds }),
+    request<ConnectionTestResult>("POST", "/api/v1/gitlab/connections/test", req),
+  createConnection: (req: ConnectionRequest) =>
+    request<ConnectionTestResult>("POST", "/api/v1/gitlab/connections", req),
+  updateConnection: (id: string, req: UpdateConnectionRequest) =>
+    request<ConnectionTestResult>("PUT", `/api/v1/gitlab/connections/${id}`, req),
+  listConnections: (page: number, size: number) =>
+    request<Paged<ConnectionView>>("GET", `/api/v1/gitlab/connections?page=${page}&size=${size}`),
+  deleteConnection: (id: string) =>
+    request<ConnectionRemovalResult>("DELETE", `/api/v1/gitlab/connections/${id}`),
+  listProjects: (connectionId: string, page: number, size: number) =>
+    request<Paged<ProjectView>>(
+      "GET",
+      `/api/v1/gitlab/connections/${connectionId}/projects?page=${page}&size=${size}`,
+    ),
+  selectRepositories: (connectionId: string, gitlabProjectIds: number[]) =>
+    request<RepositoryView[]>("POST", "/api/v1/repositories", { connectionId, gitlabProjectIds }),
   listRepositories: (page: number, size: number) =>
     request<Paged<RepositoryView>>("GET", `/api/v1/repositories?page=${page}&size=${size}`),
 };

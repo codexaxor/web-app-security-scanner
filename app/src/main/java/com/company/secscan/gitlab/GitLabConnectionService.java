@@ -1,107 +1,246 @@
 package com.company.secscan.gitlab;
 
 import com.company.secscan.config.TokenCipherHolder;
+import com.company.secscan.gitlab.api.ConnectionRemovalResult;
 import com.company.secscan.gitlab.api.ConnectionTestResult;
 import com.company.secscan.gitlab.dto.GitLabGroup;
+import com.company.secscan.gitlab.dto.GitLabProject;
 import com.company.secscan.gitlab.dto.GitLabTokenInfo;
 import com.company.secscan.gitlab.dto.GitLabVersion;
+import com.company.secscan.repository.Repository;
+import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.workspace.Workspace;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Tests and stores the GitLab connection. Token decryption happens in-memory here (api process) for the
- * connection test and project listing (D-014); the scanner container never sees the token except via a
- * one-time file in M2. The token is never logged.
+ * Tests and stores GitLab connections. A workspace may hold several (M1b): a whole-group connection and/or any
+ * number of single-project connections. Token decryption happens in-memory here (api process); the scanner
+ * container never sees the token except via a one-time file in M2 (D-014). The token is never logged.
  */
 @Service
 public class GitLabConnectionService {
 
+    private static final Logger log = LoggerFactory.getLogger(GitLabConnectionService.class);
+    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
+
     static final List<String> REQUIRED_SCOPES = List.of("read_api", "read_repository");
     static final int EXPIRY_WARN_DAYS = 14;
+    static final String NO_ACCESSIBLE_CONNECTION = "NO_ACCESSIBLE_CONNECTION";
 
     private final GitLabClient client;
     private final GitlabConnectionRepository connections;
+    private final RepositoryRepository repositories;
     private final TokenCipherHolder cipher;
     private final GitLabHostPolicy hostPolicy;
 
     public GitLabConnectionService(GitLabClient client, GitlabConnectionRepository connections,
-                                   TokenCipherHolder cipher, GitLabHostPolicy hostPolicy) {
+                                   RepositoryRepository repositories, TokenCipherHolder cipher,
+                                   GitLabHostPolicy hostPolicy) {
         this.client = client;
         this.connections = connections;
+        this.repositories = repositories;
         this.cipher = cipher;
         this.hostPolicy = hostPolicy;
     }
 
     /** Tests a connection without persisting anything. */
-    public ConnectionTestResult test(String baseUrl, String token, String groupPath) {
+    public ConnectionTestResult test(String baseUrl, String token, String targetType, String path) {
         try {
-            return runTest(baseUrl, token, GitLabGroupPath.normalize(groupPath, hostPolicy));
+            return toResult(resolve(baseUrl, token, targetType, path));
         } catch (GitLabException e) {
             return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
         }
     }
 
     /**
-     * Tests then persists the connection for the default workspace (encrypting the token). Requires the
-     * encryption key to be configured. Returns the same result shape as {@link #test}.
+     * Tests then creates a new connection (encrypting the token). Rejects a duplicate of a group/project this
+     * workspace is already connected to. Requires the encryption key to be configured. Not wrapped in a single
+     * transaction: {@code saveAndFlush} must surface a unique-index violation here (a concurrent duplicate
+     * create) so it maps to {@code CONNECTION_EXISTS} rather than failing at an outer commit.
      */
-    @Transactional
-    public ConnectionTestResult save(String baseUrl, String token, String groupPath) {
-        ConnectionTestResult result;
-        GitLabGroup group;
-        GitLabTokenInfo tokenInfo;
-        // Look the existing connection up once and reuse it for both the group-change check and the upsert.
-        Optional<GitlabConnection> existing = connections.findByWorkspaceId(Workspace.DEFAULT_ID);
+    public ConnectionTestResult create(String baseUrl, String token, String targetType, String path) {
+        Resolved r;
         try {
-            String path = GitLabGroupPath.normalize(groupPath, hostPolicy);
-            tokenInfo = requireUsableToken(baseUrl, token);
-            GitLabVersion version = client.version(baseUrl, token);
-            group = client.resolveGroup(baseUrl, token, path);
-            // Re-saving the same group (e.g. token rotation) updates the row and keeps selected repositories.
-            // Pointing an existing connection at a different group is rejected for now (D-019).
-            if (existing.isPresent() && existing.get().getGitlabGroupId() != group.id()) {
-                throw new GitLabException(GitLabError.CONNECTION_GROUP_MISMATCH,
-                        "This workspace is already connected to group '" + existing.get().getGroupFullPath()
-                                + "'. Changing the group is not supported yet — remove the connection first.");
-            }
-            result = ConnectionTestResult.success(version.version(), group.id(), group.fullPath(),
-                    tokenInfo.scopes(), tokenInfo.expiresAt(), expiringSoon(tokenInfo.expiresAt()));
+            r = resolve(baseUrl, token, targetType, path);
         } catch (GitLabException e) {
             return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
         }
-
-        // Only reached on success. Encrypt the token (clear error if the key is missing — never store plaintext).
-        String ciphertext = cipher.require().encrypt(token);
-        String scopes = String.join(",", tokenInfo.scopes());
-        GitlabConnection connection = existing.orElseGet(
-                () -> new GitlabConnection(Workspace.DEFAULT_ID, baseUrl, group.fullPath(), group.id(),
-                        ciphertext, scopes, tokenInfo.expiresAt()));
-        if (existing.isPresent()) {
-            connection.updateGroup(baseUrl, group.fullPath(), group.id());
-            connection.updateToken(ciphertext, scopes, tokenInfo.expiresAt());
+        Optional<GitlabConnection> duplicate = r.isGroup()
+                ? connections.findByWorkspaceIdAndGitlabGroupId(WORKSPACE, r.id())
+                : connections.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, r.id());
+        if (duplicate.isPresent()) {
+            return alreadyConnected(r);
         }
-        connections.save(connection);
-        return result;
+        String ciphertext = cipher.require().encrypt(token);
+        String scopes = String.join(",", r.tokenInfo().scopes());
+        GitlabConnection connection = r.isGroup()
+                ? GitlabConnection.forGroup(WORKSPACE, baseUrl, r.path(), r.id(), ciphertext, scopes,
+                        r.tokenInfo().expiresAt())
+                : GitlabConnection.forProject(WORKSPACE, baseUrl, r.path(), r.id(), ciphertext, scopes,
+                        r.tokenInfo().expiresAt());
+        try {
+            connections.saveAndFlush(connection);
+        } catch (DataIntegrityViolationException e) {
+            // A concurrent create inserted the same target first; the partial unique index rejected this one.
+            return alreadyConnected(r);
+        }
+        return toResult(r);
+    }
+
+    private static ConnectionTestResult alreadyConnected(Resolved r) {
+        return ConnectionTestResult.failure(GitLabError.CONNECTION_EXISTS.name(),
+                "This workspace is already connected to " + r.targetType() + " '" + r.path()
+                        + "'. Edit that connection to rotate its token.");
+    }
+
+    /**
+     * Rotates the token (and base URL) of an existing connection. The supplied path must resolve to the same
+     * target; to connect a different group/project, create a new connection instead. Selected repositories are
+     * kept untouched.
+     */
+    @Transactional
+    public ConnectionTestResult update(UUID connectionId, String baseUrl, String token, String path) {
+        GitlabConnection existing = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+                .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
+                        "No such connection in this workspace."));
+        Resolved r;
+        try {
+            r = resolve(baseUrl, token, existing.getTargetType(), path);
+        } catch (GitLabException e) {
+            return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
+        }
+        if (!Long.valueOf(r.id()).equals(existing.targetId())) {
+            return ConnectionTestResult.failure(GitLabError.CONNECTION_TARGET_MISMATCH.name(),
+                    "That path resolves to a different " + r.targetType() + " than this connection. To connect a "
+                            + "different target, add a new connection.");
+        }
+        String ciphertext = cipher.require().encrypt(token);
+        existing.updateToken(baseUrl, ciphertext, String.join(",", r.tokenInfo().scopes()),
+                r.tokenInfo().expiresAt());
+        connections.save(existing);
+        return toResult(r);
     }
 
     @Transactional(readOnly = true)
-    public Optional<GitlabConnection> current() {
-        return connections.findByWorkspaceId(Workspace.DEFAULT_ID);
+    public List<GitlabConnection> list() {
+        return connections.findByWorkspaceId(WORKSPACE);
     }
 
-    // --- internals ---
+    @Transactional(readOnly = true)
+    public GitlabConnection require(UUID connectionId) {
+        return connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+                .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
+                        "No such connection in this workspace."));
+    }
 
-    private ConnectionTestResult runTest(String baseUrl, String token, String groupPath) {
+    /**
+     * Removes a connection. Its repositories are never deleted: each is provisionally reassigned to another
+     * connection that still exposes it, or deactivated with {@code NO_ACCESSIBLE_CONNECTION} if none does
+     * (D-020). The connection row (and its token ciphertext) is then deleted.
+     */
+    @Transactional
+    public ConnectionRemovalResult delete(UUID connectionId) {
+        GitlabConnection conn = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+                .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
+                        "No such connection in this workspace."));
+        List<GitlabConnection> others = new ArrayList<>(connections.findByWorkspaceId(WORKSPACE));
+        others.removeIf(c -> c.getId().equals(conn.getId()));
+
+        int reassigned = 0;
+        int deactivated = 0;
+        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(WORKSPACE, conn.getId())) {
+            Optional<GitlabConnection> target = pickReassignTarget(repo, others);
+            if (target.isPresent()) {
+                repo.reassignTo(target.get().getId());
+                log.info("Reassigned repository {} from connection {} to {} on removal",
+                        repo.getId(), conn.getId(), target.get().getId());
+                reassigned++;
+            } else {
+                repo.detachAndDeactivate(NO_ACCESSIBLE_CONNECTION);
+                log.info("Deactivated repository {} after removing connection {}: {}",
+                        repo.getId(), conn.getId(), NO_ACCESSIBLE_CONNECTION);
+                deactivated++;
+            }
+            repositories.save(repo);
+        }
+        connections.delete(conn);
+        return new ConnectionRemovalResult(reassigned, deactivated);
+    }
+
+    // --- reassignment target selection (D-020) ---
+
+    private Optional<GitlabConnection> pickReassignTarget(Repository repo, List<GitlabConnection> others) {
+        // 1. A project-mode connection targeting the same project id (most recently verified wins a tie).
+        Optional<GitlabConnection> sameProject = others.stream()
+                .filter(GitlabConnection::isProject)
+                .filter(c -> c.getGitlabProjectId() != null && c.getGitlabProjectId() == repo.getGitlabProjectId())
+                .max(byVerified());
+        if (sameProject.isPresent()) {
+            return sameProject;
+        }
+        // 2. A group-mode connection whose group is a namespace ancestor of the repo; longest (most specific)
+        //    path first, most recently verified breaking a tie.
+        return others.stream()
+                .filter(GitlabConnection::isGroup)
+                .filter(c -> namespaceContains(c.getGroupFullPath(), repo.getPathWithNamespace()))
+                .max(Comparator.comparingInt((GitlabConnection c) -> c.getGroupFullPath().length())
+                        .thenComparing(byVerified()));
+    }
+
+    /** Orders connections by when they were last verified; a null (never recorded) is treated as oldest. */
+    private static Comparator<GitlabConnection> byVerified() {
+        return Comparator.comparing(c -> c.getLastVerifiedAt() == null ? Instant.MIN : c.getLastVerifiedAt());
+    }
+
+    /** True if {@code pathWithNamespace} sits under {@code groupFullPath} (the group, or one of its subgroups). */
+    private static boolean namespaceContains(String groupFullPath, String pathWithNamespace) {
+        if (groupFullPath == null || pathWithNamespace == null) {
+            return false;
+        }
+        return pathWithNamespace.toLowerCase(Locale.ROOT)
+                .startsWith(groupFullPath.toLowerCase(Locale.ROOT) + "/");
+    }
+
+    // --- resolve + token checks ---
+
+    private Resolved resolve(String baseUrl, String token, String targetType, String rawPath) {
+        if (!GitlabConnection.TARGET_GROUP.equals(targetType)
+                && !GitlabConnection.TARGET_PROJECT.equals(targetType)) {
+            throw new GitLabException(GitLabError.INVALID_GROUP_PATH,
+                    "Choose whether to connect a group or a single project.");
+        }
         GitLabTokenInfo tokenInfo = requireUsableToken(baseUrl, token);
         GitLabVersion version = client.version(baseUrl, token);
-        GitLabGroup group = client.resolveGroup(baseUrl, token, groupPath);
-        return ConnectionTestResult.success(version.version(), group.id(), group.fullPath(),
-                tokenInfo.scopes(), tokenInfo.expiresAt(), expiringSoon(tokenInfo.expiresAt()));
+        if (GitlabConnection.TARGET_PROJECT.equals(targetType)) {
+            String path = GitLabProjectPath.normalize(rawPath, hostPolicy);
+            GitLabProject p = client.resolveProject(baseUrl, token, path);
+            return new Resolved(version.version(), tokenInfo, GitlabConnection.TARGET_PROJECT,
+                    p.id(), p.pathWithNamespace());
+        }
+        String path = GitLabGroupPath.normalize(rawPath, hostPolicy);
+        GitLabGroup g = client.resolveGroup(baseUrl, token, path);
+        return new Resolved(version.version(), tokenInfo, GitlabConnection.TARGET_GROUP, g.id(), g.fullPath());
+    }
+
+    private ConnectionTestResult toResult(Resolved r) {
+        boolean soon = expiringSoon(r.tokenInfo().expiresAt());
+        return r.isGroup()
+                ? ConnectionTestResult.successGroup(r.version(), r.id(), r.path(), r.tokenInfo().scopes(),
+                        r.tokenInfo().expiresAt(), soon)
+                : ConnectionTestResult.successProject(r.version(), r.id(), r.path(), r.tokenInfo().scopes(),
+                        r.tokenInfo().expiresAt(), soon);
     }
 
     /** Fetches token info and rejects revoked/expired tokens or missing scopes. */
@@ -126,5 +265,12 @@ public class GitLabConnectionService {
     private boolean expiringSoon(LocalDate expiresAt) {
         return expiresAt != null && !expiresAt.isBefore(LocalDate.now())
                 && expiresAt.isBefore(LocalDate.now().plusDays(EXPIRY_WARN_DAYS + 1L));
+    }
+
+    /** A resolved + verified target: GitLab version, token info, and the group/project id + canonical path. */
+    private record Resolved(String version, GitLabTokenInfo tokenInfo, String targetType, long id, String path) {
+        boolean isGroup() {
+            return GitlabConnection.TARGET_GROUP.equals(targetType);
+        }
     }
 }

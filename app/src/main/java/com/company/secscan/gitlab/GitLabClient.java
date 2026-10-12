@@ -63,6 +63,15 @@ public class GitLabClient {
                 GitLabError.GROUP_NOT_FOUND);
     }
 
+    /** Resolves a single project by its full path (e.g. {@code services/ib-keycloak}); 404 → {@link GitLabError#PROJECT_NOT_FOUND}. */
+    public GitLabProject resolveProject(String baseUrl, String token, String projectPath) {
+        // Pre-encode the path (encodes '/'), then pass an absolute URI so RestClient does not encode it again.
+        URI uri = URI.create(apiBase(baseUrl) + "/projects/"
+                + URLEncoder.encode(projectPath, StandardCharsets.UTF_8));
+        return call(() -> client(baseUrl, token).get().uri(uri).retrieve().body(GitLabProject.class),
+                GitLabError.PROJECT_NOT_FOUND);
+    }
+
     /** All non-archived projects in the group (and its subgroups), following GitLab's page headers. */
     public List<GitLabProject> listGroupProjects(String baseUrl, String token, long groupId) {
         return call(() -> {
@@ -160,10 +169,11 @@ public class GitLabClient {
                     throw new GitLabException(GitLabError.MISSING_SCOPES,
                             "The token is not authorized (403); it is likely missing a required scope.", e);
                 case 404:
-                    throw new GitLabException(notFoundCategory,
-                            notFoundCategory == GitLabError.GROUP_NOT_FOUND
-                                    ? "Group not found, or the token cannot see it."
-                                    : "GitLab resource not found (404).", e);
+                    throw new GitLabException(notFoundCategory, switch (notFoundCategory) {
+                        case GROUP_NOT_FOUND -> "Group not found, or the token cannot see it.";
+                        case PROJECT_NOT_FOUND -> "Project not found, or the token cannot see it.";
+                        default -> "GitLab resource not found (404).";
+                    }, e);
                 case 429:
                     String retryAfter = e.getResponseHeaders() == null ? null
                             : e.getResponseHeaders().getFirst("Retry-After");

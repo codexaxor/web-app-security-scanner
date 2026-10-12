@@ -10,12 +10,13 @@ import com.company.secscan.support.GitLabWireMock;
 import com.company.secscan.workspace.Workspace;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-/** Connection-test behavior against mocked GitLab: success shows version + expiry; failures are categorized. */
+/** Connection-test / create / update behavior against mocked GitLab (group mode); failures are categorized. */
 class GitLabConnectionIT extends AbstractGitLabIT {
 
     private static final String TOKEN = "glpat-EXAMPLE-not-real";
@@ -33,7 +34,6 @@ class GitLabConnectionIT extends AbstractGitLabIT {
 
     @BeforeEach
     void setUp() {
-        connections.deleteAll();
         gitlab = new GitLabWireMock();
     }
 
@@ -42,13 +42,18 @@ class GitLabConnectionIT extends AbstractGitLabIT {
         gitlab.stop();
     }
 
+    private UUID groupConnectionId() {
+        return connections.findByWorkspaceIdAndGitlabGroupId(Workspace.DEFAULT_ID, 42L).orElseThrow().getId();
+    }
+
     @Test
     void successShowsVersionScopesAndExpiry() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
 
-        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "group", "services");
 
         assertThat(r.ok()).isTrue();
+        assertThat(r.targetType()).isEqualTo("group");
         assertThat(r.gitlabVersion()).isEqualTo("16.11.1");
         assertThat(r.groupId()).isEqualTo(42L);
         assertThat(r.tokenScopes()).containsExactlyInAnyOrder("read_api", "read_repository");
@@ -64,7 +69,7 @@ class GitLabConnectionIT extends AbstractGitLabIT {
                         + "\"scopes\":[\"read_api\",\"read_repository\"],\"expires_at\":\"" + soon + "\"}")
                 .stubGroup("services");
 
-        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "group", "services");
 
         assertThat(r.ok()).isTrue();
         assertThat(r.expiringSoon()).isTrue();
@@ -74,7 +79,7 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     void invalidTokenIsReported() {
         gitlab.stubVersion().stubTokenSelfStatus(401).stubGroup("services");
 
-        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "group", "services");
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.INVALID_TOKEN.name());
@@ -84,7 +89,7 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     void missingScopeIsReported() {
         gitlab.stubVersion().stubTokenSelf("token-self-missing-scope.json").stubGroup("services");
 
-        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "group", "services");
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.MISSING_SCOPES.name());
@@ -95,7 +100,7 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     void expiredTokenIsReported() {
         gitlab.stubVersion().stubTokenSelf("token-self-expired.json").stubGroup("services");
 
-        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.test(gitlab.baseUrl(), TOKEN, "group", "services");
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.TOKEN_EXPIRED.name());
@@ -103,63 +108,74 @@ class GitLabConnectionIT extends AbstractGitLabIT {
 
     @Test
     void unreachableHostIsReported() {
-        // Nothing stubbed and the server is stopped → connection refused.
         String deadUrl = gitlab.baseUrl();
         gitlab.stop();
 
-        ConnectionTestResult r = service.test(deadUrl, TOKEN, "services");
+        ConnectionTestResult r = service.test(deadUrl, TOKEN, "group", "services");
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.UNREACHABLE.name());
     }
 
     @Test
-    void saveEncryptsTokenAndStoresConnection() {
+    void createEncryptsTokenAndStoresConnection() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
 
-        ConnectionTestResult r = service.save(gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "group", "services");
         assertThat(r.ok()).isTrue();
 
-        GitlabConnection saved = connections.findByWorkspaceId(
-                com.company.secscan.workspace.Workspace.DEFAULT_ID).orElseThrow();
-        assertThat(saved.getGitlabGroupId()).isEqualTo(42L);
+        GitlabConnection saved = connections.findByWorkspaceIdAndGitlabGroupId(Workspace.DEFAULT_ID, 42L)
+                .orElseThrow();
+        assertThat(saved.isGroup()).isTrue();
+        assertThat(saved.getLastVerifiedAt()).isNotNull();
         // The token is stored only as ciphertext, never in plaintext.
         assertThat(saved.getTokenCiphertext()).isNotEqualTo(TOKEN);
         assertThat(saved.getTokenCiphertext()).doesNotContain(TOKEN);
     }
 
     @Test
-    void resavingSameGroupRotatesTokenAndKeepsSelectedRepositories() {
+    void creatingTheSameGroupTwiceIsRejected() {
+        gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
+        assertThat(service.create(gitlab.baseUrl(), TOKEN, "group", "services").ok()).isTrue();
+
+        ConnectionTestResult second = service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+
+        assertThat(second.ok()).isFalse();
+        assertThat(second.errorCode()).isEqualTo(GitLabError.CONNECTION_EXISTS.name());
+        assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID)).hasSize(1);
+    }
+
+    @Test
+    void updateRotatesTokenAndKeepsSelectedRepositories() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services")
                 .stubProjectsFromSample(42L).stubLanguages(101, "{\"Java\":100.0}");
-        service.save(gitlab.baseUrl(), TOKEN, "services");
-        repositoryService.select(List.of(101L));
-        String firstCiphertext = connections.findByWorkspaceId(Workspace.DEFAULT_ID).orElseThrow()
-                .getTokenCiphertext();
+        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        UUID connId = groupConnectionId();
+        repositoryService.select(connId, List.of(101L));
+        String firstCiphertext = connections.findById(connId).orElseThrow().getTokenCiphertext();
 
-        // Re-save the same group with a rotated token (same value here; a fresh IV still changes the ciphertext).
-        ConnectionTestResult r = service.save(gitlab.baseUrl(), TOKEN, "services");
+        // Rotate the token on the same connection (same value here; a fresh IV still changes the ciphertext).
+        ConnectionTestResult r = service.update(connId, gitlab.baseUrl(), TOKEN, "services");
 
         assertThat(r.ok()).isTrue();
-        assertThat(connections.findAll()).hasSize(1); // updated in place, not duplicated
-        assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID).orElseThrow().getTokenCiphertext())
+        assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID)).hasSize(1); // updated in place
+        assertThat(connections.findById(connId).orElseThrow().getTokenCiphertext())
                 .isNotEqualTo(firstCiphertext);
         assertThat(repositories.findByWorkspaceId(Workspace.DEFAULT_ID)).hasSize(1); // selection kept
     }
 
     @Test
-    void savingADifferentGroupIsRejected() {
+    void updatingToADifferentTargetIsRejected() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
-        service.save(gitlab.baseUrl(), TOKEN, "services"); // group id 42
+        service.create(gitlab.baseUrl(), TOKEN, "group", "services"); // group id 42
+        UUID connId = groupConnectionId();
 
-        gitlab.stubGroupBody("other-group",
-                "{\"id\":99,\"full_path\":\"other-group\"}");
-        ConnectionTestResult r = service.save(gitlab.baseUrl(), TOKEN, "other-group");
+        gitlab.stubGroupBody("other-group", "{\"id\":99,\"full_path\":\"other-group\"}");
+        ConnectionTestResult r = service.update(connId, gitlab.baseUrl(), TOKEN, "other-group");
 
         assertThat(r.ok()).isFalse();
-        assertThat(r.errorCode()).isEqualTo(GitLabError.CONNECTION_GROUP_MISMATCH.name());
-        // The existing connection is unchanged.
-        assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID).orElseThrow().getGitlabGroupId())
-                .isEqualTo(42L);
+        assertThat(r.errorCode()).isEqualTo(GitLabError.CONNECTION_TARGET_MISMATCH.name());
+        // The existing connection is unchanged (still group 42).
+        assertThat(connections.findById(connId).orElseThrow().getGitlabGroupId()).isEqualTo(42L);
     }
 }
