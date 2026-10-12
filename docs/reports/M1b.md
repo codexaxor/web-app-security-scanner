@@ -26,7 +26,7 @@ automated proxies run the full flow against a mocked GitLab (WireMock + Testcont
 | V5 applies to an empty DB; multiple connections allowed; target check enforced | `BaselineMigrationIT.workspaceSupportsManyConnectionsOfDifferentTargets`/`checkConstraintRejectsAGroupRowWithoutGroupColumns` | PASS |
 | Token stored only as ciphertext; never logged | `ProjectConnectionIT.createResolvesAndStoresTheProject` (ciphertext ≠ token), `GitLabConnectionIT.createEncryptsTokenAndStoresConnection`; no `log.*` statement references a token (verified) | PASS |
 | `./gradlew build` and `npm run build` green | Evidence below | PASS |
-| Real GitLab group **and** a single project connect over VPN; repos persist | **Manual — NOT YET RUN** (needs token + VPN); see Known gaps | PENDING |
+| Real GitLab group **and** a single project connect over VPN; repos persist | **Manual — DEFERRED by owner, to be verified during M2 manual run** (needs token + VPN); see Known gaps | DEFERRED |
 
 ## What was built
 
@@ -58,6 +58,9 @@ automated proxies run the full flow against a mocked GitLab (WireMock + Testcont
   `saveAndFlush` so a unique-index race maps to `CONNECTION_EXISTS` rather than a 500.
 - `app/.../repository/RepositoryConnectionGuard.java` — `confirm`/`deactivate` in `REQUIRES_NEW` transactions so
   a provisional deactivation commits even when the triggering use then fails and rolls back.
+- `app/.../repository/RepositoryUpserter.java` — persists one selected project per transaction (added in the
+  review fixes); a concurrent insert of the same project loses the unique-index race and is recovered by
+  reattaching the winner's row rather than returning a 500.
 - `app/.../repository/RepositoryController.java` + `api/{RepositoryView,SelectRepositoriesRequest}.java` —
   `select` takes `connectionId`; the view shows the owning connection and any inactive reason.
 - `app/.../api/ApiExceptionHandler.java` — HTTP mapping for the new error codes (404 / 409).
@@ -167,12 +170,32 @@ and `/projects` endpoints are removed (no aliases).**
   group-namespace prefix → newest-verified tie), detach+deactivate when none, provisional reassignment resolved
   on next use, and SLF4J audit until M3's `triage_event`.
 
+## Review fixes (applied after the first report)
+
+Driven by the `/review-pr M1b` findings; all covered by tests unless noted.
+
+1. **Concurrent `select` race (should-fix)** — selecting a not-yet-stored project through two connections at
+   once could lose the `uq_repository_workspace_project` race and surface a 500. `select` is no longer a single
+   transaction: it validates the whole batch first (a bad id still selects nothing), then persists each project
+   in its own transaction via the new `RepositoryUpserter`; the loser catches `DataIntegrityViolationException`
+   and reattaches the winner's row (first-wins ownership preserved). Proven by
+   `DedupAcrossConnectionsIT.concurrentSelectOfTheSameProjectStoresItOnceWithoutError`.
+2. **Provisional flag cleared by a non-owner (nit)** — re-selecting an owned, active repository through a
+   connection that is **not** its owner no longer clears `reassigned_at`; only the owner (directly, or via
+   `RepositoryConnectionGuard.confirm`) resolves its own provisional state. Proven by
+   `ConnectionRemovalIT.aNonOwnerReselectKeepsTheProvisionalFlagAndTheOwnerClearsIt`.
+3. **Locale-sensitive lowercase (nit)** — `namespaceContains` now uses `toLowerCase(Locale.ROOT)`, consistent
+   with `GitLabHostPolicy`.
+
+The remaining review nit (#4: GitLab I/O inside `@Transactional` in `update`) is intentionally left for the M2
+transaction-boundary cleanup — see Known gaps.
+
 ## Evidence
 
-- `./gradlew test --rerun-tasks` (local): **91 tests run, 0 failed, 0 skipped** (core 7; app 84).
+- `./gradlew test --rerun-tasks` (local): **93 tests run, 0 failed, 0 skipped** (core 7; app 86).
   - core: `TokenCipherTest` 7.
   - app: `GitLabClientTest` 17, `GitLabConnectionIT` 10, `ProjectConnectionIT` 7, `GitLabProjectPathTest` 7,
-    `GitLabGroupPathTest` 6, `MultiConnectionIT` 3, `ConnectionRemovalIT` 7, `DedupAcrossConnectionsIT` 1,
+    `GitLabGroupPathTest` 6, `MultiConnectionIT` 3, `ConnectionRemovalIT` 8, `DedupAcrossConnectionsIT` 2,
     `RepositorySelectionIT` 5, `BaselineMigrationIT` 5, `GitLabHostPolicyTest` 5, `ApiSecurityIT` 2,
     `AdminBootstrapIT` 3, `AdminBootstrapTest` 4, `TokenCipherHolderTest` 2.
 - `cd ui && npm run build`: green (tsc + vite, 34 modules).
@@ -191,11 +214,13 @@ and `/projects` endpoints are removed (no aliases).**
 
 ## Known gaps / TODOs
 
-- **Real-GitLab Done-when unverified** — needs the token + VPN: connect a group **and** a single project, select
-  from each, confirm both persist with the right `connection_id`, and confirm the ciphertext is not `glpat…`.
-- Carried from M1: GitLab I/O still runs inside `@Transactional` in `update`/`delete` (short network calls hold
-  a DB connection). `create` and `listProjects` are intentionally **not** transactional (so a unique-index race
-  maps cleanly to `CONNECTION_EXISTS`, and a provisional deactivation can commit). To be addressed with the M2
-  transaction-boundary cleanup.
+- **Real-GitLab Done-when DEFERRED by owner** — to be verified during the M2 manual run (needs the token + VPN):
+  connect a group **and** a single project, select from each, confirm both persist with the right
+  `connection_id`, and confirm the ciphertext is not `glpat…`.
+- Carried from M1: GitLab I/O still runs inside `@Transactional` in `update` (short network calls hold a DB
+  connection); left for the M2 transaction-boundary cleanup. `delete` makes no GitLab calls (offline
+  reassignment). `create`, `listProjects` and `select` are intentionally **not** transactional at the method
+  level: `create` lets a unique-index race map cleanly to `CONNECTION_EXISTS`; `listProjects`/`select` let a
+  provisional deactivation commit and let the per-project `RepositoryUpserter` recover a concurrent insert.
 - Reassignment/deactivation are logged, not persisted as events; a durable record waits for M3's `triage_event`.
 - Single workspace (default) throughout; multi-tenant auth is M10.

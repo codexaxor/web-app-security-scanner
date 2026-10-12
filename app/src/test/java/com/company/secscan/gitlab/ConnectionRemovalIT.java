@@ -187,6 +187,36 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
     }
 
     @Test
+    void aNonOwnerReselectKeepsTheProvisionalFlagAndTheOwnerClearsIt() {
+        // Select via a project connection, then remove it so the repo is reassigned to the group connection and
+        // left provisional (owned by the group, reassigned_at set).
+        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        UUID groupConn = groupConnId();
+        UUID projectConn = projectConnId();
+        repositoryService.select(projectConn, List.of(PROJECT_ID));
+        service.delete(projectConn);
+        assertThat(onlyRepo().isProvisional()).isTrue();
+        assertThat(onlyRepo().getConnectionId()).isEqualTo(groupConn);
+
+        // A different (non-owner) connection to the same project selects it: ownership and the provisional flag
+        // must be left intact (first-wins dedup; only the owner resolves its own provisional state).
+        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        UUID newProjectConn = projectConnId();
+        repositoryService.select(newProjectConn, List.of(PROJECT_ID));
+
+        Repository afterNonOwner = onlyRepo();
+        assertThat(afterNonOwner.getConnectionId()).isEqualTo(groupConn); // owner unchanged
+        assertThat(afterNonOwner.isProvisional()).isTrue();               // provisional NOT cleared by a non-owner
+        assertThat(afterNonOwner.isActive()).isTrue();
+
+        // The owner (group) re-selecting it confirms the reassignment and clears the flag.
+        repositoryService.select(groupConn, List.of(PROJECT_ID));
+        assertThat(onlyRepo().isProvisional()).isFalse();
+        assertThat(onlyRepo().getConnectionId()).isEqualTo(groupConn);
+    }
+
+    @Test
     void deletingAMissingConnectionIsRejected() {
         assertThatThrownBy(() -> service.delete(UUID.randomUUID()))
                 .isInstanceOf(GitLabException.class)

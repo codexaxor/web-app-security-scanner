@@ -21,6 +21,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -43,15 +44,17 @@ public class RepositoryService {
     private final GitlabConnectionRepository connections;
     private final RepositoryRepository repositories;
     private final RepositoryConnectionGuard guard;
+    private final RepositoryUpserter upserter;
     private final TokenCipherHolder cipher;
 
     public RepositoryService(GitLabClient client, GitlabConnectionRepository connections,
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
-                             TokenCipherHolder cipher) {
+                             RepositoryUpserter upserter, TokenCipherHolder cipher) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
         this.guard = guard;
+        this.upserter = upserter;
         this.cipher = cipher;
     }
 
@@ -91,16 +94,22 @@ public class RepositoryService {
                 pageOfProjects.totalElements(), pageOfProjects.totalPages());
     }
 
-    /** Selects (activates) the given projects through one connection, refreshing their metadata from GitLab. */
-    @Transactional
+    /**
+     * Selects (activates) the given projects through one connection, refreshing their metadata from GitLab.
+     * Not transactional at the method level: each project is persisted in its own transaction (via
+     * {@link RepositoryUpserter}) so a concurrent insert of the same project can be recovered (see
+     * {@link #upsertWithRaceRecovery}) rather than failing the request. The whole batch is validated first, so a
+     * bad project id selects nothing.
+     */
     public List<RepositoryView> select(UUID connectionId, List<Long> gitlabProjectIds) {
         GitlabConnection conn = requireConnection(connectionId);
         String token = cipher.require().decrypt(conn.getTokenCiphertext());
         Map<Long, GitLabProject> byId = exposedProjects(conn, token).stream()
                 .collect(Collectors.toMap(GitLabProject::id, Function.identity()));
 
-        List<RepositoryView> result = new ArrayList<>();
-        for (Long id : Set.copyOf(gitlabProjectIds)) {
+        Set<Long> ids = Set.copyOf(gitlabProjectIds);
+        // Validate the whole batch before writing anything, so a bad id selects nothing.
+        for (Long id : ids) {
             GitLabProject p = byId.get(id);
             if (p == null) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -114,26 +123,31 @@ public class RepositoryService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Project " + p.pathWithNamespace() + " is an empty repository and cannot be scanned.");
             }
+        }
+
+        List<RepositoryView> result = new ArrayList<>();
+        for (Long id : ids) {
+            GitLabProject p = byId.get(id);
             List<String> languages = safeLanguages(conn, token, id);
-            Repository repo = repositories.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, id)
-                    .map(r -> {
-                        if (r.getConnectionId() == null || !r.isActive()) {
-                            // Detached (its connection was removed) or inactive: the selecting connection takes
-                            // it over, clearing the inactive/provisional state (D-020).
-                            r.reattachTo(conn.getId());
-                        } else {
-                            // Owned and active: first connection keeps ownership (dedup); re-selecting just
-                            // refreshes it (and confirms any provisional reassignment onto its owner).
-                            r.activate();
-                        }
-                        r.refreshFromGitlab(p.pathWithNamespace(), p.defaultBranch(), languages);
-                        return r;
-                    })
-                    .orElseGet(() -> new Repository(WORKSPACE, conn.getId(), id, p.pathWithNamespace(),
-                            p.defaultBranch(), languages));
-            result.add(RepositoryView.of(repositories.save(repo), ownerOf(repo)));
+            Repository repo = upsertWithRaceRecovery(conn.getId(), id, p, languages);
+            result.add(RepositoryView.of(repo, ownerOf(repo)));
         }
         return result;
+    }
+
+    /**
+     * Persists one selected project, tolerating a concurrent select of the same project (two connections, or a
+     * double-submit). The loser of the {@code uq_repository_workspace_project} race gets a
+     * {@code DataIntegrityViolationException} from the insert; rather than a 500, we reattach/refresh the row the
+     * winner inserted — first-wins ownership is preserved.
+     */
+    private Repository upsertWithRaceRecovery(UUID connectionId, long projectId, GitLabProject p,
+                                              List<String> languages) {
+        try {
+            return upserter.upsert(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+        } catch (DataIntegrityViolationException race) {
+            return upserter.reattach(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+        }
     }
 
     @Transactional(readOnly = true)
