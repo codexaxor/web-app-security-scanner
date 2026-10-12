@@ -44,15 +44,17 @@ public class GitLabConnectionService {
     private final RepositoryRepository repositories;
     private final TokenCipherHolder cipher;
     private final GitLabHostPolicy hostPolicy;
+    private final ConnectionTokenWriter tokenWriter;
 
     public GitLabConnectionService(GitLabClient client, GitlabConnectionRepository connections,
                                    RepositoryRepository repositories, TokenCipherHolder cipher,
-                                   GitLabHostPolicy hostPolicy) {
+                                   GitLabHostPolicy hostPolicy, ConnectionTokenWriter tokenWriter) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
         this.cipher = cipher;
         this.hostPolicy = hostPolicy;
+        this.tokenWriter = tokenWriter;
     }
 
     /** Tests a connection without persisting anything. */
@@ -109,27 +111,36 @@ public class GitLabConnectionService {
      * Rotates the token (and base URL) of an existing connection. The supplied path must resolve to the same
      * target; to connect a different group/project, create a new connection instead. Selected repositories are
      * kept untouched.
+     *
+     * <p>Deliberately NOT {@code @Transactional}: the GitLab I/O (token/target verification) must not run inside
+     * a transaction holding a DB connection. It reads the target in its own short tx, verifies over the network
+     * with no tx held, then commits the rotation via {@link ConnectionTokenWriter} in a second short write tx.
      */
-    @Transactional
     public ConnectionTestResult update(UUID connectionId, String baseUrl, String token, String path) {
+        // Read tx #1 (Spring Data default): capture the connection's current target.
         GitlabConnection existing = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
                 .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
                         "No such connection in this workspace."));
+        Long existingTargetId = existing.targetId();
+        String existingTargetType = existing.getTargetType();
+
+        // Network I/O: no transaction is held here.
         Resolved r;
         try {
-            r = resolve(baseUrl, token, existing.getTargetType(), path);
+            r = resolve(baseUrl, token, existingTargetType, path);
         } catch (GitLabException e) {
             return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
         }
-        if (!Long.valueOf(r.id()).equals(existing.targetId())) {
+        if (!Long.valueOf(r.id()).equals(existingTargetId)) {
             return ConnectionTestResult.failure(GitLabError.CONNECTION_TARGET_MISMATCH.name(),
                     "That path resolves to a different " + r.targetType() + " than this connection. To connect a "
                             + "different target, add a new connection.");
         }
+
+        // Write tx #2 (short): persist the rotated token.
         String ciphertext = cipher.require().encrypt(token);
-        existing.updateToken(baseUrl, ciphertext, String.join(",", r.tokenInfo().scopes()),
-                r.tokenInfo().expiresAt());
-        connections.save(existing);
+        tokenWriter.rotate(connectionId, WORKSPACE, baseUrl, ciphertext,
+                String.join(",", r.tokenInfo().scopes()), r.tokenInfo().expiresAt());
         return toResult(r);
     }
 
