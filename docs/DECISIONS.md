@@ -14,6 +14,21 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-023 Scanner image: Alpine (digest-pinned) + Gitleaks (checksum-pinned); in-container secret sanitize (2026-10-13, accepted)
+Context: M2 needs a disposable scanner container with git + a secrets scanner, and secret findings must never
+store or leak the raw value (CLAUDE.md security rules).
+Decision: `scanner-image/` builds from `alpine:3.21` pinned by digest, adds git + jq, and installs Gitleaks
+8.21.2 verified against its published SHA-256 (per-arch). `run-scan.sh` clones one commit into tmpfs `/work`,
+runs `gitleaks dir --no-banner --report-format json` (exit 0 or 1 = success; any other code = scanner failure),
+then computes the SHA-256 and 4-char preview of each secret **inside the container** and writes only those,
+with the repo-relative file path and start line, to `/out/secrets.json` — the raw value never leaves the
+container. A manifest `/out/result.json` carries the cloned commit, tool versions and per-scanner status. The
+token, when present, arrives only as a read-only file and is sent as a basic-auth header via a tmpfs git config,
+never in the URL/env/argv/logs (D-014). apk package versions are not individually pinned (follow the pinned
+Alpine branch) — see Known gaps.
+Consequences: reproducible scanner builds; the strongest secret-handling posture (raw secret dies with the
+container); OSV-Scanner/Opengrep/Checkov are added to this same image in M4/M6.
+
 ## D-020 Multiple connections, project-mode targets, and reassignment on removal (2026-10-12, accepted)
 Context: M1b lets a workspace connect a whole group and/or several single projects; removing a connection must
 not lose repositories (scan history hangs off them from M2) and must keep a clone path resolvable.
