@@ -16,6 +16,10 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     runtimeOnly(libs.postgresql)
 
+    // Worker-only: launch hardened, disposable scanner containers against the host Docker daemon (D-022).
+    implementation(libs.docker.java.core)
+    implementation(libs.docker.java.transport.httpclient5)
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation(libs.testcontainers.junit)

@@ -1,0 +1,80 @@
+package com.company.secscan.scan.worker;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.github.dockerjava.api.model.AccessMode;
+import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.Capability;
+import com.github.dockerjava.api.model.HostConfig;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+/** Proves the scanner container is configured with the spec's hardening and that the token never leaks. */
+class ScannerContainerConfigTest {
+
+    private static ScannerLaunchSpec spec(boolean networkDisabled, Path tokenFile) {
+        return new ScannerLaunchSpec("scan-123", "secscan-scanner:test",
+                "https://gitlab.example/ns/app.git", "main", 1,
+                Path.of("/srv/secscan/scans/scan-123/out"), tokenFile,
+                "2g", 4L * 1024 * 1024 * 1024, 2.0, 512, networkDisabled, "1000:1000",
+                Duration.ofMinutes(30));
+    }
+
+    @Test
+    void appliesContainerHardening() {
+        HostConfig hc = ScannerContainerConfig.buildHostConfig(spec(false, null));
+
+        assertThat(hc.getReadonlyRootfs()).isTrue();
+        assertThat(hc.getCapDrop()).contains(Capability.ALL);
+        assertThat(hc.getSecurityOpts()).contains("no-new-privileges");
+        assertThat(hc.getPidsLimit()).isEqualTo(512L);
+        assertThat(hc.getMemory()).isEqualTo(4L * 1024 * 1024 * 1024);
+        assertThat(hc.getNanoCPUs()).isEqualTo(2_000_000_000L);
+        assertThat(hc.getTmpFs().get("/work")).contains("noexec").contains("nosuid").contains("size=2g");
+    }
+
+    @Test
+    void mountsOutReadWriteAndNeverTheDockerSocket() {
+        HostConfig hc = ScannerContainerConfig.buildHostConfig(spec(false, null));
+
+        List<Bind> binds = List.of(hc.getBinds());
+        assertThat(binds).anySatisfy(b -> {
+            assertThat(b.getVolume().getPath()).isEqualTo("/out");
+            assertThat(b.getAccessMode()).isEqualTo(AccessMode.rw);
+        });
+        assertThat(binds).noneSatisfy(b -> assertThat(b.getPath()).contains("docker.sock"));
+        assertThat(binds).noneSatisfy(b -> assertThat(b.getVolume().getPath()).contains("docker.sock"));
+    }
+
+    @Test
+    void mountsTokenFileReadOnlyAndKeepsItOutOfEnv() {
+        Path tokenFile = Path.of("/srv/secscan/scans/scan-123/token");
+        ScannerLaunchSpec s = spec(false, tokenFile);
+
+        List<Bind> binds = List.of(ScannerContainerConfig.buildHostConfig(s).getBinds());
+        assertThat(binds).anySatisfy(b -> {
+            assertThat(b.getVolume().getPath()).isEqualTo("/run/secrets/gitlab-token");
+            assertThat(b.getAccessMode()).isEqualTo(AccessMode.ro);
+        });
+
+        List<String> env = ScannerContainerConfig.buildEnv(s);
+        assertThat(env).containsExactlyInAnyOrder(
+                "SCAN_CLONE_URL=https://gitlab.example/ns/app.git", "SCAN_BRANCH=main", "SCAN_CLONE_DEPTH=1");
+        assertThat(env).noneSatisfy(e -> assertThat(e.toLowerCase()).contains("token"));
+    }
+
+    @Test
+    void disablesNetworkForOfflineRuns() {
+        assertThat(ScannerContainerConfig.buildHostConfig(spec(true, null)).getNetworkMode()).isEqualTo("none");
+        assertThat(ScannerContainerConfig.buildHostConfig(spec(false, null)).getNetworkMode()).isEqualTo("bridge");
+    }
+
+    @Test
+    void labelsIdentifyTheScan() {
+        assertThat(ScannerContainerConfig.labels("scan-123"))
+                .containsEntry("secscan.component", "scanner")
+                .containsEntry("secscan.scan", "scan-123");
+    }
+}
