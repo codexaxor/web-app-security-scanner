@@ -15,9 +15,13 @@ import org.junit.jupiter.api.Test;
 class ScannerContainerConfigTest {
 
     private static ScannerLaunchSpec spec(boolean networkDisabled, Path tokenFile) {
+        return spec(networkDisabled, tokenFile, null);
+    }
+
+    private static ScannerLaunchSpec spec(boolean networkDisabled, Path tokenFile, Path localSource) {
         return new ScannerLaunchSpec("scan-123", "secscan-scanner:test",
                 "https://gitlab.example/ns/app.git", "main", 1,
-                Path.of("/srv/secscan/scans/scan-123/out"), tokenFile,
+                Path.of("/srv/secscan/scans/scan-123/out"), tokenFile, localSource,
                 "2g", 4L * 1024 * 1024 * 1024, 2.0, 512, networkDisabled, "1000:1000",
                 Duration.ofMinutes(30));
     }
@@ -63,6 +67,16 @@ class ScannerContainerConfigTest {
         assertThat(env).containsExactlyInAnyOrder(
                 "SCAN_CLONE_URL=https://gitlab.example/ns/app.git", "SCAN_BRANCH=main", "SCAN_CLONE_DEPTH=1");
         assertThat(env).noneSatisfy(e -> assertThat(e.toLowerCase()).contains("token"));
+    }
+
+    @Test
+    void mountsLocalSourceReadOnlyWhenSet() {
+        Path src = Path.of("/srv/secscan/scans/scan-123/source");
+        List<Bind> binds = List.of(ScannerContainerConfig.buildHostConfig(spec(true, null, src)).getBinds());
+        assertThat(binds).anySatisfy(b -> {
+            assertThat(b.getVolume().getPath()).isEqualTo("/src");
+            assertThat(b.getAccessMode()).isEqualTo(AccessMode.ro);
+        });
     }
 
     @Test

@@ -11,13 +11,15 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * Worker-only wiring: the Docker client (talks to the host daemon via the mounted socket; D-026) and the
- * scanner properties. Nothing here loads in the api process.
+ * Worker-only wiring: the Docker client (talks to the host daemon via the mounted socket; D-026), the scanner
+ * properties, and scheduling for the claim loop. Nothing here loads in the api process.
  */
 @Configuration
 @Profile("worker")
+@EnableScheduling
 @EnableConfigurationProperties(ScannerProperties.class)
 public class WorkerScanConfig {
 

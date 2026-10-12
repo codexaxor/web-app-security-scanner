@@ -21,6 +21,7 @@ final class ScannerContainerConfig {
     static final String WORK_MOUNT = "/work";
     static final String OUT_MOUNT = "/out";
     static final String TOKEN_MOUNT = "/run/secrets/gitlab-token";
+    static final String SOURCE_MOUNT = "/src";
 
     private ScannerContainerConfig() {
     }
@@ -31,6 +32,10 @@ final class ScannerContainerConfig {
         if (s.tokenFile() != null) {
             // The token file is mounted read-only; it is the only way the token reaches the container (D-014).
             binds.add(new Bind(s.tokenFile().toString(), new Volume(TOKEN_MOUNT), AccessMode.ro));
+        }
+        if (s.localSource() != null) {
+            // A local git repo to clone over file:///src (offline/local repositories), mounted read-only.
+            binds.add(new Bind(s.localSource().toString(), new Volume(SOURCE_MOUNT), AccessMode.ro));
         }
         // /work is tmpfs: writable scratch that dies with the container, mounted noexec/nosuid/nodev so nothing
         // in the cloned repo can be executed (we never run repository code).

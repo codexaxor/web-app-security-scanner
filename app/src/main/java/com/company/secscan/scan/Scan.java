@@ -100,6 +100,11 @@ public class Scan {
         this.finishedAt = Instant.now();
     }
 
+    /** Returns the scan to {@code queued} after a retryable failure, so its requeued job can run it again. */
+    public void markQueuedForRetry() {
+        this.status = STATUS_QUEUED;
+    }
+
     public UUID getId() {
         return id;
     }

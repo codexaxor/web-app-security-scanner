@@ -28,6 +28,9 @@ public class ScannerProperties {
     private int maxParallel = 2;
     /** A lease older than the container timeout plus this margin is reclaimed and the job requeued (point 7). */
     private Duration leaseMargin = Duration.ofMinutes(5);
+    /** The scheduled claim loop; disabled in tests that drive the pipeline directly. */
+    private boolean pollingEnabled = true;
+    private long pollIntervalMs = 5000;
 
     public String getImage() {
         return image;
@@ -107,5 +110,21 @@ public class ScannerProperties {
 
     public void setLeaseMargin(Duration leaseMargin) {
         this.leaseMargin = leaseMargin;
+    }
+
+    public boolean isPollingEnabled() {
+        return pollingEnabled;
+    }
+
+    public void setPollingEnabled(boolean pollingEnabled) {
+        this.pollingEnabled = pollingEnabled;
+    }
+
+    public long getPollIntervalMs() {
+        return pollIntervalMs;
+    }
+
+    public void setPollIntervalMs(long pollIntervalMs) {
+        this.pollIntervalMs = pollIntervalMs;
     }
 }
