@@ -2,6 +2,10 @@ package com.company.secscan.support;
 
 import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.ScanFindingRepository;
+import com.company.secscan.scan.ScanJobRepository;
+import com.company.secscan.scan.ScanRepository;
+import com.company.secscan.scan.ScanTaskRepository;
 import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,13 +50,25 @@ public abstract class AbstractGitLabIT {
     private RepositoryRepository repositoriesForCleanup;
     @Autowired
     private GitlabConnectionRepository connectionsForCleanup;
+    @Autowired
+    private ScanFindingRepository scanFindingsForCleanup;
+    @Autowired
+    private ScanTaskRepository scanTasksForCleanup;
+    @Autowired
+    private ScanJobRepository scanJobsForCleanup;
+    @Autowired
+    private ScanRepository scansForCleanup;
 
     /**
-     * The container is shared across IT classes, so clean both tables before each test in FK-safe order
-     * (repositories reference connections). Runs before each subclass's own {@code @BeforeEach}.
+     * The container is shared across IT classes, so clean the tables before each test in FK-safe order (scans
+     * reference repositories, which reference connections). Runs before each subclass's own {@code @BeforeEach}.
      */
     @BeforeEach
     void cleanDatabase() {
+        scanFindingsForCleanup.deleteAllInBatch();
+        scanTasksForCleanup.deleteAllInBatch();
+        scanJobsForCleanup.deleteAllInBatch();
+        scansForCleanup.deleteAllInBatch();
         repositoriesForCleanup.deleteAllInBatch();
         connectionsForCleanup.deleteAllInBatch();
     }
