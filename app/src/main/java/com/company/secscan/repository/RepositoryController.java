@@ -24,7 +24,7 @@ public class RepositoryController {
 
     @PostMapping
     public List<RepositoryView> select(@Valid @RequestBody SelectRepositoriesRequest req) {
-        return service.select(req.gitlabProjectIds());
+        return service.select(req.connectionId(), req.gitlabProjectIds());
     }
 
     @GetMapping

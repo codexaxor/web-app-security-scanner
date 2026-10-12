@@ -11,13 +11,18 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * One GitLab connection per workspace (M1): base URL, the group it scopes to, and the access token stored only
- * as AES-256-GCM ciphertext. The numeric {@code gitlabGroupId} is used for all later calls because group paths
- * can be renamed.
+ * A GitLab connection for a workspace. A workspace may hold several (M1b): each targets either a whole group
+ * ({@code targetType == "group"}, carrying {@code gitlabGroupId}/{@code groupFullPath}) or a single project
+ * ({@code targetType == "project"}, carrying {@code gitlabProjectId}/{@code projectFullPath}). The access token
+ * is stored only as AES-256-GCM ciphertext. Numeric ids are used for all later calls because paths can be
+ * renamed.
  */
 @Entity
 @Table(name = "gitlab_connection")
 public class GitlabConnection {
+
+    public static final String TARGET_GROUP = "group";
+    public static final String TARGET_PROJECT = "project";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -29,11 +34,20 @@ public class GitlabConnection {
     @Column(name = "base_url", nullable = false)
     private String baseUrl;
 
-    @Column(name = "group_full_path", nullable = false)
+    @Column(name = "target_type", nullable = false)
+    private String targetType;
+
+    @Column(name = "group_full_path")
     private String groupFullPath;
 
-    @Column(name = "gitlab_group_id", nullable = false)
-    private long gitlabGroupId;
+    @Column(name = "gitlab_group_id")
+    private Long gitlabGroupId;
+
+    @Column(name = "gitlab_project_id")
+    private Long gitlabProjectId;
+
+    @Column(name = "project_full_path")
+    private String projectFullPath;
 
     @Column(name = "token_ciphertext", nullable = false)
     private String tokenCiphertext;
@@ -47,6 +61,9 @@ public class GitlabConnection {
     @Column(name = "webhook_secret_ciphertext")
     private String webhookSecretCiphertext;
 
+    @Column(name = "last_verified_at")
+    private Instant lastVerifiedAt;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -54,27 +71,64 @@ public class GitlabConnection {
         // for JPA
     }
 
-    public GitlabConnection(UUID workspaceId, String baseUrl, String groupFullPath, long gitlabGroupId,
-                            String tokenCiphertext, String tokenScopes, LocalDate tokenExpiresAt) {
+    private GitlabConnection(UUID workspaceId, String baseUrl, String targetType, String tokenCiphertext,
+                             String tokenScopes, LocalDate tokenExpiresAt) {
         this.workspaceId = workspaceId;
         this.baseUrl = baseUrl;
-        this.groupFullPath = groupFullPath;
-        this.gitlabGroupId = gitlabGroupId;
+        this.targetType = targetType;
         this.tokenCiphertext = tokenCiphertext;
         this.tokenScopes = tokenScopes;
         this.tokenExpiresAt = tokenExpiresAt;
+        this.lastVerifiedAt = Instant.now();
     }
 
-    public void updateToken(String tokenCiphertext, String tokenScopes, LocalDate tokenExpiresAt) {
-        this.tokenCiphertext = tokenCiphertext;
-        this.tokenScopes = tokenScopes;
-        this.tokenExpiresAt = tokenExpiresAt;
+    /** A connection targeting a whole group (and its subgroups). */
+    public static GitlabConnection forGroup(UUID workspaceId, String baseUrl, String groupFullPath,
+                                            long gitlabGroupId, String tokenCiphertext, String tokenScopes,
+                                            LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_GROUP, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.groupFullPath = groupFullPath;
+        c.gitlabGroupId = gitlabGroupId;
+        return c;
     }
 
-    public void updateGroup(String baseUrl, String groupFullPath, long gitlabGroupId) {
+    /** A connection targeting a single project. */
+    public static GitlabConnection forProject(UUID workspaceId, String baseUrl, String projectFullPath,
+                                              long gitlabProjectId, String tokenCiphertext, String tokenScopes,
+                                              LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_PROJECT, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.projectFullPath = projectFullPath;
+        c.gitlabProjectId = gitlabProjectId;
+        return c;
+    }
+
+    /** Rotates the stored token (same target). Marks the connection freshly verified. */
+    public void updateToken(String baseUrl, String tokenCiphertext, String tokenScopes, LocalDate tokenExpiresAt) {
         this.baseUrl = baseUrl;
-        this.groupFullPath = groupFullPath;
-        this.gitlabGroupId = gitlabGroupId;
+        this.tokenCiphertext = tokenCiphertext;
+        this.tokenScopes = tokenScopes;
+        this.tokenExpiresAt = tokenExpiresAt;
+        this.lastVerifiedAt = Instant.now();
+    }
+
+    public boolean isGroup() {
+        return TARGET_GROUP.equals(targetType);
+    }
+
+    public boolean isProject() {
+        return TARGET_PROJECT.equals(targetType);
+    }
+
+    /** The project id this connection targets (project mode) or exposes a single target for; else the group id. */
+    public Long targetId() {
+        return isGroup() ? gitlabGroupId : gitlabProjectId;
+    }
+
+    /** Human-readable path of the target, for the UI. */
+    public String targetPath() {
+        return isGroup() ? groupFullPath : projectFullPath;
     }
 
     public UUID getId() {
@@ -89,12 +143,24 @@ public class GitlabConnection {
         return baseUrl;
     }
 
+    public String getTargetType() {
+        return targetType;
+    }
+
     public String getGroupFullPath() {
         return groupFullPath;
     }
 
-    public long getGitlabGroupId() {
+    public Long getGitlabGroupId() {
         return gitlabGroupId;
+    }
+
+    public Long getGitlabProjectId() {
+        return gitlabProjectId;
+    }
+
+    public String getProjectFullPath() {
+        return projectFullPath;
     }
 
     public String getTokenCiphertext() {
@@ -107,6 +173,10 @@ public class GitlabConnection {
 
     public LocalDate getTokenExpiresAt() {
         return tokenExpiresAt;
+    }
+
+    public Instant getLastVerifiedAt() {
+        return lastVerifiedAt;
     }
 
     public Instant getCreatedAt() {

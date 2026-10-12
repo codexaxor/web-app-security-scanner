@@ -12,6 +12,7 @@ import com.company.secscan.support.AbstractGitLabIT;
 import com.company.secscan.support.GitLabWireMock;
 import com.company.secscan.workspace.Workspace;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,15 +35,16 @@ class RepositorySelectionIT extends AbstractGitLabIT {
     RepositoryRepository repositories;
 
     private GitLabWireMock gitlab;
+    private UUID connId;
 
     @BeforeEach
     void setUp() {
-        repositories.deleteAll();
-        connections.deleteAll();
         gitlab = new GitLabWireMock();
-        // Save a connection pointing at the mock.
+        // Save a group connection pointing at the mock.
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
-        connectionService.save(gitlab.baseUrl(), TOKEN, "services");
+        connectionService.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        connId = connections.findByWorkspaceIdAndGitlabGroupId(Workspace.DEFAULT_ID, GROUP_ID).orElseThrow()
+                .getId();
         // Group projects + languages for the selectable ones.
         gitlab.stubProjectsFromSample(GROUP_ID)
                 .stubLanguages(101, "{\"Java\":100.0}")
@@ -59,9 +61,9 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void listingExcludesArchivedAndDeletionAndFlagsEmpty() {
-        PagedResponse<ProjectView> page = repositoryService.listProjects(0, 50);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 50);
 
-        // 8 projects minus archived (106) and marked-for-deletion (107) = 6; empty (108) is listed but not selectable.
+        // 8 projects minus archived (106) and marked-for-deletion (107) = 6; empty (108) listed but not selectable.
         assertThat(page.totalElements()).isEqualTo(6);
         assertThat(page.content()).noneMatch(p -> p.pathWithNamespace().contains("legacy-archived"));
         assertThat(page.content()).noneMatch(p -> p.pathWithNamespace().contains("to-be-deleted"));
@@ -79,7 +81,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void listingPaginatesServerSide() {
-        PagedResponse<ProjectView> page = repositoryService.listProjects(0, 2);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 2);
 
         assertThat(page.content()).hasSize(2);
         assertThat(page.totalElements()).isEqualTo(6);
@@ -88,8 +90,10 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void selectPersistsRepositoriesPerWorkspace() {
-        List<RepositoryView> selected = repositoryService.select(List.of(101L, 102L, 103L));
+        List<RepositoryView> selected = repositoryService.select(connId, List.of(101L, 102L, 103L));
         assertThat(selected).hasSize(3);
+        assertThat(selected).allMatch(v -> v.connectionId().equals(connId));
+        assertThat(selected).allMatch(v -> "group".equals(v.connectionTargetType()));
 
         List<Repository> stored = repositories.findByWorkspaceId(Workspace.DEFAULT_ID);
         assertThat(stored).hasSize(3);
@@ -100,18 +104,19 @@ class RepositorySelectionIT extends AbstractGitLabIT {
                 .filter(r -> r.getGitlabProjectId() == 102).findFirst().orElseThrow();
         assertThat(keycloak.getDefaultBranch()).isEqualTo("master");
         assertThat(keycloak.getPathWithNamespace()).isEqualTo("services/ib-keycloak");
+        assertThat(keycloak.getConnectionId()).isEqualTo(connId);
     }
 
     @Test
     void cannotSelectEmptyRepository() {
-        assertThatThrownBy(() -> repositoryService.select(List.of(108L)))
+        assertThatThrownBy(() -> repositoryService.select(connId, List.of(108L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("empty repository");
     }
 
     @Test
     void cannotSelectArchivedProject() {
-        assertThatThrownBy(() -> repositoryService.select(List.of(106L)))
+        assertThatThrownBy(() -> repositoryService.select(connId, List.of(106L)))
                 .isInstanceOf(ResponseStatusException.class);
     }
 }

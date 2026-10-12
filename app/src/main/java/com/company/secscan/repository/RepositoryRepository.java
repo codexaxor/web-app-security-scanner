@@ -20,4 +20,6 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
     Optional<Repository> findByWorkspaceIdAndGitlabProjectId(UUID workspaceId, long gitlabProjectId);
 
     List<Repository> findByWorkspaceIdAndGitlabProjectIdIn(UUID workspaceId, List<Long> gitlabProjectIds);
+
+    List<Repository> findByWorkspaceIdAndConnectionId(UUID workspaceId, UUID connectionId);
 }

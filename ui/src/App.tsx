@@ -14,9 +14,9 @@ export default function App() {
   useEffect(() => {
     if (!signedIn) return;
     api
-      .getConnection()
+      .listConnections(0, 1)
       .then((c) => {
-        if (c) {
+        if (c.totalElements > 0) {
           setConnected(true);
           setTab("repositories");
         }
@@ -40,12 +40,7 @@ export default function App() {
             </button>
           </nav>
           {tab === "connect" ? (
-            <ConnectGitLab
-              onConnected={() => {
-                setConnected(true);
-                setTab("repositories");
-              }}
-            />
+            <ConnectGitLab onChanged={(any) => setConnected(any)} />
           ) : (
             <SelectRepositories />
           )}
