@@ -17,4 +17,11 @@ public interface ScanRepository extends JpaRepository<Scan, UUID> {
     /** In-flight scans for a repository (queued or running): used to avoid enqueuing a duplicate. */
     List<Scan> findByWorkspaceIdAndRepositoryIdAndStatusIn(UUID workspaceId, UUID repositoryId,
                                                            List<String> statuses);
+
+    /**
+     * Stale-guard (M3): true if a newer scan of the same repository has already been reconciled. Reconcile of
+     * an older, out-of-order scan is then skipped so its stale view cannot re-open or re-solve findings.
+     */
+    boolean existsByRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(UUID repositoryId,
+                                                                                java.time.Instant createdAt);
 }

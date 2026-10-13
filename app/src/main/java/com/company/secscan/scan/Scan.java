@@ -63,6 +63,9 @@ public class Scan {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
+    @Column(name = "reconciled_at")
+    private Instant reconciledAt;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -107,6 +110,11 @@ public class Scan {
         this.status = STATUS_QUEUED;
     }
 
+    /** Stamps the moment this scan's findings were reconciled into the issue model (same transaction). */
+    public void markReconciled() {
+        this.reconciledAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -141,6 +149,10 @@ public class Scan {
 
     public Instant getFinishedAt() {
         return finishedAt;
+    }
+
+    public Instant getReconciledAt() {
+        return reconciledAt;
     }
 
     public Instant getCreatedAt() {
