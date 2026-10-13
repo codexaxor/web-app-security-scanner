@@ -49,6 +49,7 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 ```
 docker compose up --build          # full stack: postgres + api + worker + ui
 docker compose up -d postgres      # just the DB, for the dev loop below
+scripts/compose-smoke.sh           # isolated compose smoke (own project `secscan-smoke`, own volume)
 ./gradlew build
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
@@ -57,6 +58,10 @@ cd ui && npm ci && npm run dev
 ```
 
 Update this section whenever a command changes.
+
+Never run `docker compose down -v` (or any volume-deleting command) on the default project — it wipes the
+developer's `postgres-data` dev database. Any smoke/scratch compose run uses a separate project
+(`docker compose -p secscan-smoke …`), i.e. `scripts/compose-smoke.sh`.
 
 ## Domain rules — never break
 

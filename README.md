@@ -85,6 +85,18 @@ docker compose up --build        # ui on :5173, api on :8080; worker is non-web 
 If a system Postgres already owns host port 5432, set `POSTGRES_HOST_PORT` in `.env` (e.g. `15432`) before
 `docker compose up`; the app containers still reach Postgres at `postgres:5432` inside the compose network.
 
+**Compose smoke test (isolated — never touches your dev database):**
+
+```bash
+scripts/compose-smoke.sh          # build + up + wait for api health + tear down
+```
+
+> ⚠️ Smoke/scratch compose runs **must** use a separate compose project — `docker compose -p secscan-smoke …` —
+> which namespaces the volume (`secscan-smoke_postgres-data`) away from the default project. **Never run
+> `docker compose down -v` on the default project**: it deletes the shared `postgres-data` volume and wipes your
+> dev database. `scripts/compose-smoke.sh` enforces this (own project, ephemeral host ports, teardown scoped to
+> `-p secscan-smoke`).
+
 **Dev loop (hot reload, Postgres in a container, app and UI on the host):**
 
 ```bash
