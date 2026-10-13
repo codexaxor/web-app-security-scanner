@@ -54,6 +54,28 @@ own Gradle/JDK version does not matter.
 cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY: openssl rand -base64 32
 ```
 
+**Build the scanner image** (the worker launches it per scan; the tag must match `ScannerProperties.image`):
+
+```bash
+docker build -t secscan-scanner:8.21.2 scanner-image/
+```
+
+**Set up the scan work root** (where per-scan token files and `/out` live). The worker launches each scanner
+container on the *host* Docker daemon, so the work root must be the **same absolute path** on the host and
+inside the worker, and the worker must run as a user that can write it:
+
+```bash
+# In .env (see .env.example):
+#   SECSCAN_SCAN_WORK_ROOT=/var/lib/secscan/scans
+#   SECSCAN_UID=$(id -u)   SECSCAN_GID=$(id -g)        # the worker runs as this host user
+#   DOCKER_GID=$(stat -c %g /var/run/docker.sock)      # so the worker can reach the Docker socket
+sudo mkdir -p /var/lib/secscan/scans
+sudo chown "$(id -u):$(id -g)" /var/lib/secscan/scans
+```
+
+The worker self-checks this on startup (work root writable, Docker reachable, scanner image present) and logs a
+clear error and refuses to claim jobs until it is fixed.
+
 **Run everything (postgres + api + worker + ui) in containers:**
 
 ```bash
@@ -75,8 +97,8 @@ cd ui && npm ci && npm run dev
 
 The first admin is created on first `api` startup when `app_user` is empty and
 `SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set (see `.env.example`).
-`/actuator/health` is public; `/api/**` requires HTTP Basic. The scanner image (`secscan-scanner`) arrives
-in M2.
+`/actuator/health` is public; `/api/**` requires HTTP Basic. For the host dev loop the worker runs as your
+own user, so the work root just needs to exist and be writable by you.
 
 ## Contributing
 

@@ -104,6 +104,21 @@ public class ScanStateService {
         scans.save(scan);
     }
 
+    /**
+     * A configuration error (work root not writable, Docker unreachable, scanner image missing): fail the scan
+     * once with a clear reason and DO NOT retry — retrying a misconfiguration just wastes attempts.
+     */
+    @Transactional
+    public void failPermanently(UUID jobId, UUID scanId, String reason) {
+        Scan scan = scans.findById(scanId).orElseThrow();
+        ScanJob job = jobs.findById(jobId).orElseThrow();
+        log.error("Scan {} failed (not retried): {}", scanId, reason);
+        scan.finish(Scan.STATUS_FAILED);
+        job.markFailed();
+        scans.save(scan);
+        jobs.save(job);
+    }
+
     /** The connection cannot reach the repository (resolved out of band): fail the scan, finish the job. */
     @Transactional
     public void resolveNoAccess(UUID jobId, UUID scanId, String reason) {

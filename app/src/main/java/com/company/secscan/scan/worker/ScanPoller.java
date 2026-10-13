@@ -28,13 +28,16 @@ public class ScanPoller {
 
     private final ScanClaimer claimer;
     private final ScanJobProcessor processor;
+    private final ScannerEnvironmentCheck environment;
     private final ScannerProperties props;
     private final ExecutorService pool;
     private final AtomicInteger active = new AtomicInteger();
 
-    public ScanPoller(ScanClaimer claimer, ScanJobProcessor processor, ScannerProperties props) {
+    public ScanPoller(ScanClaimer claimer, ScanJobProcessor processor, ScannerEnvironmentCheck environment,
+                      ScannerProperties props) {
         this.claimer = claimer;
         this.processor = processor;
+        this.environment = environment;
         this.props = props;
         this.pool = Executors.newFixedThreadPool(Math.max(1, props.getMaxParallel()));
     }
@@ -42,6 +45,10 @@ public class ScanPoller {
     @Scheduled(fixedDelayString = "${secscan.scanner.poll-interval-ms:5000}",
             initialDelayString = "${secscan.scanner.poll-interval-ms:5000}")
     public void poll() {
+        if (!environment.isReady()) {
+            // The self-check (ScannerEnvironmentCheck) has logged why; don't claim jobs we can't run.
+            return;
+        }
         try {
             claimer.sweepStaleLeases(props.getTimeout().plus(props.getLeaseMargin()));
         } catch (RuntimeException e) {

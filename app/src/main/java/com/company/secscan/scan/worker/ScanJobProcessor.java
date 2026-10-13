@@ -16,6 +16,8 @@ import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.parse.ParsedScan;
 import com.company.secscan.scan.parse.ScannerOutputParser;
 import com.company.secscan.scan.parse.ScannerTaskResult;
+import com.github.dockerjava.api.exception.DockerException;
+import com.github.dockerjava.api.exception.NotFoundException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,13 +88,37 @@ public class ScanJobProcessor {
 
         String token = isLocal(conn) ? null : cipher.require().decrypt(conn.getTokenCiphertext());
 
-        try (ScanWorkspace ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), scan.getId().toString())) {
+        ScanWorkspace ws;
+        try {
+            ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), scan.getId().toString());
+        } catch (RuntimeException e) {
+            // Config error (work root missing / not writable by the worker user): fail once, do not retry.
+            state.failPermanently(jobId, scan.getId(),
+                    "scan work root not writable (" + props.getWorkRoot() + "): " + e.getMessage());
+            return;
+        }
+
+        try (ws) {
             if (!probeProvisionalAccess(repo, conn, token, jobId, scan.getId())) {
                 return;
             }
             Path tokenFile = token == null ? null : ws.writeToken(token);
             ScannerLaunchSpec spec = buildSpec(scan, repo, conn, ws, tokenFile);
-            ScannerLauncher.LaunchResult result = launcher.run(spec);
+
+            ScannerLauncher.LaunchResult result;
+            try {
+                result = launcher.run(spec);
+            } catch (NotFoundException e) {
+                state.failPermanently(jobId, scan.getId(),
+                        "scanner image not found: " + props.getImage() + " (build it: "
+                                + "docker build -t " + props.getImage() + " scanner-image/)");
+                return;
+            } catch (DockerException | IllegalStateException e) {
+                // Daemon unreachable, or the launcher refused to run (e.g. would-be-root): a config error.
+                state.failPermanently(jobId, scan.getId(), "Docker error launching the scanner: "
+                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+                return;
+            }
 
             if (result.timedOut()) {
                 state.failOrRequeue(jobId, scan.getId(), "scanner container timed out");

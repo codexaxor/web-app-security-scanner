@@ -16,6 +16,7 @@ import com.company.secscan.scan.worker.ScannerLaunchSpec;
 import com.company.secscan.scan.worker.ScannerLauncher;
 import com.company.secscan.support.AbstractScanWorkerIT;
 import com.company.secscan.workspace.Workspace;
+import com.github.dockerjava.api.exception.NotFoundException;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -138,6 +139,21 @@ class ScanQueueIT extends AbstractScanWorkerIT {
         state.failOrRequeue(job.getId(), scan.id(), "still failing");
 
         assertThat(jobs.findById(job.getId()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
+        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
+    }
+
+    @Test
+    void aMissingScannerImageFailsTheScanWithoutRetry() {
+        // A configuration error (image missing) must fail once, not burn 3 attempts.
+        Mockito.doThrow(new NotFoundException("no such image")).when(launcher).run(any());
+        ScanView scan = scanService.startManual(seedRepository().getId());
+
+        UUID jobId = claimer.claimBatch(10).get(0);
+        processor.process(jobId);
+
+        ScanJob job = jobs.findById(jobId).orElseThrow();
+        assertThat(job.getState()).isEqualTo(ScanJob.STATE_FAILED);
+        assertThat(job.getAttempts()).isEqualTo(1);
         assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
     }
 
