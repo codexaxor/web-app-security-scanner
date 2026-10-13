@@ -2,6 +2,7 @@ package com.company.secscan.scan.worker;
 
 import com.company.secscan.config.SecretFingerprinterHolder;
 import com.company.secscan.finding.RawFinding;
+import com.company.secscan.issue.ReconcileService;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.Scan;
@@ -38,16 +39,18 @@ public class ScanStateService {
     private final ScanFindingRepository findings;
     private final RepositoryRepository repositories;
     private final SecretFingerprinterHolder fingerprinter;
+    private final ReconcileService reconcile;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
                             ScanFindingRepository findings, RepositoryRepository repositories,
-                            SecretFingerprinterHolder fingerprinter) {
+                            SecretFingerprinterHolder fingerprinter, ReconcileService reconcile) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
         this.findings = findings;
         this.repositories = repositories;
         this.fingerprinter = fingerprinter;
+        this.reconcile = reconcile;
     }
 
     @Transactional
@@ -87,6 +90,10 @@ public class ScanStateService {
             repo.recordScannedSha(parsed.commit());
             repositories.save(repo);
         });
+
+        // Reconcile in the SAME transaction (M3 plan addition 1): findings and their issue-model state commit
+        // atomically, so a worker crash never leaves findings unreconciled. No network I/O inside reconcile.
+        reconcile.reconcile(scanId);
 
         jobs.findById(jobId).ifPresent(job -> {
             job.markDone();

@@ -8,6 +8,7 @@ import com.company.secscan.gitlab.dto.GitLabProject;
 import com.company.secscan.gitlab.dto.GitLabTokenInfo;
 import com.company.secscan.gitlab.dto.GitLabVersion;
 import com.company.secscan.repository.Repository;
+import com.company.secscan.repository.RepositoryEventRecorder;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.workspace.Workspace;
 import java.time.Instant;
@@ -45,16 +46,19 @@ public class GitLabConnectionService {
     private final TokenCipherHolder cipher;
     private final GitLabHostPolicy hostPolicy;
     private final ConnectionTokenWriter tokenWriter;
+    private final RepositoryEventRecorder repositoryEvents;
 
     public GitLabConnectionService(GitLabClient client, GitlabConnectionRepository connections,
                                    RepositoryRepository repositories, TokenCipherHolder cipher,
-                                   GitLabHostPolicy hostPolicy, ConnectionTokenWriter tokenWriter) {
+                                   GitLabHostPolicy hostPolicy, ConnectionTokenWriter tokenWriter,
+                                   RepositoryEventRecorder repositoryEvents) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
         this.cipher = cipher;
         this.hostPolicy = hostPolicy;
         this.tokenWriter = tokenWriter;
+        this.repositoryEvents = repositoryEvents;
     }
 
     /** Tests a connection without persisting anything. */
@@ -177,11 +181,13 @@ public class GitLabConnectionService {
                 repo.reassignTo(target.get().getId());
                 log.info("Reassigned repository {} from connection {} to {} on removal",
                         repo.getId(), conn.getId(), target.get().getId());
+                repositoryEvents.reassigned(repo, conn.getId(), target.get().getId());
                 reassigned++;
             } else {
                 repo.detachAndDeactivate(NO_ACCESSIBLE_CONNECTION);
                 log.info("Deactivated repository {} after removing connection {}: {}",
                         repo.getId(), conn.getId(), NO_ACCESSIBLE_CONNECTION);
+                repositoryEvents.detached(repo, conn.getId(), NO_ACCESSIBLE_CONNECTION);
                 deactivated++;
             }
             repositories.save(repo);

@@ -1,5 +1,6 @@
 package com.company.secscan.scan.worker;
 
+import com.company.secscan.config.SecretFingerprinterHolder;
 import com.github.dockerjava.api.DockerClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,12 +30,15 @@ public class ScannerEnvironmentCheck {
 
     private final DockerClient docker;
     private final ScannerProperties props;
+    private final SecretFingerprinterHolder fingerprinter;
     private final AtomicBoolean ready = new AtomicBoolean(false);
     private volatile boolean loggedNotReady = false;
 
-    public ScannerEnvironmentCheck(DockerClient docker, ScannerProperties props) {
+    public ScannerEnvironmentCheck(DockerClient docker, ScannerProperties props,
+                                   SecretFingerprinterHolder fingerprinter) {
         this.docker = docker;
         this.props = props;
+        this.fingerprinter = fingerprinter;
     }
 
     public boolean isReady() {
@@ -47,6 +51,7 @@ public class ScannerEnvironmentCheck {
         checkWorkRoot(problems);
         checkDaemon(problems);
         checkImage(problems);
+        checkFingerprintKey(problems);
 
         boolean nowReady = problems.isEmpty();
         boolean wasReady = ready.getAndSet(nowReady);
@@ -100,6 +105,18 @@ public class ScannerEnvironmentCheck {
         } catch (RuntimeException e) {
             problems.add("scanner image '" + props.getImage() + "' is not present on the daemon — build it: "
                     + "docker build -t " + props.getImage() + " scanner-image/");
+        }
+    }
+
+    /**
+     * The secret fingerprint key (D-027) must be present and valid before the worker claims jobs. An invalid
+     * key already fails startup (FingerprintConfig); a missing/empty one would let the worker start and only
+     * fail when a secret finding is stored (M2 manual run) — reported as not-ready here instead.
+     */
+    private void checkFingerprintKey(List<String> problems) {
+        if (!fingerprinter.isConfigured()) {
+            problems.add("SECSCAN_FINGERPRINT_KEY is not set (D-027); secret findings cannot be stored. "
+                    + "Generate one with: openssl rand -base64 32");
         }
     }
 
