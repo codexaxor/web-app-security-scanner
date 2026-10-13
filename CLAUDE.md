@@ -38,7 +38,10 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 - Java 21, Spring Boot 3, Gradle (Kotlin DSL) multi-module. Commit `gradle.lockfile`s for our own build.
 - Base package `com.company.secscan`.
 - PostgreSQL 16, Flyway in `app/src/main/resources/db/migration`, named `V{n}__{description}.sql`.
-  Never edit a merged migration; add a new one.
+  Never edit a migration once it has run on any database — including your own local dev DB, not just merged
+  ones. Editing it changes its checksum and Flyway validation then fails on every DB that already applied the
+  old content. Always add a new migration instead (reset the DB only as a last resort, never on the shared/dev
+  `postgres-data` volume).
 - Entities in `app`; pure logic in `core`, unit-testable without Spring.
 - REST under `/api/v1`. DTOs are records. Paginate every list endpoint server-side.
 - Tests: JUnit 5, AssertJ, Testcontainers for Postgres. Scanner integration tests run against `fixtures/`.
