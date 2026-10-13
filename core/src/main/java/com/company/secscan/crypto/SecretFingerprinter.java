@@ -22,6 +22,9 @@ public final class SecretFingerprinter {
 
     private static final int KEY_BYTES = 32;
     private static final String HMAC = "HmacSHA256";
+    /** Fixed label HMAC'd to derive a short, non-reversible id for the key (D-029). */
+    private static final String KEY_ID_LABEL = "secscan-key-id";
+    private static final int KEY_ID_HEX_LEN = 8;
 
     private final byte[] key;
 
@@ -68,10 +71,24 @@ public final class SecretFingerprinter {
         if (sha256Hex == null || sha256Hex.isBlank()) {
             throw new IllegalArgumentException("sha256Hex must not be blank");
         }
+        return hmacHex(sha256Hex);
+    }
+
+    /**
+     * A short, stable, non-reversible id for this key: the first 8 hex characters of
+     * {@code HMAC-SHA256(key, "secscan-key-id")}. Stored with each secret sub-issue so reconcile can detect a
+     * changed {@code SECSCAN_FINGERPRINT_KEY} — which re-fingerprints every secret — and refuse to solve/reopen
+     * secret findings in that scan rather than mass-solving them (D-029). It reveals nothing about the key.
+     */
+    public String keyId() {
+        return hmacHex(KEY_ID_LABEL).substring(0, KEY_ID_HEX_LEN);
+    }
+
+    private String hmacHex(String message) {
         try {
             Mac mac = Mac.getInstance(HMAC);
             mac.init(new SecretKeySpec(key, HMAC));
-            byte[] out = mac.doFinal(sha256Hex.getBytes(StandardCharsets.UTF_8));
+            byte[] out = mac.doFinal(message.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(out);
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new IllegalStateException("HMAC-SHA256 is unavailable", e);
