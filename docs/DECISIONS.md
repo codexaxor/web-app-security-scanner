@@ -219,7 +219,11 @@ Decision: `workspace_id` on every business table from day one.
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
 
-## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted)
+## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
 Decision: Merge M1b without its manual real-GitLab check; run it as part of the M2 manual run.
 Consequences: M2's report must include the M1b project-connection check (group + project, dedup, reassignment).
+DONE (2026-10-14): Manual run completed against gitlab.celloscope.net (19.4.1-ee) over VPN — M2 real scan and
+the M1b group/project/dedup/reassignment check both passed. Recorded in `docs/reports/M2.md`
+("Manual verification (2026-10-14)"). Also confirmed the D-025 manual path (token one-time-file + `https`
+clone): scan completed, exit 0, no token in logs, no leftover container.
