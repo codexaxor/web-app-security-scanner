@@ -51,8 +51,30 @@ Prerequisites: JDK 21, Docker, Node 20+. Build with the committed Gradle wrapper
 own Gradle/JDK version does not matter.
 
 ```bash
-cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY: openssl rand -base64 32
+cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY and SECSCAN_FINGERPRINT_KEY: openssl rand -base64 32
 ```
+
+**Build the scanner image** (the worker launches it per scan; the tag must match `ScannerProperties.image`):
+
+```bash
+docker build -t secscan-scanner:8.21.2 scanner-image/
+```
+
+**Set up the scan work root** (where per-scan token files and `/out` live). The worker launches each scanner
+container on the *host* Docker daemon, so the work root must be the **same absolute path** on the host and
+inside the worker, and the worker must run as a user that can write it:
+
+```bash
+# In .env (see .env.example):
+#   SECSCAN_SCAN_WORK_ROOT=/var/lib/secscan/scans
+#   SECSCAN_UID=$(id -u)   SECSCAN_GID=$(id -g)        # the worker runs as this host user
+#   DOCKER_GID=$(stat -c %g /var/run/docker.sock)      # so the worker can reach the Docker socket
+sudo mkdir -p /var/lib/secscan/scans
+sudo chown "$(id -u):$(id -g)" /var/lib/secscan/scans
+```
+
+The worker self-checks this on startup (work root writable, Docker reachable, scanner image present) and logs a
+clear error and refuses to claim jobs until it is fixed.
 
 **Run everything (postgres + api + worker + ui) in containers:**
 
@@ -62,6 +84,18 @@ docker compose up --build        # ui on :5173, api on :8080; worker is non-web 
 
 If a system Postgres already owns host port 5432, set `POSTGRES_HOST_PORT` in `.env` (e.g. `15432`) before
 `docker compose up`; the app containers still reach Postgres at `postgres:5432` inside the compose network.
+
+**Compose smoke test (isolated — never touches your dev database):**
+
+```bash
+scripts/compose-smoke.sh          # build + up + wait for api health + tear down
+```
+
+> ⚠️ Smoke/scratch compose runs **must** use a separate compose project — `docker compose -p secscan-smoke …` —
+> which namespaces the volume (`secscan-smoke_postgres-data`) away from the default project. **Never run
+> `docker compose down -v` on the default project**: it deletes the shared `postgres-data` volume and wipes your
+> dev database. `scripts/compose-smoke.sh` enforces this (own project, ephemeral host ports, teardown scoped to
+> `-p secscan-smoke`).
 
 **Dev loop (hot reload, Postgres in a container, app and UI on the host):**
 
@@ -75,8 +109,8 @@ cd ui && npm ci && npm run dev
 
 The first admin is created on first `api` startup when `app_user` is empty and
 `SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set (see `.env.example`).
-`/actuator/health` is public; `/api/**` requires HTTP Basic. The scanner image (`secscan-scanner`) arrives
-in M2.
+`/actuator/health` is public; `/api/**` requires HTTP Basic. For the host dev loop the worker runs as your
+own user, so the work root just needs to exist and be writable by you.
 
 ## Contributing
 
@@ -115,6 +149,14 @@ GitLab tokens are encrypted at rest with `SECSCAN_ENCRYPTION_KEY` (AES-256-GCM).
 32 bytes (`openssl rand -base64 32`); an invalid key fails startup, and saving a connection without a key
 returns a clear error (tokens are never stored unencrypted). **Changing `SECSCAN_ENCRYPTION_KEY` makes already
 stored tokens unreadable — you must reconnect GitLab.** Key rotation is a later feature.
+
+Secret findings are stored as a **keyed** hash: `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY, the
+scanner's SHA-256 of the value)`, plus a masked preview — never the value and never the bare SHA-256 (D-027).
+Keying the digest with a server-held key means a copy of the database alone cannot confirm a guessed secret.
+`SECSCAN_FINGERPRINT_KEY` must base64-decode to 32 bytes (`openssl rand -base64 32`); an invalid key fails
+startup, and the worker returns a clear error if it must store a secret finding while the key is unset.
+**Changing it changes all future secret fingerprints**, so secrets seen before the change reopen as new on the
+next scan.
 
 Outbound GitLab calls are restricted to the hosts in `SECSCAN_GITLAB_ALLOWED_HOSTS` (comma-separated; empty =
 deny all) and must use `https` (loopback hosts may use `http` for a local or mock GitLab) — an SSRF guard

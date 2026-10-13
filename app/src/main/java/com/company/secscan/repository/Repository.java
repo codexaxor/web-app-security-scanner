@@ -130,6 +130,11 @@ public class Repository {
         return reassignedAt != null;
     }
 
+    /** Records the commit of the most recent successful scan (used by M9's skip-unchanged). */
+    public void recordScannedSha(String sha) {
+        this.lastScannedSha = sha;
+    }
+
     public void refreshFromGitlab(String pathWithNamespace, String defaultBranch, List<String> languages) {
         this.pathWithNamespace = pathWithNamespace;
         this.defaultBranch = defaultBranch;
