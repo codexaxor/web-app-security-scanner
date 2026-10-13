@@ -28,8 +28,9 @@ RUN set -eu; \
     rm /tmp/gitleaks.tar.gz; \
     gitleaks version
 
+COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh
-RUN chmod 0555 /usr/local/bin/run-scan.sh
+RUN chmod 0555 /usr/local/bin/secscan-lib.sh /usr/local/bin/run-scan.sh
 
 # A non-root default user; the launcher overrides this to the host uid that owns the bind-mounted /out so the
 # container can write there while still running non-root (never uid 0).

@@ -5,13 +5,15 @@
 #   - The token (if any) arrives only as a read-only file, never an env var or the clone URL, and is sent as a
 #     basic-auth header via a git config file on tmpfs — never on the command line, never logged.
 #   - Gitleaks runs UNREDACTED into tmpfs /work, but the raw secret NEVER leaves this container: we compute a
-#     SHA-256 and a 4-char preview here and write only those to /out. /work is tmpfs and dies with the container.
+#     SHA-256 and a masked preview here and write only those to /out. /work is tmpfs and dies with the container.
 #   - Tracing is never enabled (no `set -x`), and no secret value is ever echoed.
 #
 # Inputs (env):   SCAN_CLONE_URL (required), SCAN_BRANCH (optional), SCAN_CLONE_DEPTH (default 1)
 # Inputs (files): /run/secrets/gitlab-token (optional, read-only)
 # Outputs (/out): result.json (manifest: commit, tool versions, per-scanner status) and secrets.json (findings)
 set -eu
+
+. /usr/local/bin/secscan-lib.sh
 
 WORK=/work
 OUT=/out
@@ -60,22 +62,28 @@ fi
 COMMIT="$(git -C "$CHECKOUT" rev-parse HEAD)"
 
 # --- Secret scan (Gitleaks, unredacted into tmpfs) ---
+# `gitleaks dir` does NOT follow symlinks unless --follow-symlinks is passed (which we deliberately do not):
+# a symlink in the repo must never make the scanner read a file outside the checkout.
+# --exit-code 2 is returned when leaks are found, so we can tell "leaks found" (2) apart from a real gitleaks
+# error (gitleaks returns 1 on error); 0 = clean. The JSON report is written to a file only (never stdout).
 START="$(date +%s)"
 set +e
-gitleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 1 >"$WORK/gitleaks.log" 2>&1
+gitleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 2 >"$WORK/gitleaks.log" 2>&1
 GL_EXIT=$?
 set -e
 END="$(date +%s)"
 DUR_MS=$(( (END - START) * 1000 ))
 
-# Exit 0 (no leaks) and exit 1 (leaks found) are both successful runs; any other code is a scanner failure.
-if [ "$GL_EXIT" -eq 0 ] || [ "$GL_EXIT" -eq 1 ]; then
+# A run is successful only when gitleaks exited 0 (clean) or 2 (leaks found) AND wrote a valid JSON array
+# report. Any other exit code, or a missing/invalid report, is a scanner failure (status "failed", exit 20).
+if { [ "$GL_EXIT" -eq 0 ] || [ "$GL_EXIT" -eq 2 ]; } \
+        && [ -f "$RAW" ] && jq -e 'type == "array"' "$RAW" >/dev/null 2>&1; then
     SECRET_STATUS="ok"
 else
     SECRET_STATUS="failed"
 fi
 
-# --- Sanitize: compute SHA-256 + 4-char preview here; the raw secret never reaches /out ---
+# --- Sanitize: compute SHA-256 + masked preview here; the raw secret never reaches /out ---
 : > "$WORK/secrets.ndjson"
 if [ "$SECRET_STATUS" = "ok" ] && [ -s "$RAW" ]; then
     # Emit tab-separated rows with the secret base64-encoded, so arbitrary bytes survive the read loop. File
@@ -87,7 +95,7 @@ if [ "$SECRET_STATUS" = "ok" ] && [ -s "$RAW" ]; then
         [ -n "$rule" ] || continue
         secret="$(printf '%s' "$secret_b64" | base64 -d)"
         hash="$(printf '%s' "$secret" | sha256sum | cut -d' ' -f1)"
-        preview="$(printf '%s' "$secret" | cut -c1-4)"
+        preview="$(secret_preview "$secret")"
         unset secret
         jq -nc --arg r "$rule" --arg f "$file" --argjson l "${line:-0}" \
                --arg h "$hash" --arg p "$preview" \
