@@ -50,4 +50,19 @@ class GitLabHostPolicyTest {
         assertThat(policy.isAllowedHost("other.example.com")).isTrue();
         assertThat(policy.isAllowedHost("nope.example.com")).isFalse();
     }
+
+    @Test
+    void startupSummaryWarnsWhenEmpty() {
+        assertThat(new GitLabHostPolicy(Set.of()).startupSummary())
+                .contains("EMPTY")
+                .contains("denied")
+                .contains("SECSCAN_GITLAB_ALLOWED_HOSTS");
+    }
+
+    @Test
+    void startupSummaryListsConfiguredHosts() {
+        assertThat(new GitLabHostPolicy("gitlab.celloscope.net").startupSummary())
+                .contains("1 host(s)")
+                .contains("gitlab.celloscope.net");
+    }
 }
