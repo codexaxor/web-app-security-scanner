@@ -34,7 +34,11 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 class ScanQueueIT extends AbstractScanWorkerIT {
 
     private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
-    private static final String HASH = "91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d";
+    // The scanner container emits this plain SHA-256; the worker stores HMAC-SHA256(fingerprint key, it) (D-027).
+    private static final String CONTAINER_SHA = "91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d";
+    // HMAC-SHA256 of CONTAINER_SHA under the test's all-zero 32-byte key (see AbstractScanWorkerIT).
+    private static final String EXPECTED_STORED_HASH =
+            "ba0975bc436fa197ac88b7f761f60b5faba43d99110db898fb06b547a7a289e4";
 
     @MockBean
     ScannerLauncher launcher;
@@ -64,8 +68,8 @@ class ScanQueueIT extends AbstractScanWorkerIT {
     void stubASuccessfulScannerByDefault() {
         Mockito.when(launcher.run(any())).thenAnswer(inv -> {
             ScannerLaunchSpec spec = inv.getArgument(0);
-            ScanLaunchStub.writeSecretFinding(spec.outDir(), "deadbeefcommit", HASH, "AKIA");
-            return new ScannerLauncher.LaunchResult(1, false, "stub log");
+            ScanLaunchStub.writeSecretFinding(spec.outDir(), "deadbeefcommit", CONTAINER_SHA, "AKIA");
+            return new ScannerLauncher.LaunchResult(2, false, "stub log");
         });
     }
 
@@ -92,7 +96,8 @@ class ScanQueueIT extends AbstractScanWorkerIT {
         assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_COMPLETED);
         assertThat(findings.findByScanId(scan.id())).singleElement().satisfies(f -> {
             assertThat(f.getType()).isEqualTo(ScanFinding.TYPE_SECRET);
-            assertThat(f.getSecretHash()).isEqualTo(HASH);
+            // The bare container SHA-256 is never stored; the stored hash is the keyed HMAC (D-027).
+            assertThat(f.getSecretHash()).isEqualTo(EXPECTED_STORED_HASH).isNotEqualTo(CONTAINER_SHA);
             assertThat(f.getSecretPreview()).isEqualTo("AKIA");
         });
         assertThat(tasks.findByScanId(scan.id())).singleElement()
@@ -100,6 +105,28 @@ class ScanQueueIT extends AbstractScanWorkerIT {
         assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_DONE);
         assertThat(repositories.findById(repo.getId()).orElseThrow().getLastScannedSha())
                 .isEqualTo("deadbeefcommit");
+    }
+
+    @Test
+    void aScannerFailureMakesTheScanPartialWithNoFindings() {
+        // The clone succeeded but gitleaks failed (bad exit code / invalid report): run-scan.sh reports the
+        // task as "failed" and records no findings. doReturn so the @BeforeEach answer is not re-invoked.
+        Mockito.doAnswer(inv -> {
+            ScannerLaunchSpec spec = inv.getArgument(0);
+            ScanLaunchStub.writeScannerFailure(spec.outDir(), "deadbeefcommit");
+            return new ScannerLauncher.LaunchResult(20, false, "gitleaks: unexpected error");
+        }).when(launcher).run(any());
+        ScanView scan = scanService.startManual(seedRepository().getId());
+
+        UUID jobId = claimer.claimBatch(10).get(0);
+        processor.process(jobId);
+
+        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_PARTIAL);
+        assertThat(tasks.findByScanId(scan.id())).singleElement()
+                .satisfies(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_FAILED));
+        assertThat(findings.findByScanId(scan.id())).isEmpty();
+        // A completed-with-failures scan still closes out its job (it ran; the failed scanner closes nothing).
+        assertThat(jobs.findById(jobId).orElseThrow().getState()).isEqualTo(ScanJob.STATE_DONE);
     }
 
     @Test

@@ -40,6 +40,7 @@ public abstract class AbstractScanWorkerIT {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("SECSCAN_ENCRYPTION_KEY", () -> TEST_KEY_B64);
+        registry.add("SECSCAN_FINGERPRINT_KEY", () -> TEST_KEY_B64);
         registry.add("SECSCAN_GITLAB_ALLOWED_HOSTS", () -> "localhost");
         // Drive the pipeline from the test; no background claiming.
         registry.add("secscan.scanner.polling-enabled", () -> "false");

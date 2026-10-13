@@ -35,9 +35,15 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
 
     private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
     // sha256 of the fixture's fake key AKIA3K7HB9QO2PX5TL4D (computed in the scanner container, not here).
-    private static final String EXPECTED_HASH =
+    private static final String CONTAINER_SHA =
             "91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d";
+    // What the worker actually stores: HMAC-SHA256(fingerprint key, CONTAINER_SHA) under the test's all-zero
+    // 32-byte key (SECSCAN_FINGERPRINT_KEY in AbstractScanWorkerIT) — the bare digest is never persisted (D-027).
+    private static final String EXPECTED_STORED_HASH =
+            "ba0975bc436fa197ac88b7f761f60b5faba43d99110db898fb06b547a7a289e4";
     private static final String RAW_KEY = "AKIA3K7HB9QO2PX5TL4D";
+    // The AWS secret-access-key value also present in the fixture; neither it nor RAW_KEY may reach the log.
+    private static final String RAW_SECRET_PART = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
     static Path workRoot;
     static Path fixtureRepo;
@@ -105,15 +111,19 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
             assertThat(f.getType()).isEqualTo(ScanFinding.TYPE_SECRET);
             assertThat(f.getRuleId()).isEqualTo("aws-access-token");
             assertThat(f.getFilePath()).isEqualTo("config/application.properties");
-            assertThat(f.getSecretHash()).isEqualTo(EXPECTED_HASH);
-            assertThat(f.getSecretPreview()).isEqualTo("AKIA");
-            // The raw secret is never stored (CLAUDE.md security rules).
-            assertThat(f.getSecretHash()).isNotEqualTo(RAW_KEY);
-            assertThat(f.getSecretPreview()).isNotEqualTo(RAW_KEY);
+            // Stored hash is the keyed HMAC, never the raw key and never the bare container SHA-256 (D-027).
+            assertThat(f.getSecretHash()).isEqualTo(EXPECTED_STORED_HASH);
+            assertThat(f.getSecretHash()).isNotEqualTo(RAW_KEY).isNotEqualTo(CONTAINER_SHA);
+            assertThat(f.getSecretPreview()).isEqualTo("AKIA").isNotEqualTo(RAW_KEY);
         });
 
-        assertThat(tasks.findByScanId(scan.id())).singleElement()
-                .satisfies(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK));
+        assertThat(tasks.findByScanId(scan.id())).singleElement().satisfies(t -> {
+            assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK);
+            // The stored log excerpt must never contain the raw secret or any part of it (point 7).
+            assertThat(t.getLogExcerpt() == null ? "" : t.getLogExcerpt())
+                    .doesNotContain(RAW_KEY)
+                    .doesNotContain(RAW_SECRET_PART);
+        });
         assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_DONE);
 
         // Container is gone afterwards.

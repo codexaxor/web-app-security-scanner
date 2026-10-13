@@ -35,6 +35,8 @@ class ScannerContainerConfigTest {
         assertThat(hc.getSecurityOpts()).contains("no-new-privileges");
         assertThat(hc.getPidsLimit()).isEqualTo(512L);
         assertThat(hc.getMemory()).isEqualTo(4L * 1024 * 1024 * 1024);
+        // memorySwap == memory disables swap, so the memory limit is a hard ceiling.
+        assertThat(hc.getMemorySwap()).isEqualTo(4L * 1024 * 1024 * 1024);
         assertThat(hc.getNanoCPUs()).isEqualTo(2_000_000_000L);
         assertThat(hc.getTmpFs().get("/work")).contains("noexec").contains("nosuid").contains("size=2g");
     }

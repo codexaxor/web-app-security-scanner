@@ -4,7 +4,8 @@ import com.company.secscan.logging.LogSanitizer;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
-import com.github.dockerjava.api.exception.DockerClientException;
+import com.github.dockerjava.api.command.WaitContainerResultCallback;
+import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.model.Frame;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -52,16 +53,28 @@ public class ScannerLauncher {
         String id = container.getId();
         try {
             docker.startContainerCmd(id).exec();
-            Integer exitCode = docker.waitContainerCmd(id).start()
-                    .awaitStatusCode(spec.timeout().toSeconds(), TimeUnit.SECONDS);
-            String logs = captureLogs(id);
-            return new LaunchResult(exitCode, false, logs);
-        } catch (DockerClientException timeoutOrError) {
-            // awaitStatusCode throws on timeout; kill the container and report a timed-out run.
-            log.warn("Scanner container for scan {} did not finish within {}s; killing it",
-                    spec.scanId(), spec.timeout().toSeconds());
+            WaitContainerResultCallback wait = docker.waitContainerCmd(id).start();
+            // awaitCompletion returns false iff the wait really elapsed — the ONLY thing we treat as a timeout.
+            boolean finished = wait.awaitCompletion(spec.timeout().toSeconds(), TimeUnit.SECONDS);
+            if (!finished) {
+                log.warn("Scanner container for scan {} did not finish within {}s; killing it",
+                        spec.scanId(), spec.timeout().toSeconds());
+                safelyKill(id);
+                return new LaunchResult(null, true, captureLogs(id));
+            }
+            Integer exitCode = wait.awaitStatusCode();
+            return new LaunchResult(exitCode, false, captureLogs(id));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for scanner container for scan {}; killing it", spec.scanId());
             safelyKill(id);
-            return new LaunchResult(null, true, captureLogs(id));
+            throw new IllegalStateException("Interrupted while waiting for the scanner container", e);
+        } catch (DockerException e) {
+            // A real Docker error (daemon/client failure), NOT a wait timeout: a scanner failure, logged
+            // clearly and rethrown so the worker records it as such. timedOut is never set for this case.
+            log.error("Scanner container for scan {} failed with a Docker error ({}): {}",
+                    spec.scanId(), e.getClass().getSimpleName(), e.getMessage());
+            throw e;
         } finally {
             safelyRemove(id);
         }

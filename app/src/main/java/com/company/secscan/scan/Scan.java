@@ -15,8 +15,10 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * One scan: a single repository scanned at a single commit. Its lifecycle is {@code queued → running →
- * completed | partial | failed}. {@code partial} means at least one scanner failed or timed out while another
- * succeeded; a failed scanner never closes its findings (that rule lands in M3's reconcile).
+ * completed | partial | failed}. Once the clone succeeds the scan has run, so (SPEC step 12) it is
+ * {@code completed} when every scanner succeeded and {@code partial} when any scanner failed or timed out;
+ * {@code failed} is reserved for a scan that could not run at all (clone failure, container timeout, missing
+ * result, or an infrastructure/config error). A failed scanner never closes its findings (M3's reconcile).
  */
 @Entity
 @Table(name = "scan")

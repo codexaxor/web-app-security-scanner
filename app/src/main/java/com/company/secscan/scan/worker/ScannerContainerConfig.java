@@ -46,6 +46,9 @@ final class ScannerContainerConfig {
                 .withSecurityOpts(List.of("no-new-privileges"))
                 .withPidsLimit(s.pidsLimit())
                 .withMemory(s.memoryBytes())
+                // memorySwap == memory disables swap entirely, so the scanner cannot evade the memory limit by
+                // swapping; the memory cap is a hard ceiling.
+                .withMemorySwap(s.memoryBytes())
                 .withNanoCPUs((long) (s.cpus() * 1_000_000_000L))
                 .withTmpFs(Map.of(WORK_MOUNT, workOpts))
                 .withBinds(binds)

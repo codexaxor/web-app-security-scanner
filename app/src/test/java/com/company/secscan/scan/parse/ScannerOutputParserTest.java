@@ -32,7 +32,7 @@ class ScannerOutputParserTest {
                 .satisfies(t -> {
                     assertThat(t.name()).isEqualTo("secret");
                     assertThat(t.succeeded()).isTrue();
-                    assertThat(t.exitCode()).isEqualTo(1);
+                    assertThat(t.exitCode()).isEqualTo(2);
                 });
         assertThat(parsed.findings()).singleElement().satisfies(f -> {
             assertThat(f.type()).isEqualTo(RawFinding.TYPE_SECRET);

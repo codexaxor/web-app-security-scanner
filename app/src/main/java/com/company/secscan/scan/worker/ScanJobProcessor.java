@@ -208,9 +208,13 @@ public class ScanJobProcessor {
     }
 
     private static String deriveTerminalStatus(ParsedScan parsed) {
+        // Reached only after a successful clone, so the scan did run. Per SPEC step 12 ("scan marked complete,
+        // or partial if any scanner failed"): all scanners ok → completed; any scanner failed → partial
+        // (a failed scanner never closes its findings — M3). FAILED here only defends the impossible
+        // "no scanner ran at all" case; clone/timeout/infra failures are handled before we get here.
         long ok = parsed.tasks().stream().filter(ScannerTaskResult::succeeded).count();
         int total = parsed.tasks().size();
-        if (total == 0 || ok == 0) {
+        if (total == 0) {
             return Scan.STATUS_FAILED;
         }
         return ok == total ? Scan.STATUS_COMPLETED : Scan.STATUS_PARTIAL;

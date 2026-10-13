@@ -1,5 +1,6 @@
 package com.company.secscan.scan.worker;
 
+import com.company.secscan.config.SecretFingerprinterHolder;
 import com.company.secscan.finding.RawFinding;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
@@ -36,14 +37,17 @@ public class ScanStateService {
     private final ScanTaskRepository tasks;
     private final ScanFindingRepository findings;
     private final RepositoryRepository repositories;
+    private final SecretFingerprinterHolder fingerprinter;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
-                            ScanFindingRepository findings, RepositoryRepository repositories) {
+                            ScanFindingRepository findings, RepositoryRepository repositories,
+                            SecretFingerprinterHolder fingerprinter) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
         this.findings = findings;
         this.repositories = repositories;
+        this.fingerprinter = fingerprinter;
     }
 
     @Transactional
@@ -73,6 +77,10 @@ public class ScanStateService {
         }
         for (RawFinding f : parsed.findings()) {
             findings.save(toEntity(scan.getWorkspaceId(), scanId, repositoryId, f));
+        }
+        if (!parsed.findings().isEmpty()) {
+            log.debug("Scan {} stored {} secret finding(s) (hashes keyed with HMAC-SHA256)",
+                    scanId, parsed.findings().size());
         }
 
         repositories.findById(repositoryId).ifPresent(repo -> {
@@ -131,9 +139,12 @@ public class ScanStateService {
         jobs.save(job);
     }
 
-    private static ScanFinding toEntity(UUID workspaceId, UUID scanId, UUID repositoryId, RawFinding f) {
+    private ScanFinding toEntity(UUID workspaceId, UUID scanId, UUID repositoryId, RawFinding f) {
         // M2 produces only secret findings; other types are added with their scanners (M4/M6).
+        // The container emits a plain SHA-256; we key it with HMAC-SHA256 here so the bare digest is never
+        // persisted (D-027). Throws a clear error if SECSCAN_FINGERPRINT_KEY is missing.
+        String keyedHash = fingerprinter.require().hash(f.secretHash());
         return ScanFinding.secret(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.line(),
-                f.secretHash(), f.secretPreview(), f.toolSeverity());
+                keyedHash, f.secretPreview(), f.toolSeverity());
     }
 }

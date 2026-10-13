@@ -12,8 +12,9 @@ import java.util.UUID;
 /**
  * A raw normalized finding from one scanner (D-024, pipeline step 7). Stored per scan with no dedup or
  * reconcile — M3 turns these into {@code issue_group}/{@code sub_issue} with stable fingerprints. A secret
- * finding carries only {@code secretHash} (SHA-256) and {@code secretPreview} (first 4 chars); the raw value is
- * never stored (CLAUDE.md security rules).
+ * finding carries only {@code secretHash} (a keyed HMAC-SHA256 of the container's SHA-256, D-027) and
+ * {@code secretPreview} (masked); the raw value, and even the bare SHA-256, are never stored (CLAUDE.md
+ * security rules).
  */
 @Entity
 @Table(name = "scan_finding")
@@ -93,8 +94,9 @@ public class ScanFinding {
     }
 
     /**
-     * A secret finding. {@code secretHash} is the SHA-256 of the secret value and {@code secretPreview} its
-     * first 4 characters — the value itself is never passed in or stored.
+     * A secret finding. {@code secretHash} is the keyed HMAC-SHA256 of the container's SHA-256 of the secret
+     * (D-027) and {@code secretPreview} is a masked preview — the value itself, and the bare digest, are never
+     * passed in or stored.
      */
     public static ScanFinding secret(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
                                      String filePath, Integer line, String secretHash, String secretPreview,

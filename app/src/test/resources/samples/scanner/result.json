@@ -10,7 +10,7 @@
     {
       "name": "secret",
       "status": "ok",
-      "exitCode": 1,
+      "exitCode": 2,
       "durationMs": 0,
       "findingsFile": "secrets.json"
     }
