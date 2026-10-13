@@ -27,6 +27,20 @@ public final class ScanLaunchStub {
         }
     }
 
+    /** Writes a result.json for a successful secret scanner that found nothing (empty secrets.json). */
+    public static void writeNoFindings(Path outDir, String commit) {
+        try {
+            Files.writeString(outDir.resolve("secrets.json"), "[]");
+            Files.writeString(outDir.resolve("result.json"), "{"
+                    + "\"schemaVersion\":1,\"cloneFailed\":false,\"commit\":\"" + commit + "\","
+                    + "\"toolVersions\":{\"git\":\"2.47.3\",\"gitleaks\":\"8.21.2\"},"
+                    + "\"scanners\":[{\"name\":\"secret\",\"status\":\"ok\",\"exitCode\":0,\"durationMs\":5,"
+                    + "\"findingsFile\":\"secrets.json\"}]}");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     /**
      * Writes a result.json for a run where the clone succeeded but the secret scanner FAILED (as run-scan.sh
      * emits when gitleaks exits with an unexpected code or writes an invalid report): status "failed", no
