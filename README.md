@@ -51,7 +51,7 @@ Prerequisites: JDK 21, Docker, Node 20+. Build with the committed Gradle wrapper
 own Gradle/JDK version does not matter.
 
 ```bash
-cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY: openssl rand -base64 32
+cp .env.example .env            # set SECSCAN_ENCRYPTION_KEY and SECSCAN_FINGERPRINT_KEY: openssl rand -base64 32
 ```
 
 **Build the scanner image** (the worker launches it per scan; the tag must match `ScannerProperties.image`):
@@ -149,6 +149,14 @@ GitLab tokens are encrypted at rest with `SECSCAN_ENCRYPTION_KEY` (AES-256-GCM).
 32 bytes (`openssl rand -base64 32`); an invalid key fails startup, and saving a connection without a key
 returns a clear error (tokens are never stored unencrypted). **Changing `SECSCAN_ENCRYPTION_KEY` makes already
 stored tokens unreadable — you must reconnect GitLab.** Key rotation is a later feature.
+
+Secret findings are stored as a **keyed** hash: `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY, the
+scanner's SHA-256 of the value)`, plus a masked preview — never the value and never the bare SHA-256 (D-027).
+Keying the digest with a server-held key means a copy of the database alone cannot confirm a guessed secret.
+`SECSCAN_FINGERPRINT_KEY` must base64-decode to 32 bytes (`openssl rand -base64 32`); an invalid key fails
+startup, and the worker returns a clear error if it must store a secret finding while the key is unset.
+**Changing it changes all future secret fingerprints**, so secrets seen before the change reopen as new on the
+next scan.
 
 Outbound GitLab calls are restricted to the hosts in `SECSCAN_GITLAB_ALLOWED_HOSTS` (comma-separated; empty =
 deny all) and must use `https` (loopback hosts may use `http` for a local or mock GitLab) — an SSRF guard

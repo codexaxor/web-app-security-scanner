@@ -14,6 +14,20 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-027 Keyed secret fingerprint (HMAC-SHA256) instead of a bare SHA-256 (2026-10-14, accepted)
+Context: the scanner container computes a SHA-256 of each secret value (the raw value never leaves the
+container). Storing that bare digest would let anyone with a copy of the database confirm a guessed secret by
+hashing candidates offline — the digest is unsalted and the input space for many secret types is small.
+Decision: the worker stores `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY, the container's SHA-256)`, hex.
+The key is a 32-byte base64 value in `SECSCAN_FINGERPRINT_KEY`; an invalid key fails startup (like
+`SECSCAN_ENCRYPTION_KEY`), and a missing key makes storing a secret finding fail with a clear error rather than
+ever persisting the bare digest. The masked preview is computed in the container (first 4 chars only when the
+secret is ≥ 12 chars, else `****`).
+Consequences: a stolen database alone cannot confirm guessed secrets; the fingerprint stays stable and
+comparable for M3 reconcile. The key must be backed up with the database — changing it re-fingerprints every
+secret, so secrets seen before the change reopen as new on the next scan. Two keys (encryption + fingerprint)
+to manage.
+
 ## D-026 Docker socket mounted into the worker only (2026-10-13, accepted)
 Context: the worker launches scanner containers against the host Docker daemon, which requires the daemon
 socket; mounting it grants host-root-equivalent power to whatever holds it.

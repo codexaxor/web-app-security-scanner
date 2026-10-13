@@ -46,6 +46,7 @@ create table scan_task (
 );
 
 create index idx_scan_task_scan on scan_task (scan_id);
+create index idx_scan_task_workspace on scan_task (workspace_id);
 
 -- The queue. state drives claiming; attempts/run_after drive retry with backoff; locked_by/locked_at are the
 -- lease (a stale lease is requeued). Exactly one job per scan.
@@ -65,9 +66,11 @@ create table scan_job (
 -- The claim query filters on state + run_after; the lease sweep filters on state + locked_at.
 create index idx_scan_job_claim on scan_job (state, run_after);
 create index idx_scan_job_lease on scan_job (state, locked_at);
+create index idx_scan_job_workspace on scan_job (workspace_id);
 
 -- Raw normalized findings (D-024, pipeline step 7). One row per finding per scan; no dedup/reconcile yet
--- (that is M3). Secret findings store only a SHA-256 hash and a 4-char masked preview, never the value
+-- (that is M3). Secret findings store only a keyed hash (secret_hash = HMAC-SHA256(fingerprint key, the
+-- container's SHA-256), D-027) and a masked preview, never the value and never the bare digest
 -- (CLAUDE.md security rules).
 create table scan_finding (
     id                uuid        primary key,
@@ -92,3 +95,4 @@ create table scan_finding (
 
 create index idx_scan_finding_scan on scan_finding (scan_id);
 create index idx_scan_finding_repository on scan_finding (repository_id);
+create index idx_scan_finding_workspace on scan_finding (workspace_id);

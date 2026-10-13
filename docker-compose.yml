@@ -30,6 +30,7 @@ services:
       SECSCAN_DB_USER: ${POSTGRES_USER:-secscan}
       SECSCAN_DB_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
       SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY:-}
+      SECSCAN_FINGERPRINT_KEY: ${SECSCAN_FINGERPRINT_KEY:-}
       SECSCAN_BOOTSTRAP_ADMIN_EMAIL: ${SECSCAN_BOOTSTRAP_ADMIN_EMAIL:-}
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${SECSCAN_BOOTSTRAP_ADMIN_PASSWORD:-}
       SECSCAN_GITLAB_ALLOWED_HOSTS: ${SECSCAN_GITLAB_ALLOWED_HOSTS:-}
@@ -56,6 +57,8 @@ services:
       SECSCAN_DB_USER: ${POSTGRES_USER:-secscan}
       SECSCAN_DB_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
       SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY:-}
+      # Keys each secret finding's hash before storage (D-027); required by the worker to store secret findings.
+      SECSCAN_FINGERPRINT_KEY: ${SECSCAN_FINGERPRINT_KEY:-}
       # Scan work root — see the bind below; MUST be the same absolute path on host and in the worker.
       SECSCAN_SCANNER_WORK_ROOT: ${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}
     # The worker runs non-web (no HTTP server), so it publishes no port.
