@@ -38,7 +38,10 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 - Java 21, Spring Boot 3, Gradle (Kotlin DSL) multi-module. Commit `gradle.lockfile`s for our own build.
 - Base package `com.company.secscan`.
 - PostgreSQL 16, Flyway in `app/src/main/resources/db/migration`, named `V{n}__{description}.sql`.
-  Never edit a merged migration; add a new one.
+  Never edit a migration once it has run on any database — including your own local dev DB, not just merged
+  ones. Editing it changes its checksum and Flyway validation then fails on every DB that already applied the
+  old content. Always add a new migration instead (reset the DB only as a last resort, never on the shared/dev
+  `postgres-data` volume).
 - Entities in `app`; pure logic in `core`, unit-testable without Spring.
 - REST under `/api/v1`. DTOs are records. Paginate every list endpoint server-side.
 - Tests: JUnit 5, AssertJ, Testcontainers for Postgres. Scanner integration tests run against `fixtures/`.
@@ -49,14 +52,19 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 ```
 docker compose up --build          # full stack: postgres + api + worker + ui
 docker compose up -d postgres      # just the DB, for the dev loop below
+scripts/compose-smoke.sh           # isolated compose smoke (own project `secscan-smoke`, own volume)
 ./gradlew build
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
-docker build -t secscan-scanner scanner-image/
+docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag must match ScannerProperties.image
 cd ui && npm ci && npm run dev
 ```
 
 Update this section whenever a command changes.
+
+Never run `docker compose down -v` (or any volume-deleting command) on the default project — it wipes the
+developer's `postgres-data` dev database. Any smoke/scratch compose run uses a separate project
+(`docker compose -p secscan-smoke …`), i.e. `scripts/compose-smoke.sh`.
 
 ## Domain rules — never break
 

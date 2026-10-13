@@ -1,5 +1,6 @@
 package com.company.secscan.gitlab;
 
+import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Arrays;
@@ -7,6 +8,8 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -20,6 +23,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class GitLabHostPolicy {
 
+    private static final Logger log = LoggerFactory.getLogger(GitLabHostPolicy.class);
+
     private final Set<String> allowedHosts;
 
     @Autowired
@@ -29,6 +34,30 @@ public class GitLabHostPolicy {
 
     public GitLabHostPolicy(Set<String> allowedHosts) {
         this.allowedHosts = Set.copyOf(allowedHosts);
+    }
+
+    /**
+     * Logs the effective allowlist at startup so an operator can confirm what SecScan may reach — and is warned
+     * loudly when the list is empty, since that denies every outbound GitLab call (no connection test, listing,
+     * polling or clone can succeed). Never logs anything but hostnames.
+     */
+    @PostConstruct
+    void logStartupConfiguration() {
+        if (allowedHosts.isEmpty()) {
+            log.warn("{}", startupSummary());
+        } else {
+            log.info("{}", startupSummary());
+        }
+    }
+
+    /** Human-readable one-line summary of the allowlist for the startup log (hosts only, never secrets). */
+    String startupSummary() {
+        if (allowedHosts.isEmpty()) {
+            return "GitLab outbound allowlist (SECSCAN_GITLAB_ALLOWED_HOSTS) is EMPTY — all outbound GitLab calls "
+                    + "will be denied (D-018). Set it to the GitLab host(s) SecScan may reach.";
+        }
+        return "GitLab outbound allowlist (SECSCAN_GITLAB_ALLOWED_HOSTS): " + allowedHosts.size()
+                + " host(s): " + allowedHosts;
     }
 
     private static Set<String> parse(String csv) {

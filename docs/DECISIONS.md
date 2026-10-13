@@ -14,6 +14,73 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-027 Keyed secret fingerprint (HMAC-SHA256) instead of a bare SHA-256 (2026-10-14, accepted)
+Context: the scanner container computes a SHA-256 of each secret value (the raw value never leaves the
+container). Storing that bare digest would let anyone with a copy of the database confirm a guessed secret by
+hashing candidates offline — the digest is unsalted and the input space for many secret types is small.
+Decision: the worker stores `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY, the container's SHA-256)`, hex.
+The key is a 32-byte base64 value in `SECSCAN_FINGERPRINT_KEY`; an invalid key fails startup (like
+`SECSCAN_ENCRYPTION_KEY`), and a missing key makes storing a secret finding fail with a clear error rather than
+ever persisting the bare digest. The masked preview is computed in the container (first 4 chars only when the
+secret is ≥ 12 chars, else `****`).
+Consequences: a stolen database alone cannot confirm guessed secrets; the fingerprint stays stable and
+comparable for M3 reconcile. The key must be backed up with the database — changing it re-fingerprints every
+secret, so secrets seen before the change reopen as new on the next scan. Two keys (encryption + fingerprint)
+to manage.
+
+## D-026 Docker socket mounted into the worker only (2026-10-13, accepted)
+Context: the worker launches scanner containers against the host Docker daemon, which requires the daemon
+socket; mounting it grants host-root-equivalent power to whatever holds it.
+Decision: the Docker socket is mounted into the **worker only**, never into a scanner container (CLAUDE.md).
+The worker never passes the socket, a token env var, or the socket path to a scanner. This is accepted for
+local, single-tenant mode; before any deployment we revisit with a rootless/again-sandboxed launcher or a
+remote build service (tracked with OD-5, worker hosting).
+Consequences: simple local operation; a compromise of the worker process is host-root-equivalent until we
+harden the launch path for deployment.
+
+## D-025 Fixture clone path and deferred secret-scan coverage (2026-10-13, accepted)
+Context: M2's done-when must be an automated test, but there is no production GitLab token/VPN in this
+environment (as in M1/M1b).
+Decision: the automated `ScanPipelineIT` clones a synthetic local repository over `file://` (mounted read-only
+at `/src`) with `network=none`, exercising clone → scan → sanitize → parse → persist → container-removed
+offline. The token-via-one-time-file + `https` clone path is verified in the manual real-GitLab run, folded in
+with the M1b check deferred by D-021. Full git-history secret scanning (spec: full clone for the first secrets
+scan of a repo) is deferred — M2 scans the checked-out tree with `gitleaks dir` — and tracked in Known gaps.
+Consequences: a self-contained, offline done-when; the token/https and full-history paths are covered manually
+in M2 and automated later.
+
+## D-024 Raw scan_finding store ahead of the issue model (2026-10-13, accepted)
+Context: M2 must "store a finding", but the dedup/issue model (`issue_group`/`sub_issue`, fingerprints,
+reconcile) is M3.
+Decision: M2 persists one `scan_finding` row per normalized finding per scan (pipeline step 7's `RawFinding`),
+with no dedup or status. M3's reconcile consumes these into `issue_group`/`sub_issue` with stable fingerprints.
+Secret findings store only a SHA-256 hash and a 4-char preview (never the value).
+Consequences: M2 is self-contained and testable before the issue model exists; `scan_finding` remains the
+normalizer's output that reconcile reads.
+
+## D-022 docker-java for the scanner launcher (2026-10-13, accepted)
+Context: the worker must create/start/wait/log/remove hardened containers on the host daemon from Java.
+Decision: use `com.github.docker-java:docker-java-core` + `docker-java-transport-httpclient5`, pinned to
+**3.4.2** to match Spring Boot 3.3.x's managed `httpclient5` (5.3.x); docker-java 3.5+ requires httpclient5
+5.4+. TLS to the daemon is never disabled.
+Consequences: a new runtime dependency (worker only); the version is coupled to the Spring Boot BOM's
+httpclient5 and is revisited when Boot is upgraded.
+
+## D-023 Scanner image: Alpine (digest-pinned) + Gitleaks (checksum-pinned); in-container secret sanitize (2026-10-13, accepted)
+Context: M2 needs a disposable scanner container with git + a secrets scanner, and secret findings must never
+store or leak the raw value (CLAUDE.md security rules).
+Decision: `scanner-image/` builds from `alpine:3.21` pinned by digest, adds git + jq, and installs Gitleaks
+8.21.2 verified against its published SHA-256 (per-arch). `run-scan.sh` clones one commit into tmpfs `/work`,
+runs `gitleaks dir --no-banner --report-format json` (exit 0 or 1 = success; any other code = scanner failure),
+then computes the SHA-256 and 4-char preview of each secret **inside the container** and writes only those,
+with the repo-relative file path and start line, to `/out/secrets.json` — the raw value never leaves the
+container. A manifest `/out/result.json` carries the cloned commit, tool versions and per-scanner status. The
+token, when present, arrives only as a read-only file and is sent as a basic-auth header via a tmpfs git config,
+never in the URL/env/argv/logs (D-014). apk package versions are not individually pinned (follow the pinned
+Alpine branch) — see Known gaps.
+Consequences: reproducible scanner builds; the strongest secret-handling posture (raw secret dies with the
+container); OSV-Scanner/Opengrep/Checkov are added to this same image in M4/M6.
+
 ## D-020 Multiple connections, project-mode targets, and reassignment on removal (2026-10-12, accepted)
 Context: M1b lets a workspace connect a whole group and/or several single projects; removing a connection must
 not lose repositories (scan history hangs off them from M2) and must keep a clone path resolvable.
@@ -166,7 +233,11 @@ Decision: `workspace_id` on every business table from day one.
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
 
-## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted)
+## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
 Decision: Merge M1b without its manual real-GitLab check; run it as part of the M2 manual run.
 Consequences: M2's report must include the M1b project-connection check (group + project, dedup, reassignment).
+DONE (2026-10-14): Manual run completed against gitlab.celloscope.net (19.4.1-ee) over VPN — M2 real scan and
+the M1b group/project/dedup/reassignment check both passed. Recorded in `docs/reports/M2.md`
+("Manual verification (2026-10-14)"). Also confirmed the D-025 manual path (token one-time-file + `https`
+clone): scan completed, exit 0, no token in logs, no leftover container.

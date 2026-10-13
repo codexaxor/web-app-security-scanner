@@ -1,0 +1,91 @@
+package com.company.secscan.scan;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.company.secscan.gitlab.GitlabConnection;
+import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.repository.Repository;
+import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.support.AbstractGitLabIT;
+import com.company.secscan.workspace.Workspace;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.server.ResponseStatusException;
+
+/** Start Scan / listing behavior: one in-flight scan per repo, dedup on double-start, inactive repos rejected. */
+class ScanApiIT extends AbstractGitLabIT {
+
+    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
+
+    @Autowired
+    ScanService service;
+    @Autowired
+    ScanRepository scans;
+    @Autowired
+    ScanJobRepository jobs;
+    @Autowired
+    RepositoryRepository repositories;
+    @Autowired
+    GitlabConnectionRepository connections;
+
+    private Repository seedRepository() {
+        GitlabConnection conn = connections.save(GitlabConnection.forGroup(
+                WORKSPACE, "http://localhost", "svc", 42L, "ct", "read_api,read_repository", null));
+        return repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
+                List.of("Java")));
+    }
+
+    @Test
+    void startCreatesAQueuedScanAndJob() {
+        Repository repo = seedRepository();
+
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scan.status()).isEqualTo(Scan.STATUS_QUEUED);
+        assertThat(scan.trigger()).isEqualTo(Scan.TRIGGER_MANUAL);
+        ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
+        assertThat(job.getState()).isEqualTo(ScanJob.STATE_QUEUED);
+        assertThat(job.getAttempts()).isZero();
+    }
+
+    @Test
+    void startingAgainReturnsTheSameInFlightScan() {
+        Repository repo = seedRepository();
+
+        ScanView first = service.startManual(repo.getId());
+        ScanView second = service.startManual(repo.getId());
+
+        assertThat(second.id()).isEqualTo(first.id());
+        assertThat(scans.findByWorkspaceIdAndRepositoryIdAndStatusIn(
+                WORKSPACE, repo.getId(), List.of(Scan.STATUS_QUEUED, Scan.STATUS_RUNNING))).hasSize(1);
+    }
+
+    @Test
+    void inactiveRepositoryCannotBeScanned() {
+        Repository repo = seedRepository();
+        repo.deactivate("NO_ACCESSIBLE_CONNECTION");
+        repositories.save(repo);
+
+        assertThatThrownBy(() -> service.startManual(repo.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("inactive");
+    }
+
+    @Test
+    void listAndDetailReflectTheScan() {
+        Repository repo = seedRepository();
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(service.listForRepository(repo.getId(), 0, 50).content())
+                .extracting(ScanView::id).containsExactly(scan.id());
+
+        var detail = service.get(scan.id());
+        assertThat(detail.scan().id()).isEqualTo(scan.id());
+        assertThat(detail.tasks()).isEmpty();
+        assertThat(detail.findingCount()).isZero();
+    }
+}
