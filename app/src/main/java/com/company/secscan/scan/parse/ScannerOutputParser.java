@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,6 +25,9 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ScannerOutputParser {
+
+    private static final Logger log = LoggerFactory.getLogger(ScannerOutputParser.class);
+    static final String MASKED = "****";
 
     private final ObjectMapper mapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -60,9 +65,29 @@ public class ScannerOutputParser {
         }
         List<RawFinding> out = new ArrayList<>(entries.length);
         for (SecretEntry e : entries) {
-            out.add(RawFinding.secret(e.ruleId, e.file, e.startLine, e.secretHash, e.preview, null));
+            out.add(RawFinding.secret(e.ruleId, e.file, e.startLine, e.secretHash, safePreview(e.preview), null));
         }
         return out;
+    }
+
+    /**
+     * Defense in depth against a preview that leaks part of the secret: the container must emit at most 4
+     * characters with no whitespace/newline (see {@code secscan-lib.sh}). If it ever doesn't, clamp to the
+     * fully-masked {@code ****} and warn WITHOUT the offending value, so a bad preview can never reach the DB,
+     * the API or the logs.
+     */
+    static String safePreview(String preview) {
+        if (preview == null || preview.equals(MASKED)) {
+            return preview;
+        }
+        boolean tooLong = preview.length() > 4;
+        boolean hasWhitespace = preview.chars().anyMatch(Character::isWhitespace);
+        if (tooLong || hasWhitespace) {
+            log.warn("Scanner emitted an invalid secret preview (length={}, hasWhitespace={}); clamping to '{}'.",
+                    preview.length(), hasWhitespace, MASKED);
+            return MASKED;
+        }
+        return preview;
     }
 
     private <T> T read(Path file, Class<T> type) {

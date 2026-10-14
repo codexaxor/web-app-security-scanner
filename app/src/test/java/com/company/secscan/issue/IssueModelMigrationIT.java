@@ -62,6 +62,25 @@ class IssueModelMigrationIT {
     }
 
     @Test
+    void v9ScrubReplacesLeakyPreviewsButKeepsValidOnes() {
+        UUID repo = seedRepository(303L, "svc/scrub");
+        UUID group = insertGroup(repo, "secret|private-key");
+        UUID leaky = insertSubIssueWithPreview(group, repo, "fp-leaky", "----\nMIIE\nX3N1");
+        UUID tooLong = insertSubIssueWithPreview(group, repo, "fp-long", "ABCDE");
+        UUID ok = insertSubIssueWithPreview(group, repo, "fp-ok", "AKIA");
+
+        // Re-run V9's scrub predicate (it ran at startup on empty tables; here we prove it masks the right rows).
+        String scrub = "update sub_issue set secret_preview = '****' where secret_preview is not null "
+                + "and (char_length(secret_preview) > 4 or secret_preview like E'%\\n%' "
+                + "or secret_preview like E'%\\r%')";
+        jdbc.update(scrub);
+
+        assertThat(previewOf(leaky)).isEqualTo("****");
+        assertThat(previewOf(tooLong)).isEqualTo("****");
+        assertThat(previewOf(ok)).isEqualTo("AKIA");
+    }
+
+    @Test
     void groupKeyIsUniquePerRepository() {
         UUID repo = seedRepository(302L, "svc/gk");
         insertGroup(repo, "secret|aws-access-token");
@@ -82,6 +101,19 @@ class IssueModelMigrationIT {
         jdbc.update("insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, "
                         + "fingerprint) values (?, ?, ?, ?, 'secret', 'secret', ?)",
                 UUID.randomUUID(), WORKSPACE, groupId, repoId, fingerprint);
+    }
+
+    private UUID insertSubIssueWithPreview(UUID groupId, UUID repoId, String fingerprint, String preview) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, "
+                        + "fingerprint, secret_preview) values (?, ?, ?, ?, 'secret', 'secret', ?, ?)",
+                id, WORKSPACE, groupId, repoId, fingerprint, preview);
+        return id;
+    }
+
+    private String previewOf(UUID subIssueId) {
+        return jdbc.queryForObject("select secret_preview from sub_issue where id = ?", String.class,
+                subIssueId);
     }
 
     private UUID seedRepository(long projectId, String path) {

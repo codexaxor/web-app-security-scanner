@@ -64,6 +64,35 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void aLeakyPreviewIsClampedToTheMask(@TempDir Path outDir) throws Exception {
+        copyResource("/samples/scanner/result.json", outDir.resolve("result.json"));
+        // A preview the (old/buggy) container might emit for a multi-line PEM key: first 4 chars of every line.
+        String leaky = "----\\nMIIE\\nX3N1\\nhkiG";
+        Files.writeString(outDir.resolve("secrets.json"), "[{"
+                + "\"ruleId\":\"private-key\",\"file\":\"config/id_rsa\",\"startLine\":1,"
+                + "\"secretHash\":\"hash\",\"preview\":\"" + leaky + "\"}]");
+
+        ParsedScan parsed = parser.parse(outDir);
+
+        assertThat(parsed.findings()).singleElement()
+                .satisfies(f -> assertThat(f.secretPreview()).isEqualTo("****"));
+    }
+
+    @Test
+    void safePreviewClampsTooLongOrWhitespaceButKeepsValidPreviews() {
+        // At most 4 chars, no whitespace/newline → kept.
+        assertThat(ScannerOutputParser.safePreview("AKIA")).isEqualTo("AKIA");
+        assertThat(ScannerOutputParser.safePreview("ab")).isEqualTo("ab");
+        assertThat(ScannerOutputParser.safePreview(null)).isNull();
+        // Longer than 4 → masked.
+        assertThat(ScannerOutputParser.safePreview("AKIAX")).isEqualTo("****");
+        // Contains a newline / CR / space → masked (never leak a line fragment).
+        assertThat(ScannerOutputParser.safePreview("--\n-")).isEqualTo("****");
+        assertThat(ScannerOutputParser.safePreview("a b")).isEqualTo("****");
+        assertThat(ScannerOutputParser.safePreview("a\r")).isEqualTo("****");
+    }
+
+    @Test
     void cloneFailureYieldsNoFindings(@TempDir Path outDir) throws Exception {
         Files.writeString(outDir.resolve("result.json"),
                 "{\"schemaVersion\":1,\"cloneFailed\":true,\"error\":\"clone failed (exit 128)\",\"scanners\":[]}");
