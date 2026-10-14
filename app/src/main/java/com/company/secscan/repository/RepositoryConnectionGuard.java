@@ -21,9 +21,12 @@ public class RepositoryConnectionGuard {
     static final String NO_ACCESSIBLE_CONNECTION = "NO_ACCESSIBLE_CONNECTION";
 
     private final RepositoryRepository repositories;
+    private final RepositoryEventRecorder repositoryEvents;
 
-    public RepositoryConnectionGuard(RepositoryRepository repositories) {
+    public RepositoryConnectionGuard(RepositoryRepository repositories,
+                                     RepositoryEventRecorder repositoryEvents) {
         this.repositories = repositories;
+        this.repositoryEvents = repositoryEvents;
     }
 
     /** The connection worked: a provisional reassignment onto it is now confirmed. */
@@ -33,6 +36,7 @@ public class RepositoryConnectionGuard {
             if (repo.isProvisional()) {
                 repo.confirmConnection();
                 repositories.save(repo);
+                repositoryEvents.confirmed(repo, connectionId);
             }
         }
     }
@@ -44,6 +48,7 @@ public class RepositoryConnectionGuard {
             if (repo.isProvisional()) {
                 repo.deactivate(NO_ACCESSIBLE_CONNECTION);
                 repositories.save(repo);
+                repositoryEvents.deactivated(repo, connectionId, NO_ACCESSIBLE_CONNECTION);
                 log.info("Deactivated repository {}: reassignment to connection {} has no access ({})",
                         repo.getId(), connectionId, NO_ACCESSIBLE_CONNECTION);
             }

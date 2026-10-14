@@ -32,6 +32,23 @@ class MaskPreviewScriptTest {
         assertThat(preview("")).isEqualTo("****");
     }
 
+    @Test
+    void multiLineSecretPreviewsTheWholeStringNotEveryLine() throws Exception {
+        // A PEM private key is multi-line. The preview must be the first 4 chars of the WHOLE secret, never the
+        // first 4 of each line (the old `cut -c1-4` leaked ~4 chars per line).
+        String pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\nhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----";
+        String out = preview(pem);
+        assertThat(out).isEqualTo("----");
+        assertThat(out).doesNotContain("\n").doesNotContain("\r").hasSizeLessThanOrEqualTo(4);
+    }
+
+    @Test
+    void secretStartingWithANewlineNeverLeaksANewlineIntoThePreview() throws Exception {
+        // Even if the first characters include a newline, the preview must stay single-line (<= 4 chars).
+        String out = preview("\nSECRETvalue1234");
+        assertThat(out).doesNotContain("\n").doesNotContain("\r").hasSizeLessThanOrEqualTo(4);
+    }
+
     private static String preview(String secret) throws IOException, InterruptedException {
         // sh -c '<script>' sh <secret>  →  $1 is the secret inside the script.
         Process p = new ProcessBuilder(
