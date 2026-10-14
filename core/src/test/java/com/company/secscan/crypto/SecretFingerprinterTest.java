@@ -50,4 +50,17 @@ class SecretFingerprinterTest {
         SecretFingerprinter fp = SecretFingerprinter.fromBase64Key(ZERO_KEY_B64);
         assertThatThrownBy(() -> fp.hash(" ")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void keyIdIsShortStableAndKeySpecific() {
+        SecretFingerprinter fp = SecretFingerprinter.fromBase64Key(ZERO_KEY_B64);
+        String id = fp.keyId();
+        assertThat(id).hasSize(8).matches("[0-9a-f]{8}");
+        // Stable for the same key, and it is a prefix of HMAC(key, "secscan-key-id"), not of a secret hash.
+        assertThat(fp.keyId()).isEqualTo(id);
+
+        byte[] other = new byte[32];
+        other[0] = 1;
+        assertThat(new SecretFingerprinter(other).keyId()).isNotEqualTo(id);
+    }
 }

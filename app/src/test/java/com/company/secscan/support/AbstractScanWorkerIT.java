@@ -1,6 +1,10 @@
 package com.company.secscan.support;
 
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.IssueGroupRepository;
+import com.company.secscan.issue.SubIssueRepository;
+import com.company.secscan.issue.TriageEventRepository;
+import com.company.secscan.repository.RepositoryEventRepository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanJobRepository;
@@ -58,9 +62,21 @@ public abstract class AbstractScanWorkerIT {
     private RepositoryRepository repositoriesForCleanup;
     @Autowired
     private GitlabConnectionRepository connectionsForCleanup;
+    @Autowired
+    private TriageEventRepository triageEventsForCleanup;
+    @Autowired
+    private SubIssueRepository subIssuesForCleanup;
+    @Autowired
+    private IssueGroupRepository issueGroupsForCleanup;
+    @Autowired
+    private RepositoryEventRepository repositoryEventsForCleanup;
 
     @BeforeEach
     void cleanDatabase() {
+        triageEventsForCleanup.deleteAllInBatch();
+        subIssuesForCleanup.deleteAllInBatch();
+        issueGroupsForCleanup.deleteAllInBatch();
+        repositoryEventsForCleanup.deleteAllInBatch();
         scanFindingsForCleanup.deleteAllInBatch();
         scanTasksForCleanup.deleteAllInBatch();
         scanJobsForCleanup.deleteAllInBatch();

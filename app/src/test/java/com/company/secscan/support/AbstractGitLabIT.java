@@ -1,6 +1,10 @@
 package com.company.secscan.support;
 
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.IssueGroupRepository;
+import com.company.secscan.issue.SubIssueRepository;
+import com.company.secscan.issue.TriageEventRepository;
+import com.company.secscan.repository.RepositoryEventRepository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanJobRepository;
@@ -58,13 +62,26 @@ public abstract class AbstractGitLabIT {
     private ScanJobRepository scanJobsForCleanup;
     @Autowired
     private ScanRepository scansForCleanup;
+    @Autowired
+    private TriageEventRepository triageEventsForCleanup;
+    @Autowired
+    private SubIssueRepository subIssuesForCleanup;
+    @Autowired
+    private IssueGroupRepository issueGroupsForCleanup;
+    @Autowired
+    private RepositoryEventRepository repositoryEventsForCleanup;
 
     /**
-     * The container is shared across IT classes, so clean the tables before each test in FK-safe order (scans
-     * reference repositories, which reference connections). Runs before each subclass's own {@code @BeforeEach}.
+     * The container is shared across IT classes, so clean the tables before each test in FK-safe order (issue
+     * model and repository events reference scans/repositories, which reference connections). Runs before each
+     * subclass's own {@code @BeforeEach}.
      */
     @BeforeEach
     void cleanDatabase() {
+        triageEventsForCleanup.deleteAllInBatch();
+        subIssuesForCleanup.deleteAllInBatch();
+        issueGroupsForCleanup.deleteAllInBatch();
+        repositoryEventsForCleanup.deleteAllInBatch();
         scanFindingsForCleanup.deleteAllInBatch();
         scanTasksForCleanup.deleteAllInBatch();
         scanJobsForCleanup.deleteAllInBatch();

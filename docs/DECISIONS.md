@@ -14,6 +14,44 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-029 The secret fingerprint key must never change once secrets are stored (2026-10-14, accepted)
+Context: a secret sub-issue's fingerprint is derived from `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY,
+container SHA-256)` (D-027). Changing the key re-fingerprints every secret, so on the next scan the old
+sub-issues would all look "missing" (solved) and the same secrets would reappear as new findings — a mass
+false-solve plus duplicates.
+Decision: each secret sub-issue stores a short `key_id` = first 8 hex chars of
+`HMAC-SHA256(key, "secscan-key-id")` (non-reversible, reveals nothing about the key). During reconcile the
+secret sub-issues are **partitioned by `key_id`** (M3 review refinement): those under the current key id
+reconcile normally (solve/reopen), while those under any other key id are **frozen** — never solved, never
+reopened, no `triage_event` — so the whole secret scanner is not stopped, only the superseded rows. A single
+error names the count of frozen rows and the stale key id(s) (all non-reversible), never a secret. Operators
+must clean up the old-key rows manually; bulk ignore arrives in M7. The key must be backed up and rotated with
+care; rotation re-fingerprints all secrets and is a later, explicit feature. `key_id` is never returned by the
+API.
+Consequences: a changed key degrades gracefully — old secrets are frozen (kept, not mass-solved) while secrets
+under the new key keep reconciling normally — instead of corrupting the feed or freezing all secret
+reconciliation; operators get a loud, counted signal and a manual cleanup step. One extra stored column per
+sub-issue.
+
+## D-028 Repository lifecycle events in a dedicated table, not triage_event (2026-10-14, accepted)
+Context: D-020's connection reassignment/deactivation currently only logs; M3 must persist it. The options were
+a new table or `triage_event` with a nullable `sub_issue_id`.
+Decision: a dedicated `repository_event` table (`workspace_id`, `repository_id`, `event_type` in
+REASSIGNED/DETACHED/DEACTIVATED/CONFIRMED/REATTACHED, `from_connection_id`, `to_connection_id`, `reason_code`,
+`detail`, `at`). `triage_event` stays specifically the issue-status audit trail (domain rule 4: from/to status,
+reason code, actor, scan) and is not diluted with events that have no issue, status or sub-issue. The
+`from`/`to` connection ids are plain uuids, not FKs, because the "from" connection is typically deleted at the
+moment the event is written. A `RepositoryEventRecorder` writes these at the D-020 sites (connection removal,
+and the connection guard's confirm/deactivate), within the same transaction as the state change.
+Consequences: both audit trails stay purpose-specific and queryable; one new table.
+Note (M3 review, accepted for now, revisit in M10): `triage_event.sub_issue_id`/`group_id` are `ON DELETE
+CASCADE`, so hard-deleting a sub-issue/group would also delete its audit trail; and the issue-model FKs are
+single-column (`id` only), so the database does not enforce that a sub-issue/triage_event shares its subject's
+`workspace_id` (the server always writes a consistent `workspace_id`). Both are safe in M3 — nothing deletes
+issue rows (M7 ignore only flips status) and the deployment is single-workspace — and are left as-is to avoid a
+schema change now. Revisit before the first hard delete (repository deletion / tenant teardown) or multi-tenant
+auth: switch the audit FKs to `ON DELETE RESTRICT`/`SET NULL` and add composite `(workspace_id, id)` FKs.
+
 ## D-027 Keyed secret fingerprint (HMAC-SHA256) instead of a bare SHA-256 (2026-10-14, accepted)
 Context: the scanner container computes a SHA-256 of each secret value (the raw value never leaves the
 container). Storing that bare digest would let anyone with a copy of the database confirm a guessed secret by
@@ -100,7 +138,7 @@ inactive repository is reattached to the connection that next selects it (cleari
 state). The tie-break prefers the most-recently-verified connection and treats a null `last_verified_at` as
 oldest (existing rows are backfilled to `created_at` in V5). A concurrent duplicate `create` is caught via the
 partial unique index and returned as `CONNECTION_EXISTS`, not a 500. Reassignments/deactivations are logged (a
-persistent `triage_event` arrives with M3).
+persistent `repository_event` row arrives with M3 — D-028, not `triage_event`).
 Consequences: additive, reversible connection management; a repo can briefly point at a connection that cannot
 reach it, resolved on first use; delete works even with the VPN down or a token expired.
 
