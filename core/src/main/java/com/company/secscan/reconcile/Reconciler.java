@@ -15,14 +15,16 @@ import java.util.Set;
  * <p>Rules:
  * <ul>
  *   <li>Incoming fingerprint with no existing sub-issue &rarr; <b>new open</b>.</li>
- *   <li>Incoming fingerprint matching a {@code solved} sub-issue &rarr; <b>reopened</b> (unless its scanner is
- *       reopen-suppressed, e.g. a changed secret fingerprint key — then left untouched).</li>
+ *   <li>Incoming fingerprint matching a {@code solved} sub-issue &rarr; <b>reopened</b>.</li>
  *   <li>Incoming fingerprint matching an {@code open} or {@code ignored} sub-issue &rarr; <b>seen</b> (last-seen
  *       bumped, no status change, no event). An ignored finding stays ignored when seen again.</li>
  *   <li>An {@code open} sub-issue whose scanner ran successfully this scan ({@code solvableScanners}) and whose
  *       fingerprint is absent from this scan &rarr; <b>solved</b>. A sub-issue whose scanner failed, timed out
  *       or did not run is left untouched (a failed scanner never closes its findings). An ignored sub-issue is
  *       never solved.</li>
+ *   <li>Any fingerprint in {@code frozenFingerprints} is a superseded identity (e.g. a secret fingerprinted
+ *       under a now-replaced key; D-029) &rarr; left <b>completely untouched</b>: never solved, reopened or
+ *       seen, and it appears in no bucket. Other findings in the same scan reconcile normally.</li>
  * </ul>
  */
 public final class Reconciler {
@@ -50,14 +52,14 @@ public final class Reconciler {
     }
 
     /**
-     * @param incoming              findings this scan produced
-     * @param existing              sub-issues already stored for the repository
-     * @param solvableScanners      scanners whose task succeeded this scan and may close missing findings
-     * @param reopenSuppressedScanners scanners that must not reopen a solved match this scan (e.g. secret when
-     *                              the fingerprint key changed)
+     * @param incoming            findings this scan produced
+     * @param existing            sub-issues already stored for the repository
+     * @param solvableScanners    scanners whose task succeeded this scan and may close missing findings
+     * @param frozenFingerprints  existing fingerprints to leave completely untouched this scan (superseded
+     *                            identities, e.g. secrets under a replaced fingerprint key; D-029)
      */
     public Plan reconcile(List<Incoming> incoming, List<Existing> existing, Set<String> solvableScanners,
-                          Set<String> reopenSuppressedScanners) {
+                          Set<String> frozenFingerprints) {
         Map<String, Existing> existingByFp = new HashMap<>();
         for (Existing e : existing) {
             existingByFp.put(e.fingerprint(), e);
@@ -71,20 +73,25 @@ public final class Reconciler {
         List<String> reopened = new ArrayList<>();
         List<String> seen = new ArrayList<>();
         for (Incoming i : incoming) {
+            if (frozenFingerprints.contains(i.fingerprint())) {
+                continue; // superseded identity: untouched, no event (also never reopened on a chance match)
+            }
             Existing e = existingByFp.get(i.fingerprint());
             if (e == null) {
                 newOpen.add(i.fingerprint());
-            } else if (Existing.STATUS_SOLVED.equals(e.status())
-                    && !reopenSuppressedScanners.contains(i.scanner())) {
+            } else if (Existing.STATUS_SOLVED.equals(e.status())) {
                 reopened.add(i.fingerprint());
             } else {
-                // open, ignored, or a solved match whose scanner is reopen-suppressed: no status change.
+                // open or ignored: no status change.
                 seen.add(i.fingerprint());
             }
         }
 
         List<String> solved = new ArrayList<>();
         for (Existing e : existing) {
+            if (frozenFingerprints.contains(e.fingerprint())) {
+                continue; // superseded identity: never solved.
+            }
             if (Existing.STATUS_OPEN.equals(e.status())
                     && solvableScanners.contains(e.scanner())
                     && !incomingByFp.containsKey(e.fingerprint())) {

@@ -12,8 +12,8 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** All sub-issues for a repository — reconcile loads these to compare against a scan's findings. */
     List<SubIssue> findByWorkspaceIdAndRepositoryId(UUID workspaceId, UUID repositoryId);
 
-    /** All sub-issues in a group — used when recomputing the group's derived status. */
-    List<SubIssue> findByGroupId(UUID groupId);
+    /** All sub-issues in a group — used when recomputing the group's derived status. Workspace-scoped (rule 1). */
+    List<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId);
 
     Page<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId, Pageable pageable);
 }

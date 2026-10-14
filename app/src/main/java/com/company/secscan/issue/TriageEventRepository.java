@@ -7,5 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 /** Spring Data store for {@link TriageEvent} (the issue-status audit trail). */
 public interface TriageEventRepository extends JpaRepository<TriageEvent, UUID> {
 
-    List<TriageEvent> findBySubIssueIdOrderByAtAsc(UUID subIssueId);
+    /** The audit trail for one sub-issue, oldest first. Workspace-scoped (CLAUDE.md domain rule 1). */
+    List<TriageEvent> findByWorkspaceIdAndSubIssueIdOrderByAtAsc(UUID workspaceId, UUID subIssueId);
 }

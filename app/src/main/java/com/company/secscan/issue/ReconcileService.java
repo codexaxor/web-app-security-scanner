@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,8 +70,8 @@ public class ReconcileService {
         }
         // Stale guard: a newer scan of this repository has already been applied — do not let this older view
         // re-open or re-solve anything. Mark it reconciled (processed) and stop.
-        if (scans.existsByRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(
-                scan.getRepositoryId(), scan.getCreatedAt())) {
+        if (scans.existsByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(
+                scan.getWorkspaceId(), scan.getRepositoryId(), scan.getCreatedAt())) {
             log.info("Scan {} is stale (a newer scan of repository {} is already reconciled); skipping reconcile.",
                     scanId, scan.getRepositoryId());
             scan.markReconciled();
@@ -106,14 +107,14 @@ public class ReconcileService {
             subByFp.put(s.getFingerprint(), s);
         }
 
-        Set<String> reopenSuppressed = secretKeyGuard(existingSubs, solvableScanners);
+        Set<String> frozenFingerprints = secretKeyGuard(existingSubs);
 
         List<Existing> existing = new ArrayList<>(existingSubs.size());
         for (SubIssue s : existingSubs) {
             existing.add(new Existing(s.getFingerprint(), s.getScanner(), s.getStatus()));
         }
 
-        Plan plan = reconciler.reconcile(incoming, existing, solvableScanners, reopenSuppressed);
+        Plan plan = reconciler.reconcile(incoming, existing, solvableScanners, frozenFingerprints);
 
         Set<UUID> touchedGroups = new HashSet<>();
         for (String fp : plan.newOpen()) {
@@ -152,7 +153,7 @@ public class ReconcileService {
         }
 
         for (UUID groupId : touchedGroups) {
-            recomputeGroupStatus(groupId);
+            recomputeGroupStatus(workspaceId, groupId);
         }
 
         scan.markReconciled();
@@ -162,34 +163,39 @@ public class ReconcileService {
     }
 
     /**
-     * D-029: if the stored secret sub-issues were fingerprinted with a different key than the current one, the
-     * {@code SECSCAN_FINGERPRINT_KEY} has changed and every secret fingerprint has shifted. Solving/reopening
-     * secret findings would then mass-solve the old ones and duplicate them. Log a clear error and suppress
-     * solving/reopening for the secret scanner this scan (new findings are still recorded as new opens).
+     * D-029: a changed {@code SECSCAN_FINGERPRINT_KEY} re-fingerprints every secret, so a stored secret
+     * sub-issue whose {@code key_id} differs from the current one is a <em>superseded</em> identity. Rather than
+     * freeze the whole secret scanner (which would also stop current-key secrets reconciling), this partitions:
+     * secret sub-issues under the current key id reconcile normally (solve/reopen), while those under any other
+     * key id are frozen — never solved, never reopened, no event — by returning their fingerprints as the
+     * reconciler's frozen set. A single error names only the count and the key id(s) (both non-reversible),
+     * never a secret. Operators must clean up the old-key rows manually (bulk ignore arrives in M7); the key
+     * must never change once secrets are stored.
      *
-     * @return the set of scanners whose reopen must be suppressed (mutates {@code solvableScanners} to drop them)
+     * @return the fingerprints to freeze this scan (empty when the key is unchanged or unconfigured)
      */
-    private Set<String> secretKeyGuard(List<SubIssue> existingSubs, Set<String> solvableScanners) {
+    private Set<String> secretKeyGuard(List<SubIssue> existingSubs) {
         if (!fingerprinter.isConfigured()) {
             return Set.of();
         }
-        boolean anyStoredKeyId = existingSubs.stream().anyMatch(s -> s.getKeyId() != null);
-        if (!anyStoredKeyId) {
-            return Set.of();
-        }
         String currentKeyId = fingerprinter.require().keyId();
-        boolean keyChanged = existingSubs.stream()
-                .filter(s -> s.getKeyId() != null)
-                .anyMatch(s -> !currentKeyId.equals(s.getKeyId()));
-        if (!keyChanged) {
-            return Set.of();
+        Set<String> frozen = new HashSet<>();
+        Set<String> staleKeyIds = new TreeSet<>();
+        for (SubIssue s : existingSubs) {
+            if (ScanFinding.TYPE_SECRET.equals(s.getType())
+                    && s.getKeyId() != null && !currentKeyId.equals(s.getKeyId())) {
+                frozen.add(s.getFingerprint());
+                staleKeyIds.add(s.getKeyId());
+            }
         }
-        log.error("SECSCAN_FINGERPRINT_KEY has changed (current key id {} differs from stored secret "
-                + "fingerprints); NOT solving or reopening secret findings in this scan to avoid mass-solving "
-                + "re-fingerprinted secrets. The key must never change once secrets are stored (D-029).",
-                currentKeyId);
-        solvableScanners.remove(ScanTask.SCANNER_SECRET);
-        return Set.of(ScanTask.SCANNER_SECRET);
+        if (!frozen.isEmpty()) {
+            log.error("SECSCAN_FINGERPRINT_KEY has changed: {} secret sub-issue(s) were fingerprinted under key "
+                    + "id(s) {} but the current key id is {}. Those rows are frozen (never solved or reopened) to "
+                    + "avoid mass-solving re-fingerprinted secrets; secrets under the current key reconcile "
+                    + "normally. Clean up the old-key rows manually (bulk ignore arrives in M7); the key must "
+                    + "never change once secrets are stored (D-029).", frozen.size(), staleKeyIds, currentKeyId);
+        }
+        return frozen;
     }
 
     private IssueGroup upsertGroup(UUID workspaceId, UUID repositoryId, ScanFinding f) {
@@ -247,14 +253,14 @@ public class ReconcileService {
         }
     }
 
-    private void recomputeGroupStatus(UUID groupId) {
-        List<SubIssue> subs = subIssues.findByGroupId(groupId);
+    private void recomputeGroupStatus(UUID workspaceId, UUID groupId) {
+        List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, groupId);
         boolean anyOpen = subs.stream().anyMatch(s -> SubIssue.STATUS_OPEN.equals(s.getStatus()));
         boolean allIgnored = !subs.isEmpty()
                 && subs.stream().allMatch(s -> SubIssue.STATUS_IGNORED.equals(s.getStatus()));
         String status = anyOpen ? IssueGroup.STATUS_OPEN
                 : allIgnored ? IssueGroup.STATUS_IGNORED : IssueGroup.STATUS_SOLVED;
-        groups.findById(groupId).ifPresent(g -> {
+        groups.findByIdAndWorkspaceId(groupId, workspaceId).ifPresent(g -> {
             g.setStatus(status);
             groups.save(g);
         });

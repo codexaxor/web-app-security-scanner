@@ -161,7 +161,7 @@ class ReconcileLifecycleIT extends AbstractScanWorkerIT {
     }
 
     private List<String> reasons(UUID subIssueId) {
-        return events.findBySubIssueIdOrderByAtAsc(subIssueId).stream()
+        return events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, subIssueId).stream()
                 .map(TriageEvent::getReasonCode).toList();
     }
 

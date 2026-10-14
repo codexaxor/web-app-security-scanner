@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.company.secscan.config.SecretFingerprinterHolder;
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.reconcile.Fingerprints;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.Scan;
+import com.company.secscan.scan.ScanFinding;
+import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
@@ -40,6 +43,8 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
     @Autowired
     TriageEventRepository events;
     @Autowired
+    ScanFindingRepository scanFindings;
+    @Autowired
     GitlabConnectionRepository connections;
     @Autowired
     RepositoryRepository repositories;
@@ -54,11 +59,21 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
     }
 
     private SubIssue seedOpenSecret(UUID repoId, String fingerprint, String keyId) {
-        IssueGroup group = groups.save(new IssueGroup(WORKSPACE, repoId, "secret", "secret|aws-access-token",
+        return seedSecret(seedGroup(repoId), repoId, fingerprint, keyId, SubIssue.STATUS_OPEN);
+    }
+
+    private IssueGroup seedGroup(UUID repoId) {
+        return groups.save(new IssueGroup(WORKSPACE, repoId, "secret", "secret|aws-access-token",
                 "Exposed aws-access-token", null));
+    }
+
+    private SubIssue seedSecret(IssueGroup group, UUID repoId, String fingerprint, String keyId, String status) {
         SubIssue sub = new SubIssue(WORKSPACE, group.getId(), repoId, "secret", "secret", fingerprint, null);
         sub.setRuleId("aws-access-token");
         sub.setKeyId(keyId);
+        if (SubIssue.STATUS_SOLVED.equals(status)) {
+            sub.solve();
+        }
         return subIssues.save(sub);
     }
 
@@ -72,6 +87,14 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         return scan.getId();
     }
 
+    /** A completed scan with an OK secret task and one secret finding (so reconcile has an incoming match). */
+    private UUID seedScanWithSecretFinding(UUID repoId, String ruleId, String filePath, String secretHash) {
+        UUID scanId = seedScanWithSecretTask(repoId, ScanTask.STATUS_OK, Scan.STATUS_COMPLETED);
+        scanFindings.save(ScanFinding.secret(WORKSPACE, scanId, repoId, ruleId, filePath, 1, secretHash,
+                "****", null));
+        return scanId;
+    }
+
     @Test
     void aFailedSecretScannerClosesNothing() {
         Repository repo = seedRepository();
@@ -82,7 +105,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         reconcile.reconcile(scanId);
 
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
-        assertThat(events.findBySubIssueIdOrderByAtAsc(open.getId())).isEmpty();
+        assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, open.getId())).isEmpty();
         assertThat(scans.findById(scanId).orElseThrow().getReconciledAt()).isNotNull();
     }
 
@@ -129,6 +152,39 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
 
         // The key changed, so the (re-fingerprinted) secret must NOT be mass-solved (D-029).
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+    }
+
+    @Test
+    void afterAKeyChangeCurrentKeySecretsSolveAndReopenWhileOldKeyRowsAreFrozen() {
+        // D-029 refinement: a changed key does not freeze the whole secret scanner. Secrets under the current
+        // key reconcile normally (solve + reopen); only rows under a superseded key id are left untouched.
+        Repository repo = seedRepository();
+        String currentKey = fingerprinter.require().keyId();
+        IssueGroup group = seedGroup(repo.getId());
+
+        // Old-key open row: superseded identity, must stay open with no event.
+        SubIssue oldKey = seedSecret(group, repo.getId(), "fp-oldkey", "oldkeyid", SubIssue.STATUS_OPEN);
+        // Current-key open row, absent from this scan: must be solved.
+        SubIssue currentGone =
+                seedSecret(group, repo.getId(), "fp-currentkey-gone", currentKey, SubIssue.STATUS_OPEN);
+        // Current-key solved row whose finding is present this scan: must be reopened. Its fingerprint is the
+        // one the incoming finding will produce (Fingerprints.secret(ruleId, filePath, secretHash)).
+        String reopenFp = Fingerprints.secret("aws-access-token", "config/app.yml", "deadbeef");
+        SubIssue currentReopen = seedSecret(group, repo.getId(), reopenFp, currentKey, SubIssue.STATUS_SOLVED);
+
+        UUID scanId = seedScanWithSecretFinding(repo.getId(), "aws-access-token", "config/app.yml", "deadbeef");
+
+        reconcile.reconcile(scanId);
+
+        // Old-key row frozen: untouched, no triage event.
+        assertThat(subIssues.findById(oldKey.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, oldKey.getId())).isEmpty();
+        // Current-key rows reconcile normally.
+        assertThat(subIssues.findById(currentGone.getId()).orElseThrow().getStatus())
+                .isEqualTo(SubIssue.STATUS_SOLVED);
+        SubIssue reopened = subIssues.findById(currentReopen.getId()).orElseThrow();
+        assertThat(reopened.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(reopened.getSolvedAt()).isNull();
     }
 
     private Scan markReconciled(Scan scan) {

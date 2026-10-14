@@ -21,7 +21,8 @@ public interface ScanRepository extends JpaRepository<Scan, UUID> {
     /**
      * Stale-guard (M3): true if a newer scan of the same repository has already been reconciled. Reconcile of
      * an older, out-of-order scan is then skipped so its stale view cannot re-open or re-solve findings.
+     * Workspace-scoped (CLAUDE.md domain rule 1), though {@code repositoryId} is already workspace-unique.
      */
-    boolean existsByRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(UUID repositoryId,
-                                                                                java.time.Instant createdAt);
+    boolean existsByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(
+            UUID workspaceId, UUID repositoryId, java.time.Instant createdAt);
 }

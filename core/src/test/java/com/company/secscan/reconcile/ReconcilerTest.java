@@ -94,16 +94,43 @@ class ReconcilerTest {
     }
 
     @Test
-    void reopenSuppressedScannerLeavesASolvedMatchUntouched() {
-        // Secret fingerprint key changed: a (coincidental) solved match must not be reopened.
+    void aFrozenFingerprintIsNeverSolvedReopenedOrSeen() {
+        // A superseded identity (e.g. a secret under a replaced fingerprint key, D-029): untouched entirely.
+        // Missing from a scan whose scanner succeeded: still not solved.
+        Plan missing = reconciler.reconcile(
+                List.of(),
+                List.of(new Existing("frozen-fp", SECRET, Existing.STATUS_OPEN)),
+                Set.of(SECRET),
+                Set.of("frozen-fp"));
+        assertThat(missing.solved()).isEmpty();
+
+        // Present and matching a solved row: not reopened, not even seen; it appears in no bucket.
+        Plan present = reconciler.reconcile(
+                List.of(new Incoming("frozen-fp", SECRET)),
+                List.of(new Existing("frozen-fp", SECRET, Existing.STATUS_SOLVED)),
+                Set.of(SECRET),
+                Set.of("frozen-fp"));
+        assertThat(present.newOpen()).isEmpty();
+        assertThat(present.reopened()).isEmpty();
+        assertThat(present.seen()).isEmpty();
+        assertThat(present.solved()).isEmpty();
+    }
+
+    @Test
+    void afterAKeyChangeCurrentKeyRowsReconcileWhileFrozenRowsStayUntouched() {
+        // old-fp is frozen (old key). new-fp-reopen matches an incoming (reopened); new-fp-gone is missing
+        // from a solvable scan (solved). The frozen row is neither solved nor reopened.
         Plan plan = reconciler.reconcile(
-                List.of(new Incoming("fp1", SECRET)),
-                List.of(new Existing("fp1", SECRET, Existing.STATUS_SOLVED)),
-                Set.of(),            // not solvable either
-                Set.of(SECRET));     // reopen suppressed
-        assertThat(plan.reopened()).isEmpty();
-        assertThat(plan.seen()).containsExactly("fp1");
-        assertThat(plan.solved()).isEmpty();
+                List.of(new Incoming("new-fp-reopen", SECRET)),
+                List.of(new Existing("old-fp", SECRET, Existing.STATUS_OPEN),
+                        new Existing("new-fp-reopen", SECRET, Existing.STATUS_SOLVED),
+                        new Existing("new-fp-gone", SECRET, Existing.STATUS_OPEN)),
+                Set.of(SECRET),
+                Set.of("old-fp"));
+        assertThat(plan.reopened()).containsExactly("new-fp-reopen");
+        assertThat(plan.solved()).containsExactly("new-fp-gone");
+        assertThat(plan.newOpen()).isEmpty();
+        assertThat(plan.seen()).isEmpty();
     }
 
     @Test
