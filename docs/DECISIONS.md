@@ -20,13 +20,18 @@ container SHA-256)` (D-027). Changing the key re-fingerprints every secret, so o
 sub-issues would all look "missing" (solved) and the same secrets would reappear as new findings — a mass
 false-solve plus duplicates.
 Decision: each secret sub-issue stores a short `key_id` = first 8 hex chars of
-`HMAC-SHA256(key, "secscan-key-id")` (non-reversible, reveals nothing about the key). During reconcile, if any
-stored secret sub-issue's `key_id` differs from the current key's, the worker logs a clear error and does NOT
-solve or reopen secret findings in that scan (new findings are still recorded as new opens). The key must be
-backed up and rotated with care; rotation re-fingerprints all secrets and is a later, explicit feature.
-`key_id` is never returned by the API.
-Consequences: a changed key degrades gracefully (old secrets kept, not mass-solved) instead of corrupting the
-feed; operators get a loud signal. One extra stored column per sub-issue.
+`HMAC-SHA256(key, "secscan-key-id")` (non-reversible, reveals nothing about the key). During reconcile the
+secret sub-issues are **partitioned by `key_id`** (M3 review refinement): those under the current key id
+reconcile normally (solve/reopen), while those under any other key id are **frozen** — never solved, never
+reopened, no `triage_event` — so the whole secret scanner is not stopped, only the superseded rows. A single
+error names the count of frozen rows and the stale key id(s) (all non-reversible), never a secret. Operators
+must clean up the old-key rows manually; bulk ignore arrives in M7. The key must be backed up and rotated with
+care; rotation re-fingerprints all secrets and is a later, explicit feature. `key_id` is never returned by the
+API.
+Consequences: a changed key degrades gracefully — old secrets are frozen (kept, not mass-solved) while secrets
+under the new key keep reconciling normally — instead of corrupting the feed or freezing all secret
+reconciliation; operators get a loud, counted signal and a manual cleanup step. One extra stored column per
+sub-issue.
 
 ## D-028 Repository lifecycle events in a dedicated table, not triage_event (2026-10-14, accepted)
 Context: D-020's connection reassignment/deactivation currently only logs; M3 must persist it. The options were
@@ -39,6 +44,13 @@ reason code, actor, scan) and is not diluted with events that have no issue, sta
 moment the event is written. A `RepositoryEventRecorder` writes these at the D-020 sites (connection removal,
 and the connection guard's confirm/deactivate), within the same transaction as the state change.
 Consequences: both audit trails stay purpose-specific and queryable; one new table.
+Note (M3 review, accepted for now, revisit in M10): `triage_event.sub_issue_id`/`group_id` are `ON DELETE
+CASCADE`, so hard-deleting a sub-issue/group would also delete its audit trail; and the issue-model FKs are
+single-column (`id` only), so the database does not enforce that a sub-issue/triage_event shares its subject's
+`workspace_id` (the server always writes a consistent `workspace_id`). Both are safe in M3 — nothing deletes
+issue rows (M7 ignore only flips status) and the deployment is single-workspace — and are left as-is to avoid a
+schema change now. Revisit before the first hard delete (repository deletion / tenant teardown) or multi-tenant
+auth: switch the audit FKs to `ON DELETE RESTRICT`/`SET NULL` and add composite `(workspace_id, id)` FKs.
 
 ## D-027 Keyed secret fingerprint (HMAC-SHA256) instead of a bare SHA-256 (2026-10-14, accepted)
 Context: the scanner container computes a SHA-256 of each secret value (the raw value never leaves the
