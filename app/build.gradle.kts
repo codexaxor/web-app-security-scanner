@@ -32,17 +32,29 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
-// Builds the disposable scanner image (scanner-image/) that ScanPipelineIT launches, if the pinned tag is not
-// already present. A no-op `docker image inspect` keeps repeat test runs fast; docker is required for tests
-// anyway (Testcontainers). The tag must match ScannerProperties.image (D-023).
+// Builds the disposable scanner image (scanner-image/) that the worker ITs launch. The tag must match
+// ScannerProperties.image (D-023). Rebuilds when the image is missing OR when scanner-image/ changed: a
+// content hash of scanner-image/ is stamped on the image as a label, and we rebuild whenever the current
+// content hash differs from that label (so editing e.g. secscan-lib.sh triggers a rebuild, not just a new
+// tag). `inputs.dir` lets Gradle skip the task entirely when nothing under scanner-image/ changed.
 val buildScannerImage by tasks.registering(Exec::class) {
     group = "secscan"
-    description = "Build the scanner Docker image if the pinned tag is missing."
+    description = "Build the scanner Docker image when scanner-image/ changes or the pinned tag is missing."
     workingDir = rootDir
+    inputs.dir(rootProject.file("scanner-image")).withPropertyName("scannerImage")
     commandLine(
         "sh", "-c",
-        "docker image inspect secscan-scanner:8.21.2 >/dev/null 2>&1 || " +
-            "docker build -t secscan-scanner:8.21.2 scanner-image/"
+        """
+        set -eu
+        hash="${'$'}(find scanner-image -type f -not -path '*/.*' -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)"
+        label="${'$'}(docker image inspect -f '{{ index .Config.Labels "secscan.scanner.content-hash" }}' secscan-scanner:8.21.2 2>/dev/null || true)"
+        if [ "${'$'}label" = "${'$'}hash" ]; then
+            echo "scanner image secscan-scanner:8.21.2 is up to date (content-hash ${'$'}hash)"
+        else
+            echo "building scanner image secscan-scanner:8.21.2 (content-hash ${'$'}hash)"
+            docker build -t secscan-scanner:8.21.2 --label "secscan.scanner.content-hash=${'$'}hash" scanner-image/
+        fi
+        """.trimIndent()
     )
 }
 
