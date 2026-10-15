@@ -219,7 +219,9 @@ public class ScanJobProcessor {
         if (isLocal(conn)) {
             cloneUrl = "file:///src";
             localSource = Path.of(URI.create(conn.getBaseUrl()));
-            networkDisabled = true;
+            // Local file:// clones run offline by default (proving isolation); the one live-osv test flips
+            // secscan.scanner.local-clone-network so OSV can reach deps.dev end-to-end.
+            networkDisabled = !props.isLocalCloneNetwork();
         } else {
             cloneUrl = httpsCloneUrl(conn.getBaseUrl(), repo.getPathWithNamespace());
             networkDisabled = false;

@@ -117,7 +117,10 @@ scripts/compose-smoke.sh          # build + up + wait for api health + tear down
 ```bash
 docker compose up -d postgres
 ./gradlew build                  # compiles + runs tests; needs Docker (Testcontainers Postgres, and the
-                                 # real-scanner integration tests build & launch the scanner image)
+                                 # real-scanner integration tests build & launch the scanner image).
+                                 # The default build is OFFLINE: the one end-to-end SCA test that needs live
+                                 # network (osv.dev/deps.dev) is tagged "live-osv" and excluded. Run it with:
+                                 #   ./gradlew :app:test -PliveOsv --tests "*ScaLiveScanIT"
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
 cd ui && npm ci && npm run dev

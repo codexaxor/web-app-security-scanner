@@ -37,6 +37,12 @@ public class ScannerProperties {
      * this true; it must never be enabled in a real deployment.
      */
     private boolean allowLocalFileClone = false;
+    /**
+     * TEST-ONLY: give a local {@code file://} clone network access (normally disabled, so offline fixtures
+     * prove isolation). The one {@code @Tag("live-osv")} end-to-end test sets this so OSV-Scanner can reach
+     * deps.dev; it must never be enabled in a real deployment. Remote https clones always have network.
+     */
+    private boolean localCloneNetwork = false;
 
     public String getImage() {
         return image;
@@ -140,5 +146,13 @@ public class ScannerProperties {
 
     public void setAllowLocalFileClone(boolean allowLocalFileClone) {
         this.allowLocalFileClone = allowLocalFileClone;
+    }
+
+    public boolean isLocalCloneNetwork() {
+        return localCloneNetwork;
+    }
+
+    public void setLocalCloneNetwork(boolean localCloneNetwork) {
+        this.localCloneNetwork = localCloneNetwork;
     }
 }
