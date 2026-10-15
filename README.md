@@ -82,8 +82,23 @@ clear error and refuses to claim jobs until it is fixed.
 docker compose up --build        # ui on :5173, api on :8080; worker is non-web (no port)
 ```
 
-If a system Postgres already owns host port 5432, set `POSTGRES_HOST_PORT` in `.env` (e.g. `15432`) before
-`docker compose up`; the app containers still reach Postgres at `postgres:5432` inside the compose network.
+Published ports bind to **loopback only** (`127.0.0.1`): the UI (`127.0.0.1:5173`), the API
+(`127.0.0.1:8080`) and Postgres (`127.0.0.1:${POSTGRES_HOST_PORT:-5432}`) are reachable from this machine but
+not from the network. If a system Postgres already owns host port 5432, set `POSTGRES_HOST_PORT` in `.env`
+(e.g. `15432`) before `docker compose up`; the app containers still reach Postgres at `postgres:5432` inside the
+compose network.
+
+**Change the default database password.** The compose Postgres defaults to user/password `secscan`/`secscan`
+(see `.env.example`). `POSTGRES_PASSWORD` is only read when the data volume is **first** created, so editing
+`.env` after the volume exists does nothing. To rotate it on an already-initialised volume, change it inside
+Postgres and update `.env` to match:
+
+```bash
+# with the stack up:
+docker compose exec postgres psql -U secscan -d secscan \
+  -c "ALTER USER secscan WITH PASSWORD 'a-new-strong-password';"
+# then set POSTGRES_PASSWORD=a-new-strong-password in .env and restart api + worker.
+```
 
 **Compose smoke test (isolated — never touches your dev database):**
 
@@ -101,7 +116,8 @@ scripts/compose-smoke.sh          # build + up + wait for api health + tear down
 
 ```bash
 docker compose up -d postgres
-./gradlew build                  # compiles + runs tests (Testcontainers needs Docker)
+./gradlew build                  # compiles + runs tests; needs Docker (Testcontainers Postgres, and the
+                                 # real-scanner integration tests build & launch the scanner image)
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
 cd ui && npm ci && npm run dev
