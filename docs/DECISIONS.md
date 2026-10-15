@@ -14,6 +14,67 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-034 OSV-Scanner pinned to v2.7.0 (checksum + flags) (2026-10-16, accepted)
+Context: M4's single SCA engine is OSV-Scanner (D-006), added to the scanner image; our rule is to pin every
+scanner by version + checksum (as Gitleaks is, D-023).
+Decision: pin OSV-Scanner **v2.7.0** (https://github.com/google/osv-scanner/releases/tag/v2.7.0). The release
+ships raw per-arch binaries verified against `osv-scanner_SHA256SUMS` before use:
+`linux_amd64 = 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b`,
+`linux_arm64 = 4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7`. Run
+`osv-scanner scan source -r --format json` over the checkout; default deps.dev online data source (no
+`--offline`, no `--data-source=native`, per D-006). The OSV-Scanner version is recorded in `scan.tool_versions`.
+Exit codes: `0`/`1` = success (0 = no vulns, 1 = vulns found); `128` = no packages (scan_task `ok` **plus** a
+`NO_MANIFESTS` warning, and the SCA scanner is NOT solvable for that scan — closes nothing, domain rule 3 /
+D-030); all other codes = failure (closes no SCA issue, scan partial). The scanner image tag stays
+`secscan-scanner:8.21.2` — an identifier matching `ScannerProperties.image`, tracked for the M10 weekly rebuild.
+Consequences: a reproducible SCA engine; a new runtime egress need to deps.dev/osv.dev (D-033). Any bump is new
+checksums + a new decision.
+
+## D-033 Scanner egress stays on the default bridge network for M4 (2026-10-16, accepted; revisit before any deployment or M10, whichever comes first)
+Context: SPEC "Securing the scanner" wants scanner egress limited to an allowlist (GitLab, api.osv.dev,
+api.deps.dev, …). The scanner has used the default Docker bridge (full egress) since M2; M4 adds the first real
+egress need (OSV → osv.dev / deps.dev).
+Decision: keep the default bridge network for M4. An enforced egress allowlist (an egress-proxy sidecar on an
+internal network with `HTTPS_PROXY` + a git proxy, allowlisting only the three hosts) is deferred. This is not a
+hardening regression — the bridge predates M4 — and every other container control stays in force (non-root,
+read-only rootfs, `--cap-drop=ALL`, `no-new-privileges`, CPU/memory/PID limits, hard timeout, no Docker socket).
+Revisit when: before any deployment or M10, whichever comes first.
+Consequences: a compromised scanner could reach arbitrary hosts until the allowlist lands; accepted for local
+single-tenant mode.
+
+## D-032 Public package registries assumed; private-registry detection is M4b (2026-10-16, accepted; resolves OD-3)
+Context: OD-3 — private registries (Nexus, Artifactory, GitLab package registry) — had to be settled before M4.
+Decision: M4 assumes public registries (osv.dev/deps.dev online, D-006) and stores no registry credentials.
+Detecting and handling private registries is deferred to M4b.
+Consequences: packages served only from a private registry may be unresolved in M4; no registry credentials are
+held anywhere.
+
+## D-031 Gradle/.NET without lockfiles in M4: warn + partial; static Gradle resolver is M4b (2026-10-16, accepted; partly resolves OD-1/OD-2)
+Context: OD-1 (Gradle without a lockfile) and OD-2 (.NET without `packages.lock.json`) had to be settled before
+M4, and we never run a build (D-004, D-030).
+Decision: M4 raises a per-build-file "missing lockfile" scan warning and produces partial results. .NET falls
+back to the **direct** `<PackageReference>` versions in `.csproj` (and `Directory.Packages.props`), written
+outside the clone in OSV-Scanner's documented custom format and fed to it via `--lockfile osv-scanner:<path>`,
+only for projects that have no `packages.lock.json` in the same folder; versions that are MSBuild properties,
+ranges, wildcards or `VersionOverride` are skipped with an `UNRESOLVED_VERSION` warning (never guessed). Gradle
+without a lockfile is warning-only (a `build.gradle`-only scan finds little because Spring Boot BOM-managed
+versions are absent). A static Gradle resolver (and NuGet transitive resolution if needed) is a separate
+milestone **M4b**, designed later. Never run gradle/dotnet/npm/mvn (D-004). Python is out of M4 (not an MVP
+ecosystem).
+Consequences: OD-1/OD-2 are partly resolved now (warn + .NET direct fallback) and finished in M4b; Gradle SCA
+coverage is limited until then.
+
+## D-030 Scanned repositories are never modified; coverage gaps are shown, not hidden (2026-10-16, accepted)
+Context: SCA needs dependency versions, but running a build (gradle/dotnet/npm/mvn) on an untrusted repo is code
+execution (D-004) and would also mean writing files (lockfiles, CI jobs) into repositories we hold only
+read-only access to.
+Decision: SecScan never modifies a scanned repository and never requires a change to it (no committed lockfiles,
+CI jobs or config files as a precondition to scan). Dependency resolution is therefore static only (with D-004).
+Where a repository's layout limits what can be resolved, the gap is surfaced as a scan-health warning (per build
+file), never silently dropped.
+Consequences: SCA completeness depends on what the repo already commits; partial coverage is explicit and
+visible. Teams can improve coverage by committing lockfiles but are never forced to.
+
 ## D-029 The secret fingerprint key must never change once secrets are stored (2026-10-14, accepted)
 Context: a secret sub-issue's fingerprint is derived from `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY,
 container SHA-256)` (D-027). Changing the key re-fingerprints every secret, so on the next scan the old
@@ -264,9 +325,10 @@ Decision: `workspace_id` on every business table from day one.
 
 ## Open decisions
 
-- OD-1 Gradle repos without lockfiles — needed before M4
-- OD-2 .NET repos without `packages.lock.json` — needed before M4
-- OD-3 Private package registries — needed before M4
+- OD-1 Gradle repos without lockfiles — PARTLY RESOLVED by D-031 (warn-only in M4); finished in M4b
+- OD-2 .NET repos without `packages.lock.json` — PARTLY RESOLVED by D-031 (`.csproj` direct fallback in M4);
+  finished in M4b
+- OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
