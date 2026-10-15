@@ -130,6 +130,7 @@ This repo is built milestone by milestone with Claude Code. Rules for the agent 
 | `/start-milestone M<N>` | Creates the feature branch, reads the spec, proposes a plan, waits for approval |
 | `/finish-milestone M<N>` | Builds, self-reviews, writes `docs/reports/M<N>.md`, commits and pushes the feature branch |
 | `/review-pr M<N>` | Independent review before local merge (run with the strongest model) |
+| `/handover` | Read-only: builds the architect context bundle (outside the repo) for the claude.ai project knowledge |
 
 ## Documentation
 
