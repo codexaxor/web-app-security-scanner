@@ -104,6 +104,99 @@ class ScannerOutputParserTest {
         assertThat(parsed.tasks()).isEmpty();
     }
 
+    // --- SCA (OSV-Scanner) parsing ---
+
+    @Test
+    void mavenSampleYieldsExpectedCvesWithRepoRelativePaths(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/maven.json", outDir), "/work/checkout");
+
+        assertThat(findings).hasSize(2);
+        // Paths are repo-relative — a fingerprint must never contain a /work path (plan change #3).
+        assertThat(findings).allSatisfy(f -> {
+            assertThat(f.type()).isEqualTo(RawFinding.TYPE_SCA);
+            assertThat(f.ecosystem()).isEqualTo("Maven");
+            assertThat(f.filePath()).isEqualTo("pom.xml").doesNotContain("/work");
+        });
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.commons:commons-text");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42889");
+            assertThat(f.installedVersion()).isEqualTo("1.9");
+        });
+        assertThat(findings).anySatisfy(f ->
+                assertThat(f.packageName()).isEqualTo("org.apache.commons:commons-lang3"));
+    }
+
+    @Test
+    void anAliasGroupBecomesOneFindingWithTheLowestSortedCve(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/alias-group.json", outDir), "/work/checkout");
+
+        assertThat(findings).singleElement().satisfies(f -> {
+            // ids [GHSA-…], aliases [CVE-2026-9999, CVE-2024-1111, GHSA-…] → the lowest-sorted CVE wins.
+            assertThat(f.vulnId()).isEqualTo("CVE-2024-1111");
+            assertThat(f.packageName()).isEqualTo("com.example:widget");
+            assertThat(f.filePath()).isEqualTo("sub/pom.xml").doesNotContain("/work");
+        });
+    }
+
+    @Test
+    void npmSampleYieldsOneFindingPerAliasGroup(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/npm.json", outDir), "/work/checkout");
+
+        assertThat(findings).hasSize(8); // one per vulnerability alias group on lodash@4.17.4
+        assertThat(findings).allSatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("lodash");
+            assertThat(f.ecosystem()).isEqualTo("npm");
+            assertThat(f.filePath()).isEqualTo("package-lock.json");
+        });
+        assertThat(findings).extracting(RawFinding::vulnId).contains("CVE-2019-10744");
+    }
+
+    @Test
+    void nugetSampleYieldsTheVulnerablePackageOnly(@TempDir Path outDir) throws Exception {
+        // Newtonsoft.Json@12.0.1 is vulnerable; Serilog@$(SerilogVersion) has no vulns (and a non-concrete
+        // version) and must not surface.
+        var findings = parser.parseOsv(sample("/samples/osv/nuget.json", outDir), "/work/checkout");
+
+        assertThat(findings).singleElement().satisfies(f -> {
+            assertThat(f.packageName()).isEqualTo("Newtonsoft.Json");
+            assertThat(f.ecosystem()).isEqualTo("NuGet");
+            assertThat(f.vulnId()).isEqualTo("CVE-2024-21907");
+        });
+    }
+
+    @Test
+    void emptyOsvReportYieldsNoFindings(@TempDir Path outDir) throws Exception {
+        assertThat(parser.parseOsv(sample("/samples/osv/empty.json", outDir), "/work/checkout")).isEmpty();
+    }
+
+    @Test
+    void pickVulnIdPrefersLowestCveThenGhsaThenFirstId() {
+        assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("GHSA-x"),
+                java.util.List.of("CVE-2026-9999", "CVE-2024-1111", "GHSA-x"))).isEqualTo("CVE-2024-1111");
+        assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("GHSA-bbbb", "GHSA-aaaa"),
+                java.util.List.of())).isEqualTo("GHSA-aaaa");
+        assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("OSV-2021-1"),
+                java.util.List.of())).isEqualTo("OSV-2021-1");
+        assertThat(ScannerOutputParser.pickVulnId(java.util.List.of(), java.util.List.of())).isNull();
+    }
+
+    @Test
+    void isConcreteVersionRejectsPropertiesRangesAndWildcards() {
+        assertThat(ScannerOutputParser.isConcreteVersion("12.0.1")).isTrue();
+        assertThat(ScannerOutputParser.isConcreteVersion("1.2.3-beta.2")).isTrue();
+        assertThat(ScannerOutputParser.isConcreteVersion("$(SerilogVersion)")).isFalse();
+        assertThat(ScannerOutputParser.isConcreteVersion("[1.0,2.0)")).isFalse();
+        assertThat(ScannerOutputParser.isConcreteVersion("1.*")).isFalse();
+        assertThat(ScannerOutputParser.isConcreteVersion("")).isFalse();
+        assertThat(ScannerOutputParser.isConcreteVersion(null)).isFalse();
+    }
+
+    private Path sample(String resource, Path outDir) throws Exception {
+        Path target = outDir.resolve(resource.substring(resource.lastIndexOf('/') + 1));
+        copyResource(resource, target);
+        return target;
+    }
+
     private void copyResource(String resource, Path target) throws Exception {
         try (InputStream in = getClass().getResourceAsStream(resource)) {
             assertThat(in).as("sample resource %s", resource).isNotNull();

@@ -176,6 +176,7 @@ esac
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
     --arg commit "$COMMIT" \
+    --arg checkout "$CHECKOUT" \
     --arg git "$GIT_VERSION" \
     --arg gitleaks "$GITLEAKS_VERSION" \
     --arg osv "$OSV_VERSION" \
@@ -187,7 +188,7 @@ jq -nc \
     --argjson cadur "$OSV_DUR_MS" \
     --argjson nopkg "$OSV_NO_PACKAGES" \
     --slurpfile warnings "$WORK/warnings.json" \
-    '{schemaVersion:1, cloneFailed:false, commit:$commit,
+    '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
       toolVersions:{git:$git, gitleaks:$gitleaks, "osv-scanner":$osv},
       warnings: ($warnings[0] // []),
       scanners:[

@@ -11,15 +11,17 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Parses the scanner container's {@code /out} directory into a {@link ParsedScan}. The container emits an
- * already-sanitized format (D-023): secret entries carry only a SHA-256 hash and a 4-char preview, never the
- * value. The secret-entry binding deliberately has no field for a raw value, and unknown JSON properties are
- * ignored, so even a malformed {@code secrets.json} containing a raw secret cannot surface one here.
+ * Parses the scanner container's {@code /out} directory into a {@link ParsedScan}. Secret entries are already
+ * sanitized by the container (D-023): only a SHA-256 hash and a 4-char preview, never the value. SCA findings
+ * come from OSV-Scanner's JSON ({@code osv.json}): one finding per alias group (plan change #3), the manifest
+ * path made repo-relative by stripping the container checkout prefix (never a {@code /work} path in a
+ * fingerprint), and OSV's own junk versions (e.g. an unresolved MSBuild property) dropped (D-035).
  *
  * <p>No Spring is required to use it (own {@link ObjectMapper}), so it is unit-testable against saved samples.
  */
@@ -46,13 +48,26 @@ public class ScannerOutputParser {
         List<RawFinding> findings = new ArrayList<>();
         List<ManifestScanner> scanners = m.scanners == null ? List.of() : m.scanners;
         for (ManifestScanner s : scanners) {
-            tasks.add(new ScannerTaskResult(s.name, s.status, s.exitCode, s.durationMs, s.findingsFile));
-            if (s.succeeded() && RawFinding.SCANNER_SECRET.equals(s.name) && s.findingsFile != null) {
+            tasks.add(new ScannerTaskResult(s.name, s.status, s.exitCode, s.durationMs, s.findingsFile,
+                    s.noPackages));
+            if (!s.succeeded() || s.findingsFile == null) {
+                continue;
+            }
+            if (RawFinding.SCANNER_SECRET.equals(s.name)) {
                 findings.addAll(readSecretFindings(outDir.resolve(s.findingsFile)));
+            } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
+                findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath));
+            }
+        }
+
+        List<ScanWarning> warnings = new ArrayList<>();
+        if (m.warnings != null) {
+            for (ManifestWarning w : m.warnings) {
+                warnings.add(new ScanWarning(w.code, w.message, w.filePath));
             }
         }
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
-        return new ParsedScan(false, m.commit, versions, tasks, findings);
+        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings);
     }
 
     private List<RawFinding> readSecretFindings(Path findingsFile) {
@@ -68,6 +83,137 @@ public class ScannerOutputParser {
             out.add(RawFinding.secret(e.ruleId, e.file, e.startLine, e.secretHash, safePreview(e.preview), null));
         }
         return out;
+    }
+
+    /**
+     * Parses OSV-Scanner JSON into one {@link RawFinding} per alias group (plan change #3). {@code checkoutPath}
+     * is the container's clone root; each result's source path is made repo-relative to it so no {@code /work}
+     * path enters a fingerprint. A package whose version is not concrete (an unresolved MSBuild property, a
+     * range or a wildcard) is dropped — OSV passes such versions through literally but they identify nothing
+     * (D-035).
+     */
+    List<RawFinding> parseOsv(Path osvJson, String checkoutPath) {
+        if (!Files.exists(osvJson)) {
+            return List.of();
+        }
+        OsvReport report = read(osvJson, OsvReport.class);
+        if (report == null || report.results == null) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        for (OsvResult result : report.results) {
+            String manifestPath = relativize(result.source == null ? null : result.source.path, checkoutPath);
+            if (result.packages == null) {
+                continue;
+            }
+            for (OsvPackage p : result.packages) {
+                OsvPkgInfo pkg = p.pkg;
+                if (pkg == null || p.groups == null || p.groups.isEmpty()) {
+                    continue; // no vulnerability groups → nothing to record
+                }
+                if (!isConcreteVersion(pkg.version)) {
+                    log.debug("Dropping SCA package {} with non-concrete version '{}' (D-035)",
+                            pkg.name, pkg.version);
+                    continue;
+                }
+                String fixed = fixedVersion(p);
+                for (OsvGroup g : p.groups) {
+                    String vulnId = pickVulnId(g.ids, g.aliases);
+                    if (vulnId == null) {
+                        continue;
+                    }
+                    out.add(RawFinding.sca(vulnId, pkg.name, pkg.ecosystem, pkg.version, fixed, manifestPath,
+                            g.maxSeverity));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Makes an OSV source path repo-relative by stripping the container checkout prefix. */
+    private static String relativize(String path, String checkoutPath) {
+        if (path == null) {
+            return null;
+        }
+        if (checkoutPath != null && !checkoutPath.isBlank()) {
+            String prefix = checkoutPath.endsWith("/") ? checkoutPath : checkoutPath + "/";
+            if (path.startsWith(prefix)) {
+                return path.substring(prefix.length());
+            }
+        }
+        return path;
+    }
+
+    /**
+     * The group's preferred vulnerability id (plan change #3): the lowest-sorted CVE across the group's ids and
+     * aliases, else the lowest-sorted GHSA, else the first id. Returns null only for an empty group.
+     */
+    static String pickVulnId(List<String> ids, List<String> aliases) {
+        TreeSet<String> all = new TreeSet<>();
+        if (ids != null) {
+            all.addAll(ids);
+        }
+        if (aliases != null) {
+            all.addAll(aliases);
+        }
+        if (all.isEmpty()) {
+            return null;
+        }
+        for (String id : all) {
+            if (id.startsWith("CVE-")) {
+                return id; // TreeSet is sorted → first CVE is the lowest-sorted one
+            }
+        }
+        for (String id : all) {
+            if (id.startsWith("GHSA-")) {
+                return id;
+            }
+        }
+        return all.first();
+    }
+
+    /** A concrete pinned version OSV can identify — not empty, an MSBuild property, a range or a wildcard. */
+    static boolean isConcreteVersion(String version) {
+        if (version == null || version.isBlank()) {
+            return false;
+        }
+        for (int i = 0; i < version.length(); i++) {
+            switch (version.charAt(i)) {
+                case '$', '[', ']', '(', ')', ',', '*' -> {
+                    return false;
+                }
+                default -> { }
+            }
+        }
+        return true;
+    }
+
+    /** Best-effort "fixed in" version: the first fixed event across the package's vulnerabilities, else null. */
+    private static String fixedVersion(OsvPackage p) {
+        if (p.vulnerabilities == null) {
+            return null;
+        }
+        for (OsvVuln v : p.vulnerabilities) {
+            if (v.affected == null) {
+                continue;
+            }
+            for (OsvAffected a : v.affected) {
+                if (a.ranges == null) {
+                    continue;
+                }
+                for (OsvRange r : a.ranges) {
+                    if (r.events == null) {
+                        continue;
+                    }
+                    for (OsvEvent e : r.events) {
+                        if (e.fixed != null && !e.fixed.isBlank()) {
+                            return e.fixed;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -105,8 +251,10 @@ public class ScannerOutputParser {
         public int schemaVersion;
         public boolean cloneFailed;
         public String commit;
+        public String checkoutPath;
         public Map<String, String> toolVersions;
         public List<ManifestScanner> scanners;
+        public List<ManifestWarning> warnings;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -116,10 +264,18 @@ public class ScannerOutputParser {
         public Integer exitCode;
         public Long durationMs;
         public String findingsFile;
+        public boolean noPackages;
 
         boolean succeeded() {
             return "ok".equals(status);
         }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestWarning {
+        public String code;
+        public String message;
+        public String filePath;
     }
 
     /** A sanitized secret finding. Intentionally has NO field for the secret value, match or line text. */
@@ -130,5 +286,69 @@ public class ScannerOutputParser {
         public Integer startLine;
         public String secretHash;
         public String preview;
+    }
+
+    // --- OSV-Scanner JSON bindings (https://google.github.io/osv-scanner output schema) ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvReport {
+        public List<OsvResult> results;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvResult {
+        public OsvSource source;
+        public List<OsvPackage> packages;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvSource {
+        public String path;
+        public String type;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvPackage {
+        @com.fasterxml.jackson.annotation.JsonProperty("package")
+        public OsvPkgInfo pkg;
+        public List<OsvGroup> groups;
+        public List<OsvVuln> vulnerabilities;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvPkgInfo {
+        public String name;
+        public String version;
+        public String ecosystem;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvGroup {
+        public List<String> ids;
+        public List<String> aliases;
+        @com.fasterxml.jackson.annotation.JsonProperty("max_severity")
+        public String maxSeverity;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvVuln {
+        public String id;
+        public List<OsvAffected> affected;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvAffected {
+        public List<OsvRange> ranges;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvRange {
+        public List<OsvEvent> events;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvEvent {
+        public String introduced;
+        public String fixed;
     }
 }
