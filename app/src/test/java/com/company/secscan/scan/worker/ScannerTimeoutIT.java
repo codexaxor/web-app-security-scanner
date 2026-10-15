@@ -104,10 +104,11 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
         assertThat(failed.getStatus()).isEqualTo(Scan.STATUS_FAILED);
         assertThat(failed.getFailReason()).isEqualTo("SCANNER_TIMEOUT");
         assertThat(jobs.findById(job.getId()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
-        assertThat(tasks.findByScanId(scan.id())).singleElement().satisfies(t -> {
-            assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_TIMED_OUT);
-            assertThat(t.getScanner()).isEqualTo(ScanTask.SCANNER_SECRET);
-        });
+        // One disposable container runs both scanners, so a timeout records a timed_out task for each.
+        assertThat(tasks.findByScanId(scan.id()))
+                .allSatisfy(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_TIMED_OUT))
+                .extracting(ScanTask::getScanner)
+                .containsExactlyInAnyOrder(ScanTask.SCANNER_SECRET, ScanTask.SCANNER_SCA);
         assertThat(findings.findByScanId(scan.id())).isEmpty();
 
         // Domain rule 3: a timed-out scanner closes nothing — the open issue is untouched and wrote no event.

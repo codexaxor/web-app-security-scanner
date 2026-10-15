@@ -19,6 +19,7 @@ import java.util.UUID;
 public class ScanTask {
 
     public static final String SCANNER_SECRET = "secret";
+    public static final String SCANNER_SCA = "sca";
 
     public static final String STATUS_OK = "ok";
     public static final String STATUS_FAILED = "failed";

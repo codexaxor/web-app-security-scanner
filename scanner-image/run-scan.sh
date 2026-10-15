@@ -104,22 +104,102 @@ if [ "$SECRET_STATUS" = "ok" ] && [ -s "$RAW" ]; then
 fi
 jq -s '.' "$WORK/secrets.ndjson" > "$OUT/secrets.json"
 
+# --- Inventory: scan-health warnings, independent of any scanner's result (D-030/D-031). ---
+# A build file with no lockfile, or a non-concrete .csproj version, is a coverage gap we SHOW, never hide.
+: > "$WORK/warnings.ndjson"
+add_warning() {  # code  message  repo-relative-path
+    jq -nc --arg c "$1" --arg m "$2" --arg f "$3" '{code:$c, message:$m, filePath:$f}' >> "$WORK/warnings.ndjson"
+}
+relpath() { printf '%s' "${1#"$CHECKOUT"/}"; }
+
+# Gradle: build.gradle(.kts) with no lockfile in the same directory (OSV resolves nothing without one; M4b).
+find "$CHECKOUT" -type f \( -name build.gradle -o -name build.gradle.kts \) 2>/dev/null | while read -r bg; do
+    d="$(dirname "$bg")"
+    if [ ! -f "$d/gradle.lockfile" ] && [ ! -f "$d/buildscript-gradle.lockfile" ]; then
+        add_warning MISSING_GRADLE_LOCKFILE \
+            "Gradle build file has no gradle.lockfile; dependency versions are not resolved (M4b)." \
+            "$(relpath "$bg")"
+    fi
+done
+
+# .NET: a .csproj with no packages.lock.json next to it is scanned for DIRECT PackageReference versions only
+# (OSV reads .csproj natively, D-035) — transitive deps are not seen. Non-concrete versions are skipped+warned.
+find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
+    d="$(dirname "$csproj")"
+    rel="$(relpath "$csproj")"
+    if [ ! -f "$d/packages.lock.json" ]; then
+        add_warning MISSING_NUGET_LOCKFILE \
+            "No packages.lock.json next to the project; only direct PackageReference versions are scanned, not transitive (M4b)." \
+            "$rel"
+    fi
+    csproj_package_versions "$csproj" | while IFS="$(printf '\t')" read -r pkg ver; do
+        # Empty version = central package management (version in Directory.Packages.props), which OSV resolves;
+        # only warn for a present-but-non-concrete version (property/range/wildcard/VersionOverride).
+        if [ -n "$ver" ] && nuget_version_unresolved "$ver"; then
+            add_warning UNRESOLVED_VERSION \
+                "PackageReference '$pkg' has a non-concrete version ('$ver'); skipped, not guessed (D-031)." "$rel"
+        fi
+    done
+done
+
+# --- SCA scan (OSV-Scanner over the whole tree; deps.dev online, D-006/D-034) ---
+# Structure-agnostic: nested modules, monorepos and mixed ecosystems all work; "no manifests" is a warning
+# (NO_MANIFESTS), never a failure. TMPDIR is tmpfs /work because the root filesystem is read-only.
+export TMPDIR="$WORK"
+OSV_JSON="$OUT/osv.json"
+OSV_VERSION="$(osv-scanner --version 2>/dev/null | awk '/osv-scanner version/{print $3; exit}')"
+START="$(date +%s)"
+set +e
+osv-scanner scan source -r --format json --output-file "$OSV_JSON" "$CHECKOUT" >"$WORK/osv.log" 2>&1
+OSV_EXIT=$?
+set -e
+END="$(date +%s)"
+OSV_DUR_MS=$(( (END - START) * 1000 ))
+
+# Exit-code mapping (D-034, verified against osv-scanner v2.7.0): 0/1 = success (0 clean, 1 vulns found);
+# 128 = no packages found (status ok, but NOT authoritative to close findings this scan — NO_MANIFESTS);
+# any other code (127 general error, 129-255 non-result errors, …) = scanner failure.
+OSV_NO_PACKAGES=false
+case "$OSV_EXIT" in
+    0 | 1) SCA_STATUS=ok ;;
+    128)
+        SCA_STATUS=ok
+        OSV_NO_PACKAGES=true
+        add_warning NO_MANIFESTS "No supported dependency manifests or lockfiles were found to scan." ""
+        ;;
+    *) SCA_STATUS=failed ;;
+esac
+# Guarantee a parseable findings file even when OSV wrote none (error/no-packages), so the parser never fails.
+[ -f "$OSV_JSON" ] || printf '{"results":[]}' > "$OSV_JSON"
+
 # --- Manifest ---
+jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
     --arg commit "$COMMIT" \
     --arg git "$GIT_VERSION" \
     --arg gitleaks "$GITLEAKS_VERSION" \
-    --arg status "$SECRET_STATUS" \
-    --argjson exit "$GL_EXIT" \
-    --argjson dur "$DUR_MS" \
+    --arg osv "$OSV_VERSION" \
+    --arg sstatus "$SECRET_STATUS" \
+    --argjson sexit "$GL_EXIT" \
+    --argjson sdur "$DUR_MS" \
+    --arg castatus "$SCA_STATUS" \
+    --argjson caexit "$OSV_EXIT" \
+    --argjson cadur "$OSV_DUR_MS" \
+    --argjson nopkg "$OSV_NO_PACKAGES" \
+    --slurpfile warnings "$WORK/warnings.json" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit,
-      toolVersions:{git:$git, gitleaks:$gitleaks},
-      scanners:[{name:"secret", status:$status, exitCode:$exit, durationMs:$dur, findingsFile:"secrets.json"}]}' \
+      toolVersions:{git:$git, gitleaks:$gitleaks, "osv-scanner":$osv},
+      warnings: ($warnings[0] // []),
+      scanners:[
+        {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
+        {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",
+         noPackages:$nopkg}
+      ]}' \
     > "$OUT/result.json"
 
-# A scanner failure is reported in the manifest; exit non-zero only for an unexpected scanner crash so the
-# worker records a partial scan rather than a hard failure.
-if [ "$SECRET_STATUS" = "failed" ]; then
+# A scanner failure is reported per-scanner in the manifest (the worker records a partial scan). Exit non-zero
+# only to signal an unexpected scanner failure; clone failures exit 10 above.
+if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ]; then
     exit 20
 fi
 exit 0

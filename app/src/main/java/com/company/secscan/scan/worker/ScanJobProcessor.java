@@ -44,9 +44,11 @@ public class ScanJobProcessor {
 
     /**
      * The scanners this image runs, used only to record {@code timed_out} tasks when the whole container is
-     * killed on timeout (no manifest is produced then). M2 = secret; SCA (M4) appends its scanner here.
+     * killed on timeout (no manifest is produced then): one disposable container runs both, so a timeout
+     * times out both.
      */
-    private static final List<String> IMAGE_SCANNERS = List.of(com.company.secscan.scan.ScanTask.SCANNER_SECRET);
+    private static final List<String> IMAGE_SCANNERS = List.of(
+            com.company.secscan.scan.ScanTask.SCANNER_SECRET, com.company.secscan.scan.ScanTask.SCANNER_SCA);
 
     private final ScanRepository scans;
     private final ScanJobRepository jobs;

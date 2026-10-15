@@ -14,6 +14,25 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-035 .NET SCA uses OSV-Scanner's native .csproj/CPM extraction, not a custom input file (2026-10-16, accepted; supersedes the .NET fallback mechanism of D-031)
+Context: D-031 (and the SPEC) assumed OSV-Scanner could not read `.csproj` and that we would parse direct
+`<PackageReference>` versions ourselves and feed OSV a custom `osv-scanner.json` (`--lockfile osv-scanner:…`,
+plan change #4). Probing the pinned **OSV-Scanner v2.7.0** showed it source-scans `.csproj` AND NuGet Central
+Package Management (`Directory.Packages.props`) natively: a bare `App.csproj` with a vulnerable
+`PackageReference` yields `source.path = <the .csproj>` and the expected GHSA/CVE.
+Decision: rely on OSV's native `.csproj`/CPM extraction (direct `PackageReference` versions, already mapped to
+the real `.csproj` path). We do NOT write a custom input file (change #4 dropped — it would duplicate OSV's
+native extraction, giving two findings per package, unless we also disabled OSV's plugin). We still raise a
+`MISSING_NUGET_LOCKFILE` warning per `.csproj` that has no sibling `packages.lock.json` (the coverage gap is
+real: without the lockfile only direct deps are seen, no transitive). Plan change #6 is kept but enforced on our
+side: our inventory step reads each `.csproj` with `xmllint --nonet` (never `--noent`) and raises an
+`UNRESOLVED_VERSION` warning (path + package) for versions that are MSBuild properties (`$(…)`), ranges, `*`
+wildcards or `VersionOverride`; the parser also drops OSV packages whose version is such a non-concrete string
+(OSV passes them through literally, e.g. `Serilog@$(SerilogVersion)`, matching nothing). Transitive NuGet
+resolution without a lockfile remains an M4b item.
+Consequences: less code and no double-counting; .NET direct-dep SCA works out of the box. `UNRESOLVED_VERSION`
+visibility depends on our inventory parse, not OSV.
+
 ## D-034 OSV-Scanner pinned to v2.7.0 (checksum + flags) (2026-10-16, accepted)
 Context: M4's single SCA engine is OSV-Scanner (D-006), added to the scanner image; our rule is to pin every
 scanner by version + checksum (as Gitleaks is, D-023).
