@@ -10,6 +10,7 @@ import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanJobRepository;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTaskRepository;
+import com.company.secscan.scan.ScanWarningRepository;
 import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +59,8 @@ public abstract class AbstractScanWorkerIT {
     @Autowired
     private ScanFindingRepository scanFindingsForCleanup;
     @Autowired
+    private ScanWarningRepository scanWarningsForCleanup;
+    @Autowired
     private ScanTaskRepository scanTasksForCleanup;
     @Autowired
     private ScanJobRepository scanJobsForCleanup;
@@ -83,6 +86,7 @@ public abstract class AbstractScanWorkerIT {
         issueGroupsForCleanup.deleteAllInBatch();
         repositoryEventsForCleanup.deleteAllInBatch();
         scanFindingsForCleanup.deleteAllInBatch();
+        scanWarningsForCleanup.deleteAllInBatch();
         scanTasksForCleanup.deleteAllInBatch();
         scanJobsForCleanup.deleteAllInBatch();
         scansForCleanup.deleteAllInBatch();

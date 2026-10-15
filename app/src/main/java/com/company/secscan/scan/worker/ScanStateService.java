@@ -13,6 +13,8 @@ import com.company.secscan.scan.ScanJobRepository;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
+import com.company.secscan.scan.ScanWarning;
+import com.company.secscan.scan.ScanWarningRepository;
 import com.company.secscan.scan.parse.ParsedScan;
 import com.company.secscan.scan.parse.ScannerTaskResult;
 import java.time.Instant;
@@ -38,17 +40,20 @@ public class ScanStateService {
     private final ScanJobRepository jobs;
     private final ScanTaskRepository tasks;
     private final ScanFindingRepository findings;
+    private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final SecretFingerprinterHolder fingerprinter;
     private final ReconcileService reconcile;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
-                            ScanFindingRepository findings, RepositoryRepository repositories,
-                            SecretFingerprinterHolder fingerprinter, ReconcileService reconcile) {
+                            ScanFindingRepository findings, ScanWarningRepository warnings,
+                            RepositoryRepository repositories, SecretFingerprinterHolder fingerprinter,
+                            ReconcileService reconcile) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
         this.findings = findings;
+        this.warnings = warnings;
         this.repositories = repositories;
         this.fingerprinter = fingerprinter;
         this.reconcile = reconcile;
@@ -76,15 +81,21 @@ public class ScanStateService {
 
         for (ScannerTaskResult t : parsed.tasks()) {
             String status = t.succeeded() ? ScanTask.STATUS_OK : ScanTask.STATUS_FAILED;
-            tasks.save(new ScanTask(scan.getWorkspaceId(), scanId, t.name(), status, t.exitCode(),
-                    t.durationMs(), logExcerpt));
+            ScanTask task = new ScanTask(scan.getWorkspaceId(), scanId, t.name(), status, t.exitCode(),
+                    t.durationMs(), logExcerpt);
+            // A no-packages SCA scan is ok but not authoritative to close findings this scan (D-034).
+            task.setClosesFindings(t.closesFindings());
+            tasks.save(task);
         }
         for (RawFinding f : parsed.findings()) {
             findings.save(toEntity(scan.getWorkspaceId(), scanId, repositoryId, f));
         }
+        for (com.company.secscan.scan.parse.ScanWarning w : parsed.warnings()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, w.code(), w.message(),
+                    w.filePath()));
+        }
         if (!parsed.findings().isEmpty()) {
-            log.debug("Scan {} stored {} secret finding(s) (hashes keyed with HMAC-SHA256)",
-                    scanId, parsed.findings().size());
+            log.debug("Scan {} stored {} finding(s)", scanId, parsed.findings().size());
         }
 
         repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(repo -> {
@@ -177,11 +188,18 @@ public class ScanStateService {
     }
 
     private ScanFinding toEntity(UUID workspaceId, UUID scanId, UUID repositoryId, RawFinding f) {
-        // M2 produces only secret findings; other types are added with their scanners (M4/M6).
-        // The container emits a plain SHA-256; we key it with HMAC-SHA256 here so the bare digest is never
-        // persisted (D-027). Throws a clear error if SECSCAN_FINGERPRINT_KEY is missing.
-        String keyedHash = fingerprinter.require().hash(f.secretHash());
-        return ScanFinding.secret(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.line(),
-                keyedHash, f.secretPreview(), f.toolSeverity());
+        if (RawFinding.TYPE_SCA.equals(f.type())) {
+            return ScanFinding.sca(workspaceId, scanId, repositoryId, f.vulnId(), f.packageName(), f.ecosystem(),
+                    f.installedVersion(), f.fixedVersion(), f.filePath(), f.toolSeverity());
+        }
+        if (RawFinding.TYPE_SECRET.equals(f.type())) {
+            // The container emits a plain SHA-256; we key it with HMAC-SHA256 here so the bare digest is never
+            // persisted (D-027). Throws a clear error if SECSCAN_FINGERPRINT_KEY is missing.
+            String keyedHash = fingerprinter.require().hash(f.secretHash());
+            return ScanFinding.secret(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.line(),
+                    keyedHash, f.secretPreview(), f.toolSeverity());
+        }
+        // SAST/IaC/EOL are added with their scanners (M6).
+        throw new IllegalStateException("Unsupported finding type for persistence: " + f.type());
     }
 }

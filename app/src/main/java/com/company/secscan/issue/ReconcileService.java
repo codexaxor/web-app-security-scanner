@@ -83,10 +83,13 @@ public class ReconcileService {
         // workspaceId == scan.getWorkspaceId() (the scan was fetched scoped to it).
         UUID repositoryId = scan.getRepositoryId();
 
-        // Scanners that ran OK this scan may close their missing findings; a failed/absent scanner closes none.
+        // Scanners authoritative to close their missing findings this scan: succeeded AND closes_findings. A
+        // failed/absent scanner closes none (domain rule 3); nor does a successful SCA scan that found no
+        // packages (OSV exit 128 — closes_findings is false), so an empty scan never mass-solves SCA issues
+        // (D-034, plan change #1).
         Set<String> solvableScanners = new HashSet<>();
         for (ScanTask t : tasks.findByScanId(scanId)) {
-            if (t.succeeded()) {
+            if (t.succeeded() && t.closesFindings()) {
                 solvableScanners.add(t.getScanner());
             }
         }
@@ -206,10 +209,15 @@ public class ReconcileService {
                         title(f), null)));
     }
 
-    /** The grouping dimension per type (SPEC). M2 produces only secrets; the rest are exercised in M4/M6. */
+    /**
+     * The grouping dimension per type (SPEC "Grouping"). SCA groups by {@code ecosystem/package} (plan change
+     * #7), so the same package name in two ecosystems (e.g. npm vs Maven) forms two groups; SAST/IaC/Secret by
+     * rule id; EOL by product.
+     */
     private static String discriminator(ScanFinding f) {
         return switch (f.getType()) {
-            case ScanFinding.TYPE_SCA -> f.getPackageName();
+            case ScanFinding.TYPE_SCA -> (f.getEcosystem() == null ? "" : f.getEcosystem()) + "/"
+                    + f.getPackageName();
             case ScanFinding.TYPE_SAST, ScanFinding.TYPE_SECRET, ScanFinding.TYPE_IAC -> f.getRuleId();
             case ScanFinding.TYPE_EOL -> f.getPackageName();
             default -> f.getRuleId();

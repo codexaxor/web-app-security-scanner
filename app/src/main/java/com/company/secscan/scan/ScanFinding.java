@@ -54,6 +54,9 @@ public class ScanFinding {
     @Column(name = "package")
     private String packageName;
 
+    @Column(name = "ecosystem")
+    private String ecosystem;
+
     @Column(name = "installed_version")
     private String installedVersion;
 
@@ -112,6 +115,25 @@ public class ScanFinding {
         return f;
     }
 
+    /**
+     * A dependency (SCA) finding from OSV-Scanner (M4): {@code vulnId} is the preferred id (CVE, else GHSA/OSV),
+     * {@code ecosystem}/{@code packageName} drive the group key, and {@code filePath} is the repo-relative
+     * manifest path. No secret fields.
+     */
+    public static ScanFinding sca(UUID workspaceId, UUID scanId, UUID repositoryId, String vulnId,
+                                  String packageName, String ecosystem, String installedVersion,
+                                  String fixedVersion, String filePath, String toolSeverity) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_SCA, ScanTask.SCANNER_SCA);
+        f.vulnId = vulnId;
+        f.packageName = packageName;
+        f.ecosystem = ecosystem;
+        f.installedVersion = installedVersion;
+        f.fixedVersion = fixedVersion;
+        f.filePath = filePath;
+        f.toolSeverity = toolSeverity;
+        return f;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -146,6 +168,10 @@ public class ScanFinding {
 
     public String getPackageName() {
         return packageName;
+    }
+
+    public String getEcosystem() {
+        return ecosystem;
     }
 
     public String getInstalledVersion() {
