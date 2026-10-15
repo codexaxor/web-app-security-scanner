@@ -66,6 +66,11 @@ public class Scan {
     @Column(name = "reconciled_at")
     private Instant reconciledAt;
 
+    // A short machine code explaining a FAILED scan (e.g. HOST_NOT_ALLOWED, SCANNER_TIMEOUT), for the UI/audit;
+    // null for non-failed scans. Set via failWith(...). (V10)
+    @Column(name = "fail_reason")
+    private String failReason;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -102,6 +107,13 @@ public class Scan {
     /** Terminal status after the pipeline runs: completed (all scanners ok), partial (some failed), or failed. */
     public void finish(String terminalStatus) {
         this.status = terminalStatus;
+        this.finishedAt = Instant.now();
+    }
+
+    /** Marks the scan {@code failed} and records a short machine code for why (persisted for the UI/audit). */
+    public void failWith(String failReason) {
+        this.status = STATUS_FAILED;
+        this.failReason = failReason;
         this.finishedAt = Instant.now();
     }
 
@@ -149,6 +161,10 @@ public class Scan {
 
     public Instant getFinishedAt() {
         return finishedAt;
+    }
+
+    public String getFailReason() {
+        return failReason;
     }
 
     public Instant getReconciledAt() {

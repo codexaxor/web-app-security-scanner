@@ -6,6 +6,11 @@ import static org.mockito.Mockito.when;
 
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.IssueGroup;
+import com.company.secscan.issue.IssueGroupRepository;
+import com.company.secscan.issue.SubIssue;
+import com.company.secscan.issue.SubIssueRepository;
+import com.company.secscan.issue.TriageEventRepository;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.Scan;
@@ -56,6 +61,12 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
     GitlabConnectionRepository connections;
     @Autowired
     RepositoryRepository repositories;
+    @Autowired
+    IssueGroupRepository groups;
+    @Autowired
+    SubIssueRepository subIssues;
+    @Autowired
+    TriageEventRepository events;
 
     private Repository seedLocalRepo() {
         // A local file:// connection: no token decrypt and no host check, so the test exercises only the
@@ -68,9 +79,17 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
     }
 
     @Test
-    void aTerminalTimeoutRecordsATimedOutTaskAndFailsTheScan() {
+    void aTerminalTimeoutRecordsATimedOutTaskClosesNothingAndFailsTheScan() {
         when(launcher.run(any())).thenReturn(new ScannerLauncher.LaunchResult(null, true, "stub log"));
         Repository repo = seedLocalRepo();
+
+        // An already-open secret issue whose scanner (secret) is the one that times out: it must stay open.
+        IssueGroup group = groups.save(new IssueGroup(WORKSPACE, repo.getId(), "secret",
+                "secret|aws-access-token", "Exposed aws-access-token", null));
+        SubIssue open = new SubIssue(WORKSPACE, group.getId(), repo.getId(), "secret", ScanTask.SCANNER_SECRET,
+                "fp-open", null);
+        open.setRuleId("aws-access-token");
+        open = subIssues.save(open);
 
         ScanView scan = scanService.startManual(repo.getId());
         ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
@@ -81,13 +100,20 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
 
         processor.process(job.getId());
 
-        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        Scan failed = scans.findById(scan.id()).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        assertThat(failed.getFailReason()).isEqualTo("SCANNER_TIMEOUT");
         assertThat(jobs.findById(job.getId()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
         assertThat(tasks.findByScanId(scan.id())).singleElement().satisfies(t -> {
             assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_TIMED_OUT);
             assertThat(t.getScanner()).isEqualTo(ScanTask.SCANNER_SECRET);
         });
         assertThat(findings.findByScanId(scan.id())).isEmpty();
+
+        // Domain rule 3: a timed-out scanner closes nothing — the open issue is untouched and wrote no event.
+        assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus())
+                .isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, open.getId())).isEmpty();
     }
 
     @Test

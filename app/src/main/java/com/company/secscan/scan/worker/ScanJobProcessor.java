@@ -98,16 +98,24 @@ public class ScanJobProcessor {
             return;
         }
 
-        // Re-check the ACTUAL clone URL's scheme + host against the allowlist at clone time (SSRF guard, D-018),
-        // BEFORE decrypting the token or launching anything: the api validated the base URL when the connection
-        // was saved, but the worker must not trust that a stored row still points at an allowlisted host.
-        // Skipped for local file:// clones (offline, no host).
-        if (!isLocal(conn)) {
+        // Validate the clone scheme/host at clone time, BEFORE decrypting the token or launching anything.
+        // Production allows only https to an allowlisted host (http only for an allowlisted loopback host,
+        // D-018); the api's save-time check is not trusted here (an SSRF guard, the row may have changed).
+        // A file:// clone is accepted ONLY when the test-only property is set (default off), so a stored
+        // file:// URL cannot drive the worker to read a local path in production.
+        if (isLocal(conn)) {
+            if (!props.isAllowLocalFileClone()) {
+                state.failPermanently(workspaceId, jobId, scan.getId(), "HOST_NOT_ALLOWED",
+                        "file:// clone URLs are disabled (test-only: secscan.scanner.allow-local-file-clone). "
+                                + "Production clones must use https to an allowlisted host (D-018).");
+                return;
+            }
+        } else {
             String cloneUrl = httpsCloneUrl(conn.getBaseUrl(), repo.getPathWithNamespace());
             try {
                 hostPolicy.requireAllowed(cloneUrl);
             } catch (GitLabException e) {
-                state.failPermanently(workspaceId, jobId, scan.getId(),
+                state.failPermanently(workspaceId, jobId, scan.getId(), e.getError().name(),
                         "clone URL host not allowed (SECSCAN_GITLAB_ALLOWED_HOSTS): " + e.getError());
                 return;
             }
@@ -120,7 +128,7 @@ public class ScanJobProcessor {
             ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), scan.getId().toString());
         } catch (RuntimeException e) {
             // Config error (work root missing / not writable by the worker user): fail once, do not retry.
-            state.failPermanently(workspaceId, jobId, scan.getId(),
+            state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",
                     "scan work root not writable (" + props.getWorkRoot() + "): " + e.getMessage());
             return;
         }
@@ -136,14 +144,15 @@ public class ScanJobProcessor {
             try {
                 result = launcher.run(spec);
             } catch (NotFoundException e) {
-                state.failPermanently(workspaceId, jobId, scan.getId(),
+                state.failPermanently(workspaceId, jobId, scan.getId(), "SCANNER_IMAGE_MISSING",
                         "scanner image not found: " + props.getImage() + " (build it: "
                                 + "docker build -t " + props.getImage() + " scanner-image/)");
                 return;
             } catch (DockerException | IllegalStateException e) {
                 // Daemon unreachable, or the launcher refused to run (e.g. would-be-root): a config error.
-                state.failPermanently(workspaceId, jobId, scan.getId(), "Docker error launching the scanner: "
-                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+                state.failPermanently(workspaceId, jobId, scan.getId(), "DOCKER_ERROR",
+                        "Docker error launching the scanner: "
+                                + e.getClass().getSimpleName() + ": " + e.getMessage());
                 return;
             }
 

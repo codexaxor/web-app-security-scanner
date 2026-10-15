@@ -23,6 +23,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Slice-0 hardening (plan change #5): the worker re-checks the ACTUAL clone URL's host against the outbound
@@ -33,6 +35,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 class CloneHostRecheckIT extends AbstractScanWorkerIT {
 
     private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
+
+    // Force the test-only file:// flag OFF here (it is ON in the base) so the file:// rejection path is
+    // exercised. @DynamicPropertySource outranks the base @TestPropertySource.
+    @DynamicPropertySource
+    static void disableLocalFileClone(DynamicPropertyRegistry registry) {
+        registry.add("secscan.scanner.allow-local-file-clone", () -> "false");
+    }
 
     @MockBean
     ScannerLauncher launcher;
@@ -70,12 +79,36 @@ class CloneHostRecheckIT extends AbstractScanWorkerIT {
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
 
-        // Permanent failure: scan failed, job failed (not requeued), nothing scanned.
-        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        // Permanent failure: scan failed with a persisted reason code, job failed (not requeued), nothing scanned.
+        Scan failed = scans.findById(scan.id()).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        assertThat(failed.getFailReason()).isEqualTo("HOST_NOT_ALLOWED");
         assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
         assertThat(findings.findByScanId(scan.id())).isEmpty();
         assertThat(tasks.findByScanId(scan.id())).isEmpty();
         // The container was never launched: the clone URL was rejected before any launch.
+        verify(launcher, never()).run(any());
+    }
+
+    @Test
+    void aFileCloneUrlWithoutTheTestFlagFailsPermanentlyAndNeverLaunches() {
+        // file:// is permitted only behind secscan.scanner.allow-local-file-clone (OFF in this class). Without
+        // it, a stored file:// URL is rejected exactly like a non-allowlisted host — never a local-path read.
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file:///tmp/secscan-fixture", "svc/app", 101L, "ct", "read_api,read_repository",
+                null));
+        Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
+                List.of("Java")));
+
+        ScanView scan = scanService.startManual(repo.getId());
+        List<UUID> claimed = claimer.claimBatch(10);
+        assertThat(claimed).hasSize(1);
+        processor.process(claimed.get(0));
+
+        Scan failed = scans.findById(scan.id()).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        assertThat(failed.getFailReason()).isEqualTo("HOST_NOT_ALLOWED");
+        assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
         verify(launcher, never()).run(any());
     }
 }

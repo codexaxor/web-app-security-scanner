@@ -31,6 +31,12 @@ public class ScannerProperties {
     /** The scheduled claim loop; disabled in tests that drive the pipeline directly. */
     private boolean pollingEnabled = true;
     private long pollIntervalMs = 5000;
+    /**
+     * TEST-ONLY: allow cloning a repository over {@code file:///src} from a local path. Default false — in
+     * production the worker clones only over https to an allowlisted host (D-018). The offline fixture ITs set
+     * this true; it must never be enabled in a real deployment.
+     */
+    private boolean allowLocalFileClone = false;
 
     public String getImage() {
         return image;
@@ -126,5 +132,13 @@ public class ScannerProperties {
 
     public void setPollIntervalMs(long pollIntervalMs) {
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    public boolean isAllowLocalFileClone() {
+        return allowLocalFileClone;
+    }
+
+    public void setAllowLocalFileClone(boolean allowLocalFileClone) {
+        this.allowLocalFileClone = allowLocalFileClone;
     }
 }

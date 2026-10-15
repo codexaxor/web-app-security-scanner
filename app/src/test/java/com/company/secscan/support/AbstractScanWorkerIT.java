@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
@@ -28,6 +29,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("worker")
+// The offline fixture ITs clone synthetic repos over file:// — only permitted behind this test-only flag
+// (default off in production, D-018). A subclass that needs it OFF overrides it via @DynamicPropertySource
+// (which outranks @TestPropertySource), e.g. CloneHostRecheckIT's file:// rejection test.
+@TestPropertySource(properties = "secscan.scanner.allow-local-file-clone=true")
 public abstract class AbstractScanWorkerIT {
 
     private static final String TEST_KEY_B64 = Base64.getEncoder().encodeToString(new byte[32]);

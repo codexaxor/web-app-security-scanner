@@ -68,7 +68,13 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
 
 ## Domain rules — never break
 
-1. Every business table has `workspace_id`, and every query filters by it.
+1. Every business table has `workspace_id`, and every query filters by it. Documented workspace-agnostic
+   exceptions (the only ones; each is a trust root that establishes the workspace for the queries after it):
+   - login `AppUserRepository.findByEmail` — authentication happens before any workspace is known.
+   - the `scan_job` claim (`claimable`, `SELECT … FOR UPDATE SKIP LOCKED`) — the queue is drained across all
+     workspaces; the claimed row's `workspace_id` then scopes the rest of that scan.
+   - the stale-lease sweep (`staleLeases`) — reclaims hung leases across all workspaces; each reclaimed job's
+     `workspace_id` scopes its own state change.
 2. `issue_group` (what users triage) vs `sub_issue` (one finding, stable fingerprint = SHA-256 of fields joined
    with `|`):
    - SCA: package + vuln id (CVE, else GHSA/OSV) + manifest path

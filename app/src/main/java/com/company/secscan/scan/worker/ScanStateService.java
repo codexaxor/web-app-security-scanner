@@ -139,7 +139,7 @@ public class ScanStateService {
                         logExcerpt));
             }
             job.markFailed();
-            scan.finish(Scan.STATUS_FAILED);
+            scan.failWith("SCANNER_TIMEOUT");
         } else {
             log.info("Scan {} timed out; will be retried (attempt {})", scanId, job.getAttempts());
             job.requeue(Instant.now().plusSeconds(RETRY_BACKOFF_SECONDS));
@@ -154,11 +154,11 @@ public class ScanStateService {
      * once with a clear reason and DO NOT retry — retrying a misconfiguration just wastes attempts.
      */
     @Transactional
-    public void failPermanently(UUID workspaceId, UUID jobId, UUID scanId, String reason) {
+    public void failPermanently(UUID workspaceId, UUID jobId, UUID scanId, String failCode, String reason) {
         Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
-        log.error("Scan {} failed (not retried): {}", scanId, reason);
-        scan.finish(Scan.STATUS_FAILED);
+        log.error("Scan {} failed (not retried, {}): {}", scanId, failCode, reason);
+        scan.failWith(failCode);
         job.markFailed();
         scans.save(scan);
         jobs.save(job);
@@ -169,8 +169,8 @@ public class ScanStateService {
     public void resolveNoAccess(UUID workspaceId, UUID jobId, UUID scanId, String reason) {
         Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
-        log.warn("Scan {} failed: {}", scanId, reason);
-        scan.finish(Scan.STATUS_FAILED);
+        log.warn("Scan {} failed (NO_ACCESSIBLE_CONNECTION): {}", scanId, reason);
+        scan.failWith("NO_ACCESSIBLE_CONNECTION");
         job.markDone();
         scans.save(scan);
         jobs.save(job);
