@@ -62,7 +62,7 @@ public class ScanClaimer {
         for (ScanJob job : jobs.staleLeases(threshold)) {
             log.warn("Reclaiming stale lease on scan job {} (locked by {} at {})",
                     job.getId(), job.getLockedBy(), job.getLockedAt());
-            state.failOrRequeue(job.getId(), job.getScanId(), "lease expired");
+            state.failOrRequeue(job.getWorkspaceId(), job.getId(), job.getScanId(), "lease expired");
         }
     }
 

@@ -60,11 +60,12 @@ public class ReconcileService {
 
     /**
      * Reconciles one scan's findings into {@code issue_group}/{@code sub_issue}. Idempotent (a second run is a
-     * no-op) and guarded against stale, out-of-order scans. Always stamps {@code scan.reconciled_at}.
+     * no-op) and guarded against stale, out-of-order scans. Always stamps {@code scan.reconciled_at}. The scan
+     * is loaded scoped to {@code workspaceId} (domain rule 1); every other query is already workspace-scoped.
      */
     @Transactional
-    public void reconcile(UUID scanId) {
-        Scan scan = scans.findById(scanId).orElseThrow();
+    public void reconcile(UUID scanId, UUID workspaceId) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         if (scan.getReconciledAt() != null) {
             return; // already reconciled (idempotent)
         }
@@ -79,7 +80,7 @@ public class ReconcileService {
             return;
         }
 
-        UUID workspaceId = scan.getWorkspaceId();
+        // workspaceId == scan.getWorkspaceId() (the scan was fetched scoped to it).
         UUID repositoryId = scan.getRepositoryId();
 
         // Scanners that ran OK this scan may close their missing findings; a failed/absent scanner closes none.

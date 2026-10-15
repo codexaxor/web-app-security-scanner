@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
 
+    /** Workspace-scoped lookup (domain rule 1): a repository is only visible within its own workspace. */
+    Optional<Repository> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
+
     Page<Repository> findByWorkspaceId(UUID workspaceId, Pageable pageable);
 
     List<Repository> findByWorkspaceId(UUID workspaceId);

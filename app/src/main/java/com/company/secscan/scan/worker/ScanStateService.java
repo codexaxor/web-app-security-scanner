@@ -16,6 +16,7 @@ import com.company.secscan.scan.ScanTaskRepository;
 import com.company.secscan.scan.parse.ParsedScan;
 import com.company.secscan.scan.parse.ScannerTaskResult;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,8 +55,8 @@ public class ScanStateService {
     }
 
     @Transactional
-    public void markRunning(UUID scanId) {
-        Scan scan = scans.findById(scanId).orElseThrow();
+    public void markRunning(UUID workspaceId, UUID scanId) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         scan.markRunning();
         scans.save(scan);
     }
@@ -65,9 +66,9 @@ public class ScanStateService {
      * {@link ScanFinding}, the repository's last-scanned SHA, and the scan's terminal status; the job is done.
      */
     @Transactional
-    public void recordSuccess(UUID scanId, UUID jobId, UUID repositoryId, ParsedScan parsed, String logExcerpt,
-                              String terminalStatus) {
-        Scan scan = scans.findById(scanId).orElseThrow();
+    public void recordSuccess(UUID workspaceId, UUID scanId, UUID jobId, UUID repositoryId, ParsedScan parsed,
+                              String logExcerpt, String terminalStatus) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         scan.recordCommit(parsed.commit());
         scan.recordToolVersions(parsed.toolVersions());
         scan.finish(terminalStatus);
@@ -86,16 +87,16 @@ public class ScanStateService {
                     scanId, parsed.findings().size());
         }
 
-        repositories.findById(repositoryId).ifPresent(repo -> {
+        repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(repo -> {
             repo.recordScannedSha(parsed.commit());
             repositories.save(repo);
         });
 
         // Reconcile in the SAME transaction (M3 plan addition 1): findings and their issue-model state commit
         // atomically, so a worker crash never leaves findings unreconciled. No network I/O inside reconcile.
-        reconcile.reconcile(scanId);
+        reconcile.reconcile(scanId, workspaceId);
 
-        jobs.findById(jobId).ifPresent(job -> {
+        jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {
             job.markDone();
             jobs.save(job);
         });
@@ -103,9 +104,9 @@ public class ScanStateService {
 
     /** A retryable failure (timeout, no result, clone failure, unexpected error): requeue, or fail if exhausted. */
     @Transactional
-    public void failOrRequeue(UUID jobId, UUID scanId, String reason) {
-        Scan scan = scans.findById(scanId).orElseThrow();
-        ScanJob job = jobs.findById(jobId).orElseThrow();
+    public void failOrRequeue(UUID workspaceId, UUID jobId, UUID scanId, String reason) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
+        ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
         if (job.attemptsExhausted()) {
             log.warn("Scan {} failed after {} attempts: {}", scanId, job.getAttempts(), reason);
             job.markFailed();
@@ -120,13 +121,42 @@ public class ScanStateService {
     }
 
     /**
+     * The scanner container timed out and was killed (no manifest produced). On a terminal timeout (attempts
+     * exhausted) record one {@code timed_out} {@link ScanTask} per scanner the image runs — so the outcome is
+     * auditable and, per domain rule 3, a timed-out scanner never closes its findings — then fail the scan. If
+     * attempts remain, requeue instead and write no tasks (the retry produces its own fresh tasks).
+     */
+    @Transactional
+    public void failOrRequeueTimedOut(UUID workspaceId, UUID jobId, UUID scanId, List<String> scanners,
+                                      String logExcerpt) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
+        ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
+        if (job.attemptsExhausted()) {
+            log.warn("Scan {} timed out after {} attempts; recording timed_out task(s) and failing",
+                    scanId, job.getAttempts());
+            for (String scanner : scanners) {
+                tasks.save(new ScanTask(workspaceId, scanId, scanner, ScanTask.STATUS_TIMED_OUT, null, null,
+                        logExcerpt));
+            }
+            job.markFailed();
+            scan.finish(Scan.STATUS_FAILED);
+        } else {
+            log.info("Scan {} timed out; will be retried (attempt {})", scanId, job.getAttempts());
+            job.requeue(Instant.now().plusSeconds(RETRY_BACKOFF_SECONDS));
+            scan.markQueuedForRetry();
+        }
+        jobs.save(job);
+        scans.save(scan);
+    }
+
+    /**
      * A configuration error (work root not writable, Docker unreachable, scanner image missing): fail the scan
      * once with a clear reason and DO NOT retry — retrying a misconfiguration just wastes attempts.
      */
     @Transactional
-    public void failPermanently(UUID jobId, UUID scanId, String reason) {
-        Scan scan = scans.findById(scanId).orElseThrow();
-        ScanJob job = jobs.findById(jobId).orElseThrow();
+    public void failPermanently(UUID workspaceId, UUID jobId, UUID scanId, String reason) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
+        ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
         log.error("Scan {} failed (not retried): {}", scanId, reason);
         scan.finish(Scan.STATUS_FAILED);
         job.markFailed();
@@ -136,9 +166,9 @@ public class ScanStateService {
 
     /** The connection cannot reach the repository (resolved out of band): fail the scan, finish the job. */
     @Transactional
-    public void resolveNoAccess(UUID jobId, UUID scanId, String reason) {
-        Scan scan = scans.findById(scanId).orElseThrow();
-        ScanJob job = jobs.findById(jobId).orElseThrow();
+    public void resolveNoAccess(UUID workspaceId, UUID jobId, UUID scanId, String reason) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
+        ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
         log.warn("Scan {} failed: {}", scanId, reason);
         scan.finish(Scan.STATUS_FAILED);
         job.markDone();

@@ -1,0 +1,109 @@
+package com.company.secscan.scan.worker;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+import com.company.secscan.gitlab.GitlabConnection;
+import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.repository.Repository;
+import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.Scan;
+import com.company.secscan.scan.ScanFindingRepository;
+import com.company.secscan.scan.ScanJob;
+import com.company.secscan.scan.ScanJobRepository;
+import com.company.secscan.scan.ScanRepository;
+import com.company.secscan.scan.ScanTask;
+import com.company.secscan.scan.ScanTaskRepository;
+import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.support.AbstractScanWorkerIT;
+import com.company.secscan.workspace.Workspace;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.mock.mockito.MockBean;
+
+/**
+ * Slice-0 hardening (point 2c): when the scanner container times out and is killed, the {@code timed_out}
+ * scan_task status (defined in V6 but never written until now) is recorded on a terminal timeout — so the
+ * outcome is auditable and, per domain rule 3, a timed-out scanner never closes its findings. A non-terminal
+ * timeout requeues and writes no task (the retry produces its own). The launcher is mocked to report a timeout,
+ * so no real container runs.
+ */
+class ScannerTimeoutIT extends AbstractScanWorkerIT {
+
+    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
+
+    @MockBean
+    ScannerLauncher launcher;
+
+    @Autowired
+    com.company.secscan.scan.ScanService scanService;
+    @Autowired
+    ScanClaimer claimer;
+    @Autowired
+    ScanJobProcessor processor;
+    @Autowired
+    ScanRepository scans;
+    @Autowired
+    ScanJobRepository jobs;
+    @Autowired
+    ScanTaskRepository tasks;
+    @Autowired
+    ScanFindingRepository findings;
+    @Autowired
+    GitlabConnectionRepository connections;
+    @Autowired
+    RepositoryRepository repositories;
+
+    private Repository seedLocalRepo() {
+        // A local file:// connection: no token decrypt and no host check, so the test exercises only the
+        // timeout path. The launcher is mocked, so the path need not exist.
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file:///tmp/secscan-fixture", "svc/app", 101L, "ct", "read_api,read_repository",
+                null));
+        return repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
+                List.of("Java")));
+    }
+
+    @Test
+    void aTerminalTimeoutRecordsATimedOutTaskAndFailsTheScan() {
+        when(launcher.run(any())).thenReturn(new ScannerLauncher.LaunchResult(null, true, "stub log"));
+        Repository repo = seedLocalRepo();
+
+        ScanView scan = scanService.startManual(repo.getId());
+        ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
+        for (int i = 0; i < ScanJob.MAX_ATTEMPTS; i++) {
+            job.lease("worker");
+        }
+        jobs.save(job);
+
+        processor.process(job.getId());
+
+        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        assertThat(jobs.findById(job.getId()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
+        assertThat(tasks.findByScanId(scan.id())).singleElement().satisfies(t -> {
+            assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_TIMED_OUT);
+            assertThat(t.getScanner()).isEqualTo(ScanTask.SCANNER_SECRET);
+        });
+        assertThat(findings.findByScanId(scan.id())).isEmpty();
+    }
+
+    @Test
+    void aNonTerminalTimeoutRequeuesWithoutWritingATask() {
+        when(launcher.run(any())).thenReturn(new ScannerLauncher.LaunchResult(null, true, "stub log"));
+        Repository repo = seedLocalRepo();
+
+        ScanView scan = scanService.startManual(repo.getId());
+        List<UUID> claimed = claimer.claimBatch(10); // one lease, attempts = 1 (< MAX_ATTEMPTS)
+        assertThat(claimed).hasSize(1);
+
+        processor.process(claimed.get(0));
+
+        assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_QUEUED);
+        assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_QUEUED);
+        // No stale task on a scan that will be retried.
+        assertThat(tasks.findByScanId(scan.id())).isEmpty();
+    }
+}

@@ -67,7 +67,7 @@ class ReconcileAtomicityIT extends AbstractScanWorkerIT {
             return new ScannerLauncher.LaunchResult(2, false, "stub log");
         });
         Mockito.doThrow(new IllegalStateException("boom during reconcile"))
-                .when(reconcile).reconcile(any());
+                .when(reconcile).reconcile(any(), any());
 
         GitlabConnection conn = connections.save(GitlabConnection.forProject(
                 WORKSPACE, "file:///tmp/secscan-fixture", "svc/app", 101L, "ct", "read_api,read_repository",

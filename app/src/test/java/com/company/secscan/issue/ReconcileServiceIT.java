@@ -102,7 +102,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         // A scan where the secret scanner FAILED (partial): the finding is absent but must not be solved.
         UUID scanId = seedScanWithSecretTask(repo.getId(), ScanTask.STATUS_FAILED, Scan.STATUS_PARTIAL);
 
-        reconcile.reconcile(scanId);
+        reconcile.reconcile(scanId, WORKSPACE);
 
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
         assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, open.getId())).isEmpty();
@@ -116,7 +116,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         SubIssue open = seedOpenSecret(repo.getId(), "fp-gone", fingerprinter.require().keyId());
         UUID scanId = seedScanWithSecretTask(repo.getId(), ScanTask.STATUS_OK, Scan.STATUS_COMPLETED);
 
-        reconcile.reconcile(scanId);
+        reconcile.reconcile(scanId, WORKSPACE);
 
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
     }
@@ -132,7 +132,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         Thread.sleep(10);
         Scan newerB = scans.save(markReconciled(Scan.manual(WORKSPACE, repo.getId())));
 
-        reconcile.reconcile(olderA);
+        reconcile.reconcile(olderA, WORKSPACE);
 
         // A is stale (B is newer and reconciled), so it must not solve the open finding.
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
@@ -148,7 +148,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
         assertThat(fingerprinter.require().keyId()).isNotEqualTo("oldkeyid");
         UUID scanId = seedScanWithSecretTask(repo.getId(), ScanTask.STATUS_OK, Scan.STATUS_COMPLETED);
 
-        reconcile.reconcile(scanId);
+        reconcile.reconcile(scanId, WORKSPACE);
 
         // The key changed, so the (re-fingerprinted) secret must NOT be mass-solved (D-029).
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
@@ -174,7 +174,7 @@ class ReconcileServiceIT extends AbstractScanWorkerIT {
 
         UUID scanId = seedScanWithSecretFinding(repo.getId(), "aws-access-token", "config/app.yml", "deadbeef");
 
-        reconcile.reconcile(scanId);
+        reconcile.reconcile(scanId, WORKSPACE);
 
         // Old-key row frozen: untouched, no triage event.
         assertThat(subIssues.findById(oldKey.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
