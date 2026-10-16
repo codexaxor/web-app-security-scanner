@@ -1,0 +1,4 @@
+{"results":[{"source":{"path":"/work/checkout/sub/pom.xml","type":"lockfile"},
+  "packages":[{"package":{"name":"com.example:widget","version":"1.2.3","ecosystem":"Maven"},
+    "groups":[{"ids":["GHSA-aaaa-bbbb-cccc"],"aliases":["CVE-2026-9999","CVE-2024-1111","GHSA-aaaa-bbbb-cccc"],"max_severity":"9.8"}],
+    "vulnerabilities":[{"id":"GHSA-aaaa-bbbb-cccc"}]}]}]}

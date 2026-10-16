@@ -13,6 +13,7 @@ public record RawFinding(
         String ruleId,
         String vulnId,
         String packageName,
+        String ecosystem,
         String installedVersion,
         String fixedVersion,
         String filePath,
@@ -29,6 +30,7 @@ public record RawFinding(
     public static final String TYPE_EOL = "eol";
 
     public static final String SCANNER_SECRET = "secret";
+    public static final String SCANNER_SCA = "sca";
 
     /**
      * A secret finding. The raw value is never passed in; {@code secretHash} is its SHA-256 and
@@ -36,7 +38,18 @@ public record RawFinding(
      */
     public static RawFinding secret(String ruleId, String filePath, Integer line, String secretHash,
                                     String secretPreview, String toolSeverity) {
-        return new RawFinding(TYPE_SECRET, SCANNER_SECRET, ruleId, null, null, null, null,
+        return new RawFinding(TYPE_SECRET, SCANNER_SECRET, ruleId, null, null, null, null, null,
                 filePath, line, null, secretHash, secretPreview, toolSeverity);
+    }
+
+    /**
+     * A dependency (SCA) finding: one per OSV alias group (D-030 / plan change #3). {@code vulnId} is the
+     * group's preferred id (lowest-sorted CVE, else GHSA/OSV), {@code ecosystem}/{@code packageName} drive the
+     * group key, and {@code filePath} is the repo-relative manifest path. No secret fields.
+     */
+    public static RawFinding sca(String vulnId, String packageName, String ecosystem, String installedVersion,
+                                 String fixedVersion, String manifestPath, String toolSeverity) {
+        return new RawFinding(TYPE_SCA, SCANNER_SCA, null, vulnId, packageName, ecosystem, installedVersion,
+                fixedVersion, manifestPath, null, null, null, null, toolSeverity);
     }
 }

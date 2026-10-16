@@ -104,7 +104,8 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         Scan finished = scans.findById(scan.id()).orElseThrow();
         assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_COMPLETED);
         assertThat(finished.getCommitSha()).isEqualTo(fixtureCommit);
-        assertThat(finished.getToolVersions()).containsKey("gitleaks");
+        // tool_versions records every scanner's version, including OSV-Scanner (plan change #9).
+        assertThat(finished.getToolVersions()).containsKeys("gitleaks", "osv-scanner");
 
         List<ScanFinding> stored = findings.findByScanId(scan.id());
         assertThat(stored).singleElement().satisfies(f -> {
@@ -117,13 +118,18 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
             assertThat(f.getSecretPreview()).isEqualTo("AKIA").isNotEqualTo(RAW_KEY);
         });
 
-        assertThat(tasks.findByScanId(scan.id())).singleElement().satisfies(t -> {
-            assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK);
-            // The stored log excerpt must never contain the raw secret or any part of it (point 7).
-            assertThat(t.getLogExcerpt() == null ? "" : t.getLogExcerpt())
-                    .doesNotContain(RAW_KEY)
-                    .doesNotContain(RAW_SECRET_PART);
-        });
+        // Two scanners now run in the one container: the secret scanner and OSV-Scanner (SCA). The fixture has
+        // no dependency manifests, so SCA is ok with no packages (exit 128) and the scan still completes.
+        List<ScanTask> scanTasks = tasks.findByScanId(scan.id());
+        assertThat(scanTasks).extracting(ScanTask::getScanner)
+                .containsExactlyInAnyOrder(ScanTask.SCANNER_SECRET, ScanTask.SCANNER_SCA);
+        assertThat(scanTasks).allSatisfy(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK));
+        ScanTask secretTask = scanTasks.stream()
+                .filter(t -> ScanTask.SCANNER_SECRET.equals(t.getScanner())).findFirst().orElseThrow();
+        // The stored log excerpt must never contain the raw secret or any part of it (point 7).
+        assertThat(secretTask.getLogExcerpt() == null ? "" : secretTask.getLogExcerpt())
+                .doesNotContain(RAW_KEY)
+                .doesNotContain(RAW_SECRET_PART);
         assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_DONE);
 
         // Container is gone afterwards.

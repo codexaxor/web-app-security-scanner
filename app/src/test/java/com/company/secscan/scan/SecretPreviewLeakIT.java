@@ -136,10 +136,11 @@ class SecretPreviewLeakIT extends AbstractScanWorkerIT {
         String firstLineOnly = expectedHash("-----BEGIN PRIVATE KEY-----");
         assertThat(pk.getSecretHash()).isIn(whole, wholeNl).isNotEqualTo(firstLineOnly);
 
-        // No part of the key leaks into the stored preview, hash, log excerpt, or the API view.
-        ScanTask task = tasks.findByScanId(scan.id()).get(0);
-        String logExcerpt = task.getLogExcerpt() == null ? "" : task.getLogExcerpt();
-        assertThat(logExcerpt).doesNotContain(keyBodySample);
+        // No part of the key leaks into the stored preview, hash, any task's log excerpt, or the API view.
+        // (Two scanners run now — secret and SCA — so check every task's excerpt.)
+        assertThat(tasks.findByScanId(scan.id()))
+                .allSatisfy(t -> assertThat(t.getLogExcerpt() == null ? "" : t.getLogExcerpt())
+                        .doesNotContain(keyBodySample));
         assertThat(pk.getSecretPreview()).doesNotContain(keyBodySample);
         assertThat(pk.getSecretHash()).doesNotContain(keyBodySample);
 

@@ -14,6 +14,115 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-035 .NET SCA uses OSV-Scanner's native .csproj/CPM extraction, not a custom input file (2026-10-16, accepted; supersedes the .NET fallback mechanism of D-031)
+Context: D-031 (and the SPEC) assumed OSV-Scanner could not read `.csproj` and that we would parse direct
+`<PackageReference>` versions ourselves and feed OSV a custom `osv-scanner.json` (`--lockfile osv-scanner:…`,
+plan change #4). Probing the pinned **OSV-Scanner v2.7.0** showed it source-scans `.csproj` AND NuGet Central
+Package Management (`Directory.Packages.props`) natively: a bare `App.csproj` with a vulnerable
+`PackageReference` yields `source.path = <the .csproj>` and the expected GHSA/CVE.
+Decision: rely on OSV's native `.csproj`/CPM extraction (direct `PackageReference` versions, already mapped to
+the real `.csproj` path). We do NOT write a custom input file (change #4 dropped — it would duplicate OSV's
+native extraction, giving two findings per package, unless we also disabled OSV's plugin). We still raise a
+`MISSING_NUGET_LOCKFILE` warning per `.csproj` that has no sibling `packages.lock.json` (the coverage gap is
+real: without the lockfile only direct deps are seen, no transitive). Plan change #6 is kept but enforced on our
+side: our inventory step reads each `.csproj` with `xmllint --nonet` (never `--noent`) and raises an
+`UNRESOLVED_VERSION` warning (path + package) for versions that are MSBuild properties (`$(…)`), ranges, `*`
+wildcards or `VersionOverride`; the parser also drops OSV packages whose version is such a non-concrete string
+(OSV passes them through literally, e.g. `Serilog@$(SerilogVersion)`, matching nothing). Transitive NuGet
+resolution without a lockfile remains an M4b item.
+Consequences: less code and no double-counting; .NET direct-dep SCA works out of the box. `UNRESOLVED_VERSION`
+visibility depends on our inventory parse, not OSV.
+NuGet .csproj/lockfile dedup (2026-10-16, from the manual real-GitLab check): when a `.csproj` and a
+`packages.lock.json` sit in the same directory, OSV v2.7.0 reports the same package from BOTH sources, so the
+parser emitted two SCA findings (two sub-issues) for one vulnerability. Rule (in `ScannerOutputParser.parseOsv`):
+a `.csproj`-sourced finding is kept ONLY when that `.csproj` (repo-relative path) has a `MISSING_NUGET_LOCKFILE`
+warning in the same scan — i.e. the inventory step found no sibling `packages.lock.json` on disk. Otherwise a
+lockfile exists and is authoritative (resolved versions, includes transitives), so the `.csproj` copy is
+dropped. The rule keys on the filesystem inventory (the warning), NOT on OSV's results: OSV may omit a clean
+lockfile from its JSON, and a `.csproj` beside it must still be dropped or its declared-but-not-resolved version
+would be a false positive. Proven by `ScannerOutputParserTest` —
+`nugetCsprojFindingIsKeptWhenItHasAMissingLockfileWarning`, `nugetCsprojFindingIsDroppedWhenNoMissingLockfileWarning`,
+`nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt`.
+Vuln-id choice is FROZEN from M4 on (2026-10-16): the preferred id is the numerically lowest CVE by (year,
+sequence) across the alias group, else the lowest-sorted GHSA, else the first id (`ScannerOutputParser.pickVulnId`).
+Because this id feeds the SCA fingerprint (`package | vulnId | manifestPath`), changing the rule would
+re-fingerprint every stored SCA sub-issue (mass solve + reopen), so it must not change once SCA findings are
+stored. The parser also drops any OSV result whose source path is not safely repo-relative (still absolute or
+containing a `..` segment) and raises an `UNRESOLVED_PATH` warning, so such a path can never enter a fingerprint.
+Known gap (M4, for the report): npm `devDependencies` and Gradle test configurations are NOT excluded from SCA
+— OSV-Scanner v2.7.0's JSON exposes no dependency-group ("dev") marker to filter on (Q2). Deferred to M7's
+`DEV_DEPENDENCY` auto-triage, which will ignore such findings with a visible reason code.
+
+## D-034 OSV-Scanner pinned to v2.7.0 (checksum + flags) (2026-10-16, accepted)
+Context: M4's single SCA engine is OSV-Scanner (D-006), added to the scanner image; our rule is to pin every
+scanner by version + checksum (as Gitleaks is, D-023).
+Decision: pin OSV-Scanner **v2.7.0** (https://github.com/google/osv-scanner/releases/tag/v2.7.0). The release
+ships raw per-arch binaries verified against `osv-scanner_SHA256SUMS` before use:
+`linux_amd64 = 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b`,
+`linux_arm64 = 4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7`. Run
+`osv-scanner scan source -r --format json` over the checkout; default deps.dev online data source (no
+`--offline`, no `--data-source=native`, per D-006). The OSV-Scanner version is recorded in `scan.tool_versions`.
+Exit codes: `0`/`1` = success (0 = no vulns, 1 = vulns found); `128` = no packages (scan_task `ok` **plus** a
+`NO_MANIFESTS` warning, and the SCA scanner is NOT solvable for that scan — closes nothing, domain rule 3 /
+D-030); all other codes = failure (closes no SCA issue, scan partial). The scanner image tag stays
+`secscan-scanner:8.21.2` — an identifier matching `ScannerProperties.image`, tracked for the M10 weekly rebuild.
+Consequences: a reproducible SCA engine; a new runtime egress need to deps.dev/osv.dev (D-033). Any bump is new
+checksums + a new decision.
+Maven transitive resolution (verified v2.7.0): `osv-scanner scan source -r` resolves Maven transitive
+dependencies **by default** via the **deps.dev** data source — no `--allow-unsafe-plugins`/native flag, and it
+does **not** follow `<repositories>`/`<pluginRepositories>` or other URLs declared in the scanned pom (verified:
+a bogus `<repositories>` URL was ignored while an undeclared transitive dep was still resolved). Parent/
+effective-POM lookups, when needed, go to **Maven Central** (a fixed host), not to artifact-declared URLs. We
+deliberately do **not** pass `--data-source=native` (which would fetch from Maven Central/registries via the
+`transitivedependency/pomxml` plugin). Egress implication for D-033: allow `api.deps.dev`, `api.osv.dev`, and
+`repo.maven.apache.org`.
+
+## D-033 Scanner egress stays on the default bridge network for M4 (2026-10-16, accepted; revisit before any deployment or M10, whichever comes first)
+Context: SPEC "Securing the scanner" wants scanner egress limited to an allowlist (GitLab, api.osv.dev,
+api.deps.dev, …). The scanner has used the default Docker bridge (full egress) since M2; M4 adds the first real
+egress need (OSV → osv.dev / deps.dev).
+Decision: keep the default bridge network for M4. An enforced egress allowlist (an egress-proxy sidecar on an
+internal network with `HTTPS_PROXY` + a git proxy, allowlisting only GitLab, `api.osv.dev`, `api.deps.dev` and
+`repo.maven.apache.org` — the last for OSV's Maven effective-POM/parent lookups, D-034) is deferred. This is not a
+hardening regression — the bridge predates M4 — and every other container control stays in force (non-root,
+read-only rootfs, `--cap-drop=ALL`, `no-new-privileges`, CPU/memory/PID limits, hard timeout, no Docker socket).
+Revisit when: before any deployment or M10, whichever comes first.
+Consequences: a compromised scanner could reach arbitrary hosts until the allowlist lands; accepted for local
+single-tenant mode.
+
+## D-032 Public package registries assumed; private-registry detection is M4b (2026-10-16, accepted; resolves OD-3)
+Context: OD-3 — private registries (Nexus, Artifactory, GitLab package registry) — had to be settled before M4.
+Decision: M4 assumes public registries (osv.dev/deps.dev online, D-006) and stores no registry credentials.
+Detecting and handling private registries is deferred to M4b.
+Consequences: packages served only from a private registry may be unresolved in M4; no registry credentials are
+held anywhere.
+
+## D-031 Gradle/.NET without lockfiles in M4: warn + partial; static Gradle resolver is M4b (2026-10-16, accepted; partly resolves OD-1/OD-2)
+Context: OD-1 (Gradle without a lockfile) and OD-2 (.NET without `packages.lock.json`) had to be settled before
+M4, and we never run a build (D-004, D-030).
+Decision: M4 raises a per-build-file "missing lockfile" scan warning and produces partial results. .NET falls
+back to the **direct** `<PackageReference>` versions in `.csproj` (and `Directory.Packages.props`), written
+outside the clone in OSV-Scanner's documented custom format and fed to it via `--lockfile osv-scanner:<path>`,
+only for projects that have no `packages.lock.json` in the same folder; versions that are MSBuild properties,
+ranges, wildcards or `VersionOverride` are skipped with an `UNRESOLVED_VERSION` warning (never guessed). Gradle
+without a lockfile is warning-only (a `build.gradle`-only scan finds little because Spring Boot BOM-managed
+versions are absent). A static Gradle resolver (and NuGet transitive resolution if needed) is a separate
+milestone **M4b**, designed later. Never run gradle/dotnet/npm/mvn (D-004). Python is out of M4 (not an MVP
+ecosystem).
+Consequences: OD-1/OD-2 are partly resolved now (warn + .NET direct fallback) and finished in M4b; Gradle SCA
+coverage is limited until then.
+
+## D-030 Scanned repositories are never modified; coverage gaps are shown, not hidden (2026-10-16, accepted)
+Context: SCA needs dependency versions, but running a build (gradle/dotnet/npm/mvn) on an untrusted repo is code
+execution (D-004) and would also mean writing files (lockfiles, CI jobs) into repositories we hold only
+read-only access to.
+Decision: SecScan never modifies a scanned repository and never requires a change to it (no committed lockfiles,
+CI jobs or config files as a precondition to scan). Dependency resolution is therefore static only (with D-004).
+Where a repository's layout limits what can be resolved, the gap is surfaced as a scan-health warning (per build
+file), never silently dropped.
+Consequences: SCA completeness depends on what the repo already commits; partial coverage is explicit and
+visible. Teams can improve coverage by committing lockfiles but are never forced to.
+
 ## D-029 The secret fingerprint key must never change once secrets are stored (2026-10-14, accepted)
 Context: a secret sub-issue's fingerprint is derived from `secret_hash = HMAC-SHA256(SECSCAN_FINGERPRINT_KEY,
 container SHA-256)` (D-027). Changing the key re-fingerprints every secret, so on the next scan the old
@@ -264,9 +373,10 @@ Decision: `workspace_id` on every business table from day one.
 
 ## Open decisions
 
-- OD-1 Gradle repos without lockfiles — needed before M4
-- OD-2 .NET repos without `packages.lock.json` — needed before M4
-- OD-3 Private package registries — needed before M4
+- OD-1 Gradle repos without lockfiles — PARTLY RESOLVED by D-031 (warn-only in M4); finished in M4b
+- OD-2 .NET repos without `packages.lock.json` — PARTLY RESOLVED by D-031 (`.csproj` direct fallback in M4);
+  finished in M4b
+- OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name

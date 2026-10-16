@@ -1,0 +1,4 @@
+{"results":[{"source":{"path":"/work/outside/pom.xml","type":"lockfile"},
+  "packages":[{"package":{"name":"com.example:evil","version":"1.0.0","ecosystem":"Maven"},
+    "groups":[{"ids":["CVE-2024-0001"],"aliases":["CVE-2024-0001"],"max_severity":"9.8"}],
+    "vulnerabilities":[{"id":"CVE-2024-0001"}]}]}]}

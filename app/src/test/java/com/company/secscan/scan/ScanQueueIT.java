@@ -163,7 +163,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
         }
         jobs.save(job);
 
-        state.failOrRequeue(job.getId(), scan.id(), "still failing");
+        state.failOrRequeue(WORKSPACE, job.getId(), scan.id(), "still failing");
 
         assertThat(jobs.findById(job.getId()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_FAILED);
         assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_FAILED);
