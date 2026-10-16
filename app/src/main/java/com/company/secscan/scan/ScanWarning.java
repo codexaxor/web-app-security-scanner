@@ -12,8 +12,8 @@ import java.util.UUID;
 /**
  * A scan-health warning recorded for one scan (M4): a coverage gap SecScan surfaces rather than hides (D-030).
  * {@code code} is a machine code ({@code MISSING_GRADLE_LOCKFILE}, {@code MISSING_NUGET_LOCKFILE},
- * {@code UNRESOLVED_VERSION}, {@code NO_MANIFESTS}); {@code filePath} is the repo-relative build file, or null
- * when the warning is repository-wide.
+ * {@code UNRESOLVED_VERSION}, {@code NO_MANIFESTS}, {@code UNRESOLVED_PATH}); {@code filePath} is the
+ * repo-relative build file, or null when the warning is repository-wide.
  */
 @Entity
 @Table(name = "scan_warning")

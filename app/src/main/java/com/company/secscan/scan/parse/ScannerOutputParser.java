@@ -32,6 +32,8 @@ public class ScannerOutputParser {
     static final String MASKED = "****";
     /** Warning code the scanner raises per .csproj that has no sibling packages.lock.json (run-scan.sh). */
     static final String WARN_MISSING_NUGET_LOCKFILE = "MISSING_NUGET_LOCKFILE";
+    /** Parser-side warning: an OSV source path that is not safely repo-relative (absolute or contains ".."). */
+    static final String WARN_UNRESOLVED_PATH = "UNRESOLVED_PATH";
 
     private final ObjectMapper mapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -46,11 +48,15 @@ public class ScannerOutputParser {
             return ParsedScan.cloneFailure();
         }
 
-        // The .csproj paths the scan flagged with MISSING_NUGET_LOCKFILE (no sibling packages.lock.json on
-        // disk). These, and only these, keep their .csproj-sourced SCA findings; see parseOsv (D-035).
+        // Warnings the scanner surfaced in its manifest (coverage gaps), built first so the SCA parse can append
+        // its own (UNRESOLVED_PATH for an OSV source path that escaped the checkout). The .csproj paths flagged
+        // MISSING_NUGET_LOCKFILE (no sibling packages.lock.json on disk) keep their .csproj-sourced SCA findings;
+        // see parseOsv (D-035).
+        List<ScanWarning> warnings = new ArrayList<>();
         java.util.Set<String> csprojMissingLockfile = new java.util.HashSet<>();
         if (m.warnings != null) {
             for (ManifestWarning w : m.warnings) {
+                warnings.add(new ScanWarning(w.code, w.message, w.filePath));
                 if (WARN_MISSING_NUGET_LOCKFILE.equals(w.code) && w.filePath != null) {
                     csprojMissingLockfile.add(w.filePath);
                 }
@@ -69,16 +75,11 @@ public class ScannerOutputParser {
             if (RawFinding.SCANNER_SECRET.equals(s.name)) {
                 findings.addAll(readSecretFindings(outDir.resolve(s.findingsFile)));
             } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
-                findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile));
+                findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile,
+                        warnings));
             }
         }
 
-        List<ScanWarning> warnings = new ArrayList<>();
-        if (m.warnings != null) {
-            for (ManifestWarning w : m.warnings) {
-                warnings.add(new ScanWarning(w.code, w.message, w.filePath));
-            }
-        }
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings);
     }
@@ -106,7 +107,11 @@ public class ScannerOutputParser {
      * (D-035).
      */
     List<RawFinding> parseOsv(Path osvJson, String checkoutPath) {
-        return parseOsv(osvJson, checkoutPath, java.util.Set.of());
+        return parseOsv(osvJson, checkoutPath, java.util.Set.of(), new ArrayList<>());
+    }
+
+    List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile) {
+        return parseOsv(osvJson, checkoutPath, csprojMissingLockfile, new ArrayList<>());
     }
 
     /**
@@ -118,8 +123,14 @@ public class ScannerOutputParser {
      * rule keys on the filesystem inventory (the warning), not on OSV's results: a clean lockfile may be absent
      * from OSV's JSON, and a {@code .csproj} beside it must still be dropped or its declared-but-not-resolved
      * version would be a false positive.
+     *
+     * <p>Any OSV source path that does not relativize to a safely repo-relative path (still absolute, or
+     * containing a {@code ".."} segment) has its findings dropped and raises an {@code UNRESOLVED_PATH} warning
+     * into {@code warningsOut}: such a path must never enter a fingerprint. Normal OSV output never triggers this
+     * (every source path is under the checkout); it is defense in depth.
      */
-    List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile) {
+    List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile,
+                             List<ScanWarning> warningsOut) {
         if (!Files.exists(osvJson)) {
             return List.of();
         }
@@ -131,6 +142,14 @@ public class ScannerOutputParser {
         for (OsvResult result : report.results) {
             String manifestPath = relativize(result.source == null ? null : result.source.path, checkoutPath);
             if (result.packages == null) {
+                continue;
+            }
+            if (isPathOutsideCheckout(manifestPath)) {
+                String src = result.source == null ? null : result.source.path;
+                log.warn("Dropping OSV result with a source path outside the checkout (UNRESOLVED_PATH): {}", src);
+                warningsOut.add(new ScanWarning(WARN_UNRESOLVED_PATH,
+                        "OSV reported a dependency manifest at a path outside the repository checkout; its "
+                                + "findings were dropped (source path: " + src + ").", null));
                 continue;
             }
             if (manifestPath != null && manifestPath.endsWith(".csproj")
@@ -178,8 +197,31 @@ public class ScannerOutputParser {
     }
 
     /**
-     * The group's preferred vulnerability id (plan change #3): the lowest-sorted CVE across the group's ids and
-     * aliases, else the lowest-sorted GHSA, else the first id. Returns null only for an empty group.
+     * True when a relativized manifest path is not safely repo-relative — it is still absolute or contains a
+     * {@code ".."} segment. Normally every OSV source path is under the checkout and {@link #relativize} strips
+     * it to a clean relative path; this is defense in depth so a stray absolute/escaping path can never enter a
+     * fingerprint. A {@code null} path (no source) is not treated as unsafe.
+     */
+    static boolean isPathOutsideCheckout(String path) {
+        if (path == null) {
+            return false;
+        }
+        String p = path.replace('\\', '/');
+        if (p.startsWith("/")) {
+            return true;
+        }
+        for (String segment : p.split("/")) {
+            if (segment.equals("..")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The group's preferred vulnerability id (plan change #3): the numerically lowest CVE across the group's ids
+     * and aliases, else the lowest-sorted GHSA, else the first id. Returns null only for an empty group. The
+     * chosen id feeds the SCA fingerprint, so this rule is frozen from M4 on (D-035).
      */
     static String pickVulnId(List<String> ids, List<String> aliases) {
         TreeSet<String> all = new TreeSet<>();
@@ -192,10 +234,14 @@ public class ScannerOutputParser {
         if (all.isEmpty()) {
             return null;
         }
+        String lowestCve = null;
         for (String id : all) {
-            if (id.startsWith("CVE-")) {
-                return id; // TreeSet is sorted → first CVE is the lowest-sorted one
+            if (id.startsWith("CVE-") && (lowestCve == null || CVE_ORDER.compare(id, lowestCve) < 0)) {
+                lowestCve = id;
             }
+        }
+        if (lowestCve != null) {
+            return lowestCve; // numerically lowest CVE by (year, sequence)
         }
         for (String id : all) {
             if (id.startsWith("GHSA-")) {
@@ -203,6 +249,33 @@ public class ScannerOutputParser {
             }
         }
         return all.first();
+    }
+
+    /**
+     * Orders CVE ids numerically by (year, sequence) rather than as text, so {@code CVE-2024-9999} precedes
+     * {@code CVE-2024-10000}. A malformed id sorts last; ties break lexicographically so the choice is stable.
+     */
+    private static final java.util.Comparator<String> CVE_ORDER = (a, b) -> {
+        long[] ka = cveKey(a);
+        long[] kb = cveKey(b);
+        int c = Long.compare(ka[0], kb[0]);
+        if (c == 0) {
+            c = Long.compare(ka[1], kb[1]);
+        }
+        return c != 0 ? c : a.compareTo(b);
+    };
+
+    /** (year, sequence) for a {@code CVE-<year>-<seq>} id, or (MAX, MAX) when it does not parse as one. */
+    private static long[] cveKey(String id) {
+        String[] parts = id.split("-");
+        if (parts.length == 3) {
+            try {
+                return new long[] {Long.parseLong(parts[1]), Long.parseLong(parts[2])};
+            } catch (NumberFormatException ignored) {
+                // fall through to the max sentinel so a malformed id never wins and ordering stays total
+            }
+        }
+        return new long[] {Long.MAX_VALUE, Long.MAX_VALUE};
     }
 
     /** A concrete pinned version OSV can identify — not empty, an MSBuild property, a range or a wildcard. */

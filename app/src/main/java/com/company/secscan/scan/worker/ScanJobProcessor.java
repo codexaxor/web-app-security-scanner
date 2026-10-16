@@ -82,7 +82,9 @@ public class ScanJobProcessor {
     }
 
     public void process(UUID jobId) {
-        // The claimed job is the trust root; its workspace_id scopes every later lookup (domain rule 1).
+        // The claimed job is the trust root (domain rule 1): this findById is deliberately NOT workspace-scoped —
+        // the job was already claimed for this worker (the scan_job claim exception), and its workspace_id scopes
+        // every later lookup here. Listed among CLAUDE.md's documented workspace-agnostic exceptions.
         ScanJob job = jobs.findById(jobId).orElse(null);
         if (job == null) {
             return;

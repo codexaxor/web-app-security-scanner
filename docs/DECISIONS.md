@@ -43,6 +43,12 @@ lockfile from its JSON, and a `.csproj` beside it must still be dropped or its d
 would be a false positive. Proven by `ScannerOutputParserTest` —
 `nugetCsprojFindingIsKeptWhenItHasAMissingLockfileWarning`, `nugetCsprojFindingIsDroppedWhenNoMissingLockfileWarning`,
 `nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt`.
+Vuln-id choice is FROZEN from M4 on (2026-10-16): the preferred id is the numerically lowest CVE by (year,
+sequence) across the alias group, else the lowest-sorted GHSA, else the first id (`ScannerOutputParser.pickVulnId`).
+Because this id feeds the SCA fingerprint (`package | vulnId | manifestPath`), changing the rule would
+re-fingerprint every stored SCA sub-issue (mass solve + reopen), so it must not change once SCA findings are
+stored. The parser also drops any OSV result whose source path is not safely repo-relative (still absolute or
+containing a `..` segment) and raises an `UNRESOLVED_PATH` warning, so such a path can never enter a fingerprint.
 Known gap (M4, for the report): npm `devDependencies` and Gradle test configurations are NOT excluded from SCA
 — OSV-Scanner v2.7.0's JSON exposes no dependency-group ("dev") marker to filter on (Q2). Deferred to M7's
 `DEV_DEPENDENCY` auto-triage, which will ignore such findings with a visible reason code.

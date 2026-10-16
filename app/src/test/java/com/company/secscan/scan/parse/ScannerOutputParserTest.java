@@ -204,9 +204,40 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void anOsvSourcePathOutsideTheCheckoutYieldsNoFindingButAnUnresolvedPathWarning(@TempDir Path outDir)
+            throws Exception {
+        // The result would otherwise be a finding (concrete version, has a vuln group); it is dropped only
+        // because its source path (/work/outside/pom.xml) is not under the checkout — it must never reach a
+        // fingerprint. The warning names the OSV path, never file contents.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        var findings = parser.parseOsv(sample("/samples/osv/path-escape.json", outDir), "/work/checkout",
+                java.util.Set.of(), warnings);
+
+        assertThat(findings).isEmpty();
+        assertThat(warnings).singleElement().satisfies(w -> {
+            assertThat(w.code()).isEqualTo("UNRESOLVED_PATH");
+            assertThat(w.message()).contains("/work/outside/pom.xml");
+            assertThat(w.filePath()).isNull();
+        });
+    }
+
+    @Test
+    void isPathOutsideCheckoutFlagsAbsoluteAndDotDotPaths() {
+        assertThat(ScannerOutputParser.isPathOutsideCheckout("pom.xml")).isFalse();
+        assertThat(ScannerOutputParser.isPathOutsideCheckout("sub/pom.xml")).isFalse();
+        assertThat(ScannerOutputParser.isPathOutsideCheckout(null)).isFalse();
+        assertThat(ScannerOutputParser.isPathOutsideCheckout("/work/outside/pom.xml")).isTrue();
+        assertThat(ScannerOutputParser.isPathOutsideCheckout("../escape/pom.xml")).isTrue();
+        assertThat(ScannerOutputParser.isPathOutsideCheckout("sub/../../escape/pom.xml")).isTrue();
+    }
+
+    @Test
     void pickVulnIdPrefersLowestCveThenGhsaThenFirstId() {
         assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("GHSA-x"),
                 java.util.List.of("CVE-2026-9999", "CVE-2024-1111", "GHSA-x"))).isEqualTo("CVE-2024-1111");
+        // "Lowest CVE" is numeric by (year, sequence), not lexicographic: CVE-2024-9999 < CVE-2024-10000.
+        assertThat(ScannerOutputParser.pickVulnId(java.util.List.of(),
+                java.util.List.of("CVE-2024-10000", "CVE-2024-9999"))).isEqualTo("CVE-2024-9999");
         assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("GHSA-bbbb", "GHSA-aaaa"),
                 java.util.List.of())).isEqualTo("GHSA-aaaa");
         assertThat(ScannerOutputParser.pickVulnId(java.util.List.of("OSV-2021-1"),
