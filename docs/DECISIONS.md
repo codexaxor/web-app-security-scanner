@@ -34,11 +34,15 @@ Consequences: less code and no double-counting; .NET direct-dep SCA works out of
 visibility depends on our inventory parse, not OSV.
 NuGet .csproj/lockfile dedup (2026-10-16, from the manual real-GitLab check): when a `.csproj` and a
 `packages.lock.json` sit in the same directory, OSV v2.7.0 reports the same package from BOTH sources, so the
-parser emitted two SCA findings (two sub-issues) for one vulnerability. Rule: in `ScannerOutputParser.parseOsv`,
-if a NuGet finding's source is a `.csproj` and a `packages.lock.json` exists in the same directory, drop the
-`.csproj`-sourced finding — the lockfile is authoritative (resolved versions, includes transitives). A `.csproj`
-with no sibling lockfile is unchanged (and still raises `MISSING_NUGET_LOCKFILE`). Proven by
-`ScannerOutputParserTest.nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt`.
+parser emitted two SCA findings (two sub-issues) for one vulnerability. Rule (in `ScannerOutputParser.parseOsv`):
+a `.csproj`-sourced finding is kept ONLY when that `.csproj` (repo-relative path) has a `MISSING_NUGET_LOCKFILE`
+warning in the same scan — i.e. the inventory step found no sibling `packages.lock.json` on disk. Otherwise a
+lockfile exists and is authoritative (resolved versions, includes transitives), so the `.csproj` copy is
+dropped. The rule keys on the filesystem inventory (the warning), NOT on OSV's results: OSV may omit a clean
+lockfile from its JSON, and a `.csproj` beside it must still be dropped or its declared-but-not-resolved version
+would be a false positive. Proven by `ScannerOutputParserTest` —
+`nugetCsprojFindingIsKeptWhenItHasAMissingLockfileWarning`, `nugetCsprojFindingIsDroppedWhenNoMissingLockfileWarning`,
+`nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt`.
 Known gap (M4, for the report): npm `devDependencies` and Gradle test configurations are NOT excluded from SCA
 — OSV-Scanner v2.7.0's JSON exposes no dependency-group ("dev") marker to filter on (Q2). Deferred to M7's
 `DEV_DEPENDENCY` auto-triage, which will ignore such findings with a visible reason code.

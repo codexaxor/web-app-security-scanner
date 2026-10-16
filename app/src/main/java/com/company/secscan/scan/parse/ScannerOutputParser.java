@@ -30,6 +30,8 @@ public class ScannerOutputParser {
 
     private static final Logger log = LoggerFactory.getLogger(ScannerOutputParser.class);
     static final String MASKED = "****";
+    /** Warning code the scanner raises per .csproj that has no sibling packages.lock.json (run-scan.sh). */
+    static final String WARN_MISSING_NUGET_LOCKFILE = "MISSING_NUGET_LOCKFILE";
 
     private final ObjectMapper mapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -44,6 +46,17 @@ public class ScannerOutputParser {
             return ParsedScan.cloneFailure();
         }
 
+        // The .csproj paths the scan flagged with MISSING_NUGET_LOCKFILE (no sibling packages.lock.json on
+        // disk). These, and only these, keep their .csproj-sourced SCA findings; see parseOsv (D-035).
+        java.util.Set<String> csprojMissingLockfile = new java.util.HashSet<>();
+        if (m.warnings != null) {
+            for (ManifestWarning w : m.warnings) {
+                if (WARN_MISSING_NUGET_LOCKFILE.equals(w.code) && w.filePath != null) {
+                    csprojMissingLockfile.add(w.filePath);
+                }
+            }
+        }
+
         List<ScannerTaskResult> tasks = new ArrayList<>();
         List<RawFinding> findings = new ArrayList<>();
         List<ManifestScanner> scanners = m.scanners == null ? List.of() : m.scanners;
@@ -56,7 +69,7 @@ public class ScannerOutputParser {
             if (RawFinding.SCANNER_SECRET.equals(s.name)) {
                 findings.addAll(readSecretFindings(outDir.resolve(s.findingsFile)));
             } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
-                findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath));
+                findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile));
             }
         }
 
@@ -93,6 +106,20 @@ public class ScannerOutputParser {
      * (D-035).
      */
     List<RawFinding> parseOsv(Path osvJson, String checkoutPath) {
+        return parseOsv(osvJson, checkoutPath, java.util.Set.of());
+    }
+
+    /**
+     * As {@link #parseOsv(Path, String)}, plus the NuGet .csproj/lockfile dedup (D-035). OSV reports the same
+     * package from both a {@code .csproj} and its sibling {@code packages.lock.json}, so a {@code .csproj}-sourced
+     * finding is kept ONLY when that {@code .csproj} (repo-relative path) is in {@code csprojMissingLockfile} —
+     * i.e. the scan raised {@code MISSING_NUGET_LOCKFILE} for it (no lockfile on disk). Otherwise a lockfile
+     * exists and is authoritative (resolved versions, transitives), so the {@code .csproj} copy is dropped. The
+     * rule keys on the filesystem inventory (the warning), not on OSV's results: a clean lockfile may be absent
+     * from OSV's JSON, and a {@code .csproj} beside it must still be dropped or its declared-but-not-resolved
+     * version would be a false positive.
+     */
+    List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile) {
         if (!Files.exists(osvJson)) {
             return List.of();
         }
@@ -100,28 +127,16 @@ public class ScannerOutputParser {
         if (report == null || report.results == null) {
             return List.of();
         }
-        // NuGet dedup (D-035): OSV reports the same package from both a .csproj and its sibling
-        // packages.lock.json when both sit in one folder. The lockfile is authoritative (resolved versions,
-        // includes transitives), so collect the directories that have one and drop the .csproj-sourced
-        // findings there. A .csproj with no lockfile beside it is untouched.
-        var nugetLockfileDirs = new java.util.HashSet<String>();
-        for (OsvResult result : report.results) {
-            String path = relativize(result.source == null ? null : result.source.path, checkoutPath);
-            if (path != null && "packages.lock.json".equals(fileName(path))) {
-                nugetLockfileDirs.add(dirOf(path));
-            }
-        }
-
         List<RawFinding> out = new ArrayList<>();
         for (OsvResult result : report.results) {
             String manifestPath = relativize(result.source == null ? null : result.source.path, checkoutPath);
             if (result.packages == null) {
                 continue;
             }
-            if (manifestPath != null && fileName(manifestPath).endsWith(".csproj")
-                    && nugetLockfileDirs.contains(dirOf(manifestPath))) {
-                log.debug("Dropping .csproj-sourced SCA findings for {} — authoritative packages.lock.json "
-                        + "present in the same directory (D-035)", manifestPath);
+            if (manifestPath != null && manifestPath.endsWith(".csproj")
+                    && !csprojMissingLockfile.contains(manifestPath)) {
+                log.debug("Dropping .csproj-sourced SCA findings for {} — an authoritative packages.lock.json "
+                        + "sits beside it (no MISSING_NUGET_LOCKFILE warning) (D-035)", manifestPath);
                 continue;
             }
             for (OsvPackage p : result.packages) {
@@ -146,24 +161,6 @@ public class ScannerOutputParser {
             }
         }
         return out;
-    }
-
-    /** The final path segment (handles both repo-relative and bare paths); empty string for a null/blank path. */
-    private static String fileName(String path) {
-        if (path == null || path.isBlank()) {
-            return "";
-        }
-        int slash = path.lastIndexOf('/');
-        return slash < 0 ? path : path.substring(slash + 1);
-    }
-
-    /** The directory of a repo-relative path ("" for a file at the repo root), used to match siblings. */
-    private static String dirOf(String path) {
-        if (path == null) {
-            return "";
-        }
-        int slash = path.lastIndexOf('/');
-        return slash < 0 ? "" : path.substring(0, slash);
     }
 
     /** Makes an OSV source path repo-relative by stripping the container checkout prefix. */

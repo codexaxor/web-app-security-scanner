@@ -152,10 +152,12 @@ class ScannerOutputParserTest {
     }
 
     @Test
-    void nugetSampleYieldsTheVulnerablePackageOnly(@TempDir Path outDir) throws Exception {
+    void nugetCsprojFindingIsKeptWhenItHasAMissingLockfileWarning(@TempDir Path outDir) throws Exception {
         // Newtonsoft.Json@12.0.1 is vulnerable; Serilog@$(SerilogVersion) has no vulns (and a non-concrete
-        // version) and must not surface.
-        var findings = parser.parseOsv(sample("/samples/osv/nuget.json", outDir), "/work/checkout");
+        // version) and must not surface. App.csproj has no lockfile beside it (MISSING_NUGET_LOCKFILE), so its
+        // finding is authoritative and kept.
+        var findings = parser.parseOsv(sample("/samples/osv/nuget.json", outDir), "/work/checkout",
+                java.util.Set.of("App.csproj"));
 
         assertThat(findings).singleElement().satisfies(f -> {
             assertThat(f.packageName()).isEqualTo("Newtonsoft.Json");
@@ -165,13 +167,24 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void nugetCsprojFindingIsDroppedWhenNoMissingLockfileWarning(@TempDir Path outDir) throws Exception {
+        // Same App.csproj with a vulnerable declared version, but NO MISSING_NUGET_LOCKFILE warning: a
+        // packages.lock.json exists on disk (authoritative) and is clean enough that OSV left it out of the
+        // results. The .csproj's declared-but-not-resolved version must not surface as a false positive.
+        var findings = parser.parseOsv(sample("/samples/osv/nuget.json", outDir), "/work/checkout",
+                java.util.Set.of());
+
+        assertThat(findings).isEmpty();
+    }
+
+    @Test
     void nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt(@TempDir Path outDir) throws Exception {
         // OSV reports Newtonsoft.Json from BOTH App.csproj and packages.lock.json in the repo root (the real
-        // v2.7.0 behaviour that caused duplicate sub-issues). The lockfile is authoritative, so the .csproj
-        // copy is dropped and the surviving finding's path is the lockfile. The other/Other.csproj has no
-        // lockfile beside it and is kept as-is (D-035).
+        // v2.7.0 behaviour that caused duplicate sub-issues). App.csproj has a lockfile beside it (no
+        // MISSING_NUGET_LOCKFILE warning), so its copy is dropped and the surviving finding's path is the
+        // lockfile. other/Other.csproj has no lockfile (warning raised) and is kept as-is (D-035).
         var findings = parser.parseOsv(sample("/samples/osv/nuget-csproj-and-lockfile.json", outDir),
-                "/work/checkout");
+                "/work/checkout", java.util.Set.of("other/Other.csproj"));
 
         assertThat(findings).filteredOn(f -> f.packageName().equals("Newtonsoft.Json"))
                 .singleElement()
