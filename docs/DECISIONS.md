@@ -32,6 +32,9 @@ wildcards or `VersionOverride`; the parser also drops OSV packages whose version
 resolution without a lockfile remains an M4b item.
 Consequences: less code and no double-counting; .NET direct-dep SCA works out of the box. `UNRESOLVED_VERSION`
 visibility depends on our inventory parse, not OSV.
+Known gap (M4, for the report): npm `devDependencies` and Gradle test configurations are NOT excluded from SCA
+— OSV-Scanner v2.7.0's JSON exposes no dependency-group ("dev") marker to filter on (Q2). Deferred to M7's
+`DEV_DEPENDENCY` auto-triage, which will ignore such findings with a visible reason code.
 
 ## D-034 OSV-Scanner pinned to v2.7.0 (checksum + flags) (2026-10-16, accepted)
 Context: M4's single SCA engine is OSV-Scanner (D-006), added to the scanner image; our rule is to pin every
@@ -48,13 +51,22 @@ D-030); all other codes = failure (closes no SCA issue, scan partial). The scann
 `secscan-scanner:8.21.2` — an identifier matching `ScannerProperties.image`, tracked for the M10 weekly rebuild.
 Consequences: a reproducible SCA engine; a new runtime egress need to deps.dev/osv.dev (D-033). Any bump is new
 checksums + a new decision.
+Maven transitive resolution (verified v2.7.0): `osv-scanner scan source -r` resolves Maven transitive
+dependencies **by default** via the **deps.dev** data source — no `--allow-unsafe-plugins`/native flag, and it
+does **not** follow `<repositories>`/`<pluginRepositories>` or other URLs declared in the scanned pom (verified:
+a bogus `<repositories>` URL was ignored while an undeclared transitive dep was still resolved). Parent/
+effective-POM lookups, when needed, go to **Maven Central** (a fixed host), not to artifact-declared URLs. We
+deliberately do **not** pass `--data-source=native` (which would fetch from Maven Central/registries via the
+`transitivedependency/pomxml` plugin). Egress implication for D-033: allow `api.deps.dev`, `api.osv.dev`, and
+`repo.maven.apache.org`.
 
 ## D-033 Scanner egress stays on the default bridge network for M4 (2026-10-16, accepted; revisit before any deployment or M10, whichever comes first)
 Context: SPEC "Securing the scanner" wants scanner egress limited to an allowlist (GitLab, api.osv.dev,
 api.deps.dev, …). The scanner has used the default Docker bridge (full egress) since M2; M4 adds the first real
 egress need (OSV → osv.dev / deps.dev).
 Decision: keep the default bridge network for M4. An enforced egress allowlist (an egress-proxy sidecar on an
-internal network with `HTTPS_PROXY` + a git proxy, allowlisting only the three hosts) is deferred. This is not a
+internal network with `HTTPS_PROXY` + a git proxy, allowlisting only GitLab, `api.osv.dev`, `api.deps.dev` and
+`repo.maven.apache.org` — the last for OSV's Maven effective-POM/parent lookups, D-034) is deferred. This is not a
 hardening regression — the bridge predates M4 — and every other container control stays in force (non-root,
 read-only rootfs, `--cap-drop=ALL`, `no-new-privileges`, CPU/memory/PID limits, hard timeout, no Docker socket).
 Revisit when: before any deployment or M10, whichever comes first.

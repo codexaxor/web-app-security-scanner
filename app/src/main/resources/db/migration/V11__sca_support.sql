@@ -21,6 +21,7 @@ create table scan_warning (
     created_at    timestamptz not null default now()
 );
 
+create index idx_scan_warning_workspace on scan_warning (workspace_id);
 create index idx_scan_warning_scan on scan_warning (scan_id);
 create index idx_scan_warning_repository on scan_warning (repository_id);
 
