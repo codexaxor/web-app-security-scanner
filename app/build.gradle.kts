@@ -27,9 +27,15 @@ dependencies {
     testImplementation(libs.wiremock)
 }
 
-// Spring Boot manages the JUnit platform launcher versions; keep AssertJ from the BOM.
+// Spring Boot manages the JUnit platform launcher versions; keep AssertJ from the BOM. The one end-to-end SCA
+// test that needs live network (osv.dev/deps.dev) is tagged "live-osv" and excluded by default; run it with
+// `./gradlew :app:test -PliveOsv --tests "*ScaLiveScanIT"`.
 tasks.withType<Test> {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        if (!project.hasProperty("liveOsv")) {
+            excludeTags("live-osv")
+        }
+    }
 }
 
 // Builds the disposable scanner image (scanner-image/) that the worker ITs launch. The tag must match

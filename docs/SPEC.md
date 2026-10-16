@@ -343,6 +343,7 @@ locally.
 | M2 | Scan engine | `scan`, `scan_job`, `scan_task`; queue claim; scanner image with git + Gitleaks; hardened docker-java launcher; parser | Start Scan on a fixture with a fake AWS key stores a finding; container is gone afterwards |
 | M3 | Issue model | Fingerprints, `issue_group`/`sub_issue`, reconcile (new, solved, reopened), `triage_event` | Removing the key and rescanning marks it solved; re-adding reopens it; a failed scanner closes nothing |
 | M4 | Dependencies (SCA) | OSV-Scanner in image; Maven, Gradle lockfile, npm/yarn/pnpm/bun, NuGet lockfile; `.csproj` fallback; scan warnings; dev-dep exclusion | Each fixture repo yields its expected CVEs; missing-lockfile warnings appear |
+| M4b | Static Gradle/.NET resolution | Static Gradle dependency resolver (no build execution) + accuracy check vs a committed lockfile; NuGet transitive resolution if needed; private-registry detection (D-031, D-032) | A Gradle fixture without a lockfile yields its expected transitive CVEs within an accuracy bound |
 | M5 | Scoring | Base scores, KEV + EPSS sync, adjustments, `score_breakdown`, fix time, CWE phrase table, re-score job | A KEV-listed CVE scores +5 with the reason visible in the API |
 | M6 | SAST, IaC, EOL | Opengrep with pinned rules + custom Spring/.NET rules; Checkov; EOL detector + sync | Each fixture triggers its expected rule; an old Spring Boot version raises an EOL issue |
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
@@ -352,13 +353,16 @@ locally.
 
 ## Open decisions
 
-None of these block M0–M3; the first two must be settled before M4. Record answers in `docs/DECISIONS.md`.
+None of these block M0–M3; the first three were settled before M4. Record answers in `docs/DECISIONS.md`.
 
-- [ ] **Gradle repos without lockfiles.** (a) teams enable Gradle dependency locking and commit `gradle.lockfile`
-  (recommended); (b) generate lockfiles by running Gradle in a separate, stricter sandbox; (c) accept partial results.
-- [ ] **.NET repos without `packages.lock.json`.** Recommended: `RestorePackagesWithLockFile=true` and commit the
-  lockfile; `.csproj` fallback meanwhile.
-- [ ] **Private package registries** (Nexus, Artifactory, GitLab package registry): unknown.
+- [x] **Gradle repos without lockfiles.** M4 = warn-only partial (D-031); static resolver = M4b. Options were:
+  (a) teams enable Gradle dependency locking and commit `gradle.lockfile`; (b) generate lockfiles by running
+  Gradle in a separate, stricter sandbox; (c) accept partial results — we take (c) for M4, (b)-style static
+  resolution for M4b (still no build execution).
+- [x] **.NET repos without `packages.lock.json`.** M4 = `.csproj` direct `<PackageReference>` fallback (D-031);
+  recommend `RestorePackagesWithLockFile=true` and committing the lockfile for full transitive coverage.
+- [x] **Private package registries** (Nexus, Artifactory, GitLab package registry): M4 assumes public registries
+  (D-032); private-registry detection is M4b.
 - [ ] **GitLab details:** self-managed or gitlab.com, version, which top-level group(s) to connect.
 - [ ] **Hosting:** which VM or host runs the worker with Docker.
 - [ ] **SAST rule licensing** before any multi-tenant/SaaS use.

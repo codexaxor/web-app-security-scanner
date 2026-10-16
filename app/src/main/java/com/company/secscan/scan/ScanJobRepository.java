@@ -17,6 +17,9 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, UUID> {
 
     Optional<ScanJob> findByScanId(UUID scanId);
 
+    /** Workspace-scoped lookup (domain rule 1): the job is only visible within its own workspace. */
+    Optional<ScanJob> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
+
     /**
      * Locks and returns up to {@code limit} runnable queued jobs (ordered oldest-first), skipping rows another
      * worker already holds. The caller leases them within the same transaction.

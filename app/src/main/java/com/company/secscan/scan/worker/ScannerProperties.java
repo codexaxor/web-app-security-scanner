@@ -1,6 +1,9 @@
 package com.company.secscan.scan.worker;
 
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
@@ -15,6 +18,8 @@ import org.springframework.util.unit.DataSize;
  */
 @ConfigurationProperties(prefix = "secscan.scanner")
 public class ScannerProperties {
+
+    private static final Logger log = LoggerFactory.getLogger(ScannerProperties.class);
 
     private String image = "secscan-scanner:8.21.2";
     private String workRoot = "/tmp/secscan/scans";
@@ -31,6 +36,36 @@ public class ScannerProperties {
     /** The scheduled claim loop; disabled in tests that drive the pipeline directly. */
     private boolean pollingEnabled = true;
     private long pollIntervalMs = 5000;
+    /**
+     * TEST-ONLY: allow cloning a repository over {@code file:///src} from a local path. Default false — in
+     * production the worker clones only over https to an allowlisted host (D-018). The offline fixture ITs set
+     * this true; it must never be enabled in a real deployment.
+     */
+    private boolean allowLocalFileClone = false;
+    /**
+     * TEST-ONLY: give a local {@code file://} clone network access (normally disabled, so offline fixtures
+     * prove isolation). The one {@code @Tag("live-osv")} end-to-end test sets this so OSV-Scanner can reach
+     * deps.dev; it must never be enabled in a real deployment. Remote https clones always have network.
+     */
+    private boolean localCloneNetwork = false;
+
+    /**
+     * Loudly warn at worker startup if either test-only clone escape hatch is enabled — neither must ever be on
+     * in a real deployment (both weaken the clone-scheme/egress posture, D-018/D-033).
+     */
+    @PostConstruct
+    void warnOnTestOnlyFlags() {
+        if (allowLocalFileClone) {
+            log.warn("secscan.scanner.allow-local-file-clone is TRUE: the worker will clone repositories over "
+                    + "file:// from a local path. This is TEST-ONLY and must never be enabled in a deployment "
+                    + "(production clones only over https to an allowlisted host, D-018).");
+        }
+        if (localCloneNetwork) {
+            log.warn("secscan.scanner.local-clone-network is TRUE: local file:// clones run WITH network access. "
+                    + "This is TEST-ONLY (for the live-osv end-to-end test) and must never be enabled in a "
+                    + "deployment.");
+        }
+    }
 
     public String getImage() {
         return image;
@@ -126,5 +161,21 @@ public class ScannerProperties {
 
     public void setPollIntervalMs(long pollIntervalMs) {
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    public boolean isAllowLocalFileClone() {
+        return allowLocalFileClone;
+    }
+
+    public void setAllowLocalFileClone(boolean allowLocalFileClone) {
+        this.allowLocalFileClone = allowLocalFileClone;
+    }
+
+    public boolean isLocalCloneNetwork() {
+        return localCloneNetwork;
+    }
+
+    public void setLocalCloneNetwork(boolean localCloneNetwork) {
+        this.localCloneNetwork = localCloneNetwork;
     }
 }

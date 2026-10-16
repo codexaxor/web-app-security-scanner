@@ -10,9 +10,9 @@ import java.util.Map;
  * was scanned) — the worker treats that as "no access", distinct from a scanner that ran and failed.
  */
 public record ParsedScan(boolean cloneFailed, String commit, Map<String, String> toolVersions,
-                         List<ScannerTaskResult> tasks, List<RawFinding> findings) {
+                         List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings) {
 
     public static ParsedScan cloneFailure() {
-        return new ParsedScan(true, null, Map.of(), List.of(), List.of());
+        return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of());
     }
 }

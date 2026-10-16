@@ -34,6 +34,7 @@ Claude Code never commits to, merges into, or pushes `main` or `develop`. Mergin
    git branch -d feature/m<N>-<slug>
    git checkout develop
 ```
+8. Run `/handover` and replace the files in the claude.ai project knowledge with the new bundle.
 
 ## Commits
 Conventional Commits `type(scope): summary`. Types: feat, fix, test, refactor, docs, build, chore.

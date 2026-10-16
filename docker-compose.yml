@@ -10,8 +10,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-secscan}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
     ports:
+      # Bound to loopback only: these services are for local dev and must not be reachable from the network.
       # Host port is configurable (default 5432) so it can dodge a system Postgres already on 5432.
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -35,7 +36,8 @@ services:
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${SECSCAN_BOOTSTRAP_ADMIN_PASSWORD:-}
       SECSCAN_GITLAB_ALLOWED_HOSTS: ${SECSCAN_GITLAB_ALLOWED_HOSTS:-}
     ports:
-      - "8080:8080"
+      # Loopback only (local dev); do not expose the API to the network.
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,7 +90,8 @@ services:
       context: ./ui
       dockerfile: Dockerfile
     ports:
-      - "5173:80"
+      # Loopback only (local dev).
+      - "127.0.0.1:5173:80"
     depends_on:
       - api
 

@@ -19,6 +19,7 @@ import java.util.UUID;
 public class ScanTask {
 
     public static final String SCANNER_SECRET = "secret";
+    public static final String SCANNER_SCA = "sca";
 
     public static final String STATUS_OK = "ok";
     public static final String STATUS_FAILED = "failed";
@@ -49,6 +50,12 @@ public class ScanTask {
     @Column(name = "log_excerpt")
     private String logExcerpt;
 
+    // Whether this (successful) scanner is authoritative to close its missing findings this scan. False for an
+    // SCA task that found no packages (OSV exit 128): the scan is ok but must not mass-solve SCA issues
+    // (D-034, plan change #1). Irrelevant for failed/timed_out tasks (they close nothing regardless).
+    @Column(name = "closes_findings", nullable = false)
+    private boolean closesFindings = true;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -69,6 +76,15 @@ public class ScanTask {
 
     public boolean succeeded() {
         return STATUS_OK.equals(status);
+    }
+
+    /** A successful scanner closes its missing findings only when this is set (default true). */
+    public boolean closesFindings() {
+        return closesFindings;
+    }
+
+    public void setClosesFindings(boolean closesFindings) {
+        this.closesFindings = closesFindings;
     }
 
     public UUID getId() {
