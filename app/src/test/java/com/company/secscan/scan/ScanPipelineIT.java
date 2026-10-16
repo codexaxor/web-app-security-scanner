@@ -104,7 +104,8 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         Scan finished = scans.findById(scan.id()).orElseThrow();
         assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_COMPLETED);
         assertThat(finished.getCommitSha()).isEqualTo(fixtureCommit);
-        assertThat(finished.getToolVersions()).containsKey("gitleaks");
+        // tool_versions records every scanner's version, including OSV-Scanner (plan change #9).
+        assertThat(finished.getToolVersions()).containsKeys("gitleaks", "osv-scanner");
 
         List<ScanFinding> stored = findings.findByScanId(scan.id());
         assertThat(stored).singleElement().satisfies(f -> {

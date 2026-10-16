@@ -1,6 +1,9 @@
 package com.company.secscan.scan.worker;
 
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
@@ -15,6 +18,8 @@ import org.springframework.util.unit.DataSize;
  */
 @ConfigurationProperties(prefix = "secscan.scanner")
 public class ScannerProperties {
+
+    private static final Logger log = LoggerFactory.getLogger(ScannerProperties.class);
 
     private String image = "secscan-scanner:8.21.2";
     private String workRoot = "/tmp/secscan/scans";
@@ -43,6 +48,24 @@ public class ScannerProperties {
      * deps.dev; it must never be enabled in a real deployment. Remote https clones always have network.
      */
     private boolean localCloneNetwork = false;
+
+    /**
+     * Loudly warn at worker startup if either test-only clone escape hatch is enabled — neither must ever be on
+     * in a real deployment (both weaken the clone-scheme/egress posture, D-018/D-033).
+     */
+    @PostConstruct
+    void warnOnTestOnlyFlags() {
+        if (allowLocalFileClone) {
+            log.warn("secscan.scanner.allow-local-file-clone is TRUE: the worker will clone repositories over "
+                    + "file:// from a local path. This is TEST-ONLY and must never be enabled in a deployment "
+                    + "(production clones only over https to an allowlisted host, D-018).");
+        }
+        if (localCloneNetwork) {
+            log.warn("secscan.scanner.local-clone-network is TRUE: local file:// clones run WITH network access. "
+                    + "This is TEST-ONLY (for the live-osv end-to-end test) and must never be enabled in a "
+                    + "deployment.");
+        }
+    }
 
     public String getImage() {
         return image;

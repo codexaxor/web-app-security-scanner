@@ -1,0 +1,15 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>sca-maven-transitive-fixture</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+    <!-- commons-text 1.12.0 is NOT itself vulnerable; it pulls commons-lang3 (transitive, undeclared here)
+         which carries CVE-2025-48924. Proves OSV resolves Maven transitive deps by default (deps.dev). -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-text</artifactId>
+      <version>1.12.0</version>
+    </dependency>
+  </dependencies>
+</project>
