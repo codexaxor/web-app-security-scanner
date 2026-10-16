@@ -100,10 +100,28 @@ public class ScannerOutputParser {
         if (report == null || report.results == null) {
             return List.of();
         }
+        // NuGet dedup (D-035): OSV reports the same package from both a .csproj and its sibling
+        // packages.lock.json when both sit in one folder. The lockfile is authoritative (resolved versions,
+        // includes transitives), so collect the directories that have one and drop the .csproj-sourced
+        // findings there. A .csproj with no lockfile beside it is untouched.
+        var nugetLockfileDirs = new java.util.HashSet<String>();
+        for (OsvResult result : report.results) {
+            String path = relativize(result.source == null ? null : result.source.path, checkoutPath);
+            if (path != null && "packages.lock.json".equals(fileName(path))) {
+                nugetLockfileDirs.add(dirOf(path));
+            }
+        }
+
         List<RawFinding> out = new ArrayList<>();
         for (OsvResult result : report.results) {
             String manifestPath = relativize(result.source == null ? null : result.source.path, checkoutPath);
             if (result.packages == null) {
+                continue;
+            }
+            if (manifestPath != null && fileName(manifestPath).endsWith(".csproj")
+                    && nugetLockfileDirs.contains(dirOf(manifestPath))) {
+                log.debug("Dropping .csproj-sourced SCA findings for {} — authoritative packages.lock.json "
+                        + "present in the same directory (D-035)", manifestPath);
                 continue;
             }
             for (OsvPackage p : result.packages) {
@@ -128,6 +146,24 @@ public class ScannerOutputParser {
             }
         }
         return out;
+    }
+
+    /** The final path segment (handles both repo-relative and bare paths); empty string for a null/blank path. */
+    private static String fileName(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? path : path.substring(slash + 1);
+    }
+
+    /** The directory of a repo-relative path ("" for a file at the repo root), used to match siblings. */
+    private static String dirOf(String path) {
+        if (path == null) {
+            return "";
+        }
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? "" : path.substring(0, slash);
     }
 
     /** Makes an OSV source path repo-relative by stripping the container checkout prefix. */

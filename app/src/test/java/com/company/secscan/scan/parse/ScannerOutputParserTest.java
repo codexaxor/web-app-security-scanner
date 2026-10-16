@@ -165,6 +165,27 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void nugetCsprojFindingIsDroppedWhenAPackagesLockfileSitsBesideIt(@TempDir Path outDir) throws Exception {
+        // OSV reports Newtonsoft.Json from BOTH App.csproj and packages.lock.json in the repo root (the real
+        // v2.7.0 behaviour that caused duplicate sub-issues). The lockfile is authoritative, so the .csproj
+        // copy is dropped and the surviving finding's path is the lockfile. The other/Other.csproj has no
+        // lockfile beside it and is kept as-is (D-035).
+        var findings = parser.parseOsv(sample("/samples/osv/nuget-csproj-and-lockfile.json", outDir),
+                "/work/checkout");
+
+        assertThat(findings).filteredOn(f -> f.packageName().equals("Newtonsoft.Json"))
+                .singleElement()
+                .satisfies(f -> {
+                    assertThat(f.vulnId()).isEqualTo("CVE-2024-21907");
+                    assertThat(f.filePath()).isEqualTo("packages.lock.json");
+                });
+        // A .csproj with no lockfile in its directory still surfaces its vulnerable package.
+        assertThat(findings).filteredOn(f -> f.packageName().equals("System.Text.Encodings.Web"))
+                .singleElement()
+                .satisfies(f -> assertThat(f.filePath()).isEqualTo("other/Other.csproj"));
+    }
+
+    @Test
     void emptyOsvReportYieldsNoFindings(@TempDir Path outDir) throws Exception {
         assertThat(parser.parseOsv(sample("/samples/osv/empty.json", outDir), "/work/checkout")).isEmpty();
     }
