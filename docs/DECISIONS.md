@@ -14,6 +14,19 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-040 Secrets fixture uses a fake GitHub PAT, not an AWS key (2026-10-17, accepted)
+Context: Betterleaks v1.7.3 reworked `aws-access-token` into a composite rule (an access key ID must be paired
+with a validatable secret access key) and does not fire offline on a lone fake AWS key; the old
+`fixtures/secrets-aws` key also paired with AWS's documented EXAMPLE secret, which is allowlisted. So the M4
+secrets fixture no longer proves detection under the new engine.
+Decision: the secrets fixture plants an obviously-fake GitHub personal access token (`ghp_…`), detected under
+the stable, specific `github-pat` rule (identical id in both engines). `fixtures/secrets-aws` is renamed to
+`fixtures/secrets-token`; this also updates the M2 done-when fixture (`ScanPipelineIT`) and the sample dir
+`app/src/test/resources/samples/gitleaks` → `betterleaks`. The real open secret in `secscan-test-secrets` is an
+RSA private key (`config/deploy-key.pem`, `private-key`), which Betterleaks detects offline unchanged (same rule
+id, matched as the whole PEM block) — it is NOT affected by this fixture change and is not modified.
+Consequences: a reliably-detected synthetic secret under the new engine; no real project secret changes.
+
 ## D-039 Gradle/NuGet static resolver is a Python 3 script in the scanner image (2026-10-17, accepted)
 Context: the M4b static Gradle resolver (and NuGet transitive resolution) must run where the clone exists and
 where OSV runs — inside the scanner container — so it cannot live in `core` as unit-testable Java. The existing
