@@ -39,6 +39,11 @@ scanned tree (D-004); pin the `python3` apk version and record it when it is add
 under `./gradlew build` (wired via a Gradle task) or, if impractical, `GradleResolverIT` is the gate. Python is
 NOT added to the image in slice 0 (no resolver yet) — only when slice 1 lands.
 Consequences: a maintainable, testable resolver; one new image dependency (python3) arriving in slice 1.
+Slice 1 (2026-10-18): the Gradle resolver landed as `scanner-image/gradle_resolver.py`, invoked `python3 -I`;
+the `python3` apk is pinned to **`python3=3.12.15-r0`** (Alpine 3.21, ships `tomllib`). Its unit tests
+(`gradle_resolver_test.py`) run on the host under `./gradlew build` via the `gradleResolverTest` task (the
+primary gate); the live-osv `ScaLiveScanIT` is the behavioural proof. NuGet transitive resolution (slice 2) is
+not yet done.
 
 ## D-038 Gradle synthetic-pom path mapping anchors SCA fingerprints to the build file (2026-10-17, accepted)
 Context: the M4b Gradle resolver emits a synthetic `pom.xml` for OSV to resolve transitively, written OUTSIDE
