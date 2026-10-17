@@ -44,6 +44,25 @@ findings". `betterleaks dir` does not follow symlinks. In-repo suppressors are i
 live provider calls are made. OSV-Scanner is likewise passed a pinned `--config /etc/secscan/osv-scanner.toml`
 so an in-repo `osv-scanner.toml` cannot suppress a vulnerability.
 
+## Static Gradle resolution (D-038 / D-039)
+
+OSV-Scanner reads `gradle.lockfile`, not `build.gradle`, so a Gradle project with no lockfile resolves nothing.
+`gradle_resolver.py` (Python 3, stdlib only — pinned `python3=3.12.15-r0`, which ships `tomllib`) parses each
+lockfile-less `build.gradle`/`build.gradle.kts` **as data** and emits a synthetic Maven `pom.xml` under
+`/work/synthetic/<n>/` (outside the clone, so a scanned repo cannot plant one). OSV then scans both the
+checkout and `/work/synthetic`, resolving the synthetic poms **transitively** (deps.dev). It is invoked
+`python3 -I` so the scanned tree and CWD are off `sys.path` and a planted `json.py`/`tomllib.py` can never be
+imported (D-004); no build is ever executed. Only production configurations are read (test/dev scopes are
+excluded) and only concrete versions are emitted (dynamic/range/unresolved versions are skipped, never guessed).
+
+Because Gradle uses Maven coordinates, **Gradle findings surface in OSV's `Maven` ecosystem**. The manifest's
+`syntheticPoms` array maps each synthetic pom's `/work` path to its originating `build.gradle` (repo-relative);
+the parser rewrites OSV's `source.path` back to the build file before fingerprinting, so a Gradle SCA finding
+anchors to the real build file. An OSV source path that is neither under the checkout nor in this map is
+dropped (`UNRESOLVED_PATH`). The resolver is best-effort: any failure falls back to an empty map and the scan
+still runs. Its unit tests (`gradle_resolver_test.py`) run on the host under `./gradlew build`
+(`gradleResolverTest`), not inside the image.
+
 ## Output format (`/out`)
 
 `result.json`:
@@ -51,6 +70,8 @@ so an in-repo `osv-scanner.toml` cannot suppress a vulnerability.
 ```json
 { "schemaVersion": 1, "cloneFailed": false, "commit": "<sha>",
   "toolVersions": { "git": "2.x", "betterleaks": "1.7.3", "osv-scanner": "2.7.0" },
+  "warnings": [ { "code": "MISSING_GRADLE_LOCKFILE", "message": "…", "filePath": "build.gradle" } ],
+  "syntheticPoms": [ { "syntheticPath": "/work/synthetic/0/pom.xml", "buildFile": "build.gradle" } ],
   "scanners": [ { "name": "secret", "status": "ok", "exitCode": 2, "durationMs": 1234,
                   "findingsFile": "secrets.json" } ] }
 ```

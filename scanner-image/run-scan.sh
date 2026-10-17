@@ -162,9 +162,31 @@ find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
     done
 done
 
+# --- Static Gradle resolution (D-038/D-039) ---
+# Emit a synthetic Maven pom OUTSIDE the clone for each Gradle build file that ships NO lockfile, so OSV can
+# resolve its TRANSITIVE dependencies (a locked project is resolved by OSV natively; a build-file-only project
+# otherwise finds nothing). Gradle findings therefore surface in OSV's MAVEN ecosystem. The resolver reads the
+# repo as DATA only -- `python3 -I` keeps the scanned tree and the CWD off sys.path so a planted json.py can
+# never be imported (D-004) -- and writes the poms plus a {syntheticPath -> repo-relative build file} map to
+# tmpfs /work. It is best-effort: on ANY failure we fall back to an empty map and the scan still runs (OSV over
+# the checkout, plus the MISSING_GRADLE_LOCKFILE inventory warning). The parser rewrites OSV's synthetic-pom
+# source path back to the build file before fingerprinting (D-038); an unmapped /work path is dropped (D-035).
+SYNTH="$WORK/synthetic"
+SYNTH_MAP="$WORK/synthetic-map.json"
+mkdir -p "$SYNTH"
+set +e
+python3 -I /usr/local/bin/gradle_resolver.py "$CHECKOUT" "$SYNTH" > "$SYNTH_MAP" 2>"$WORK/resolver.log"
+RESOLVER_EXIT=$?
+set -e
+if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "array"' "$SYNTH_MAP" >/dev/null 2>&1; then
+    printf '[]' > "$SYNTH_MAP"
+fi
+
 # --- SCA scan (OSV-Scanner over the whole tree; deps.dev online, D-006/D-034) ---
 # Structure-agnostic: nested modules, monorepos and mixed ecosystems all work; "no manifests" is a warning
-# (NO_MANIFESTS), never a failure. TMPDIR is tmpfs /work because the root filesystem is read-only.
+# (NO_MANIFESTS), never a failure. TMPDIR is tmpfs /work because the root filesystem is read-only. We scan both
+# the checkout and the synthetic-pom dir ($SYNTH); the synthetic dir is empty (harmless) when no Gradle build
+# file needed resolving.
 export TMPDIR="$WORK"
 OSV_JSON="$OUT/osv.json"
 OSV_VERSION="$(osv-scanner --version 2>/dev/null | awk '/osv-scanner version/{print $3; exit}')"
@@ -172,7 +194,7 @@ START="$(date +%s)"
 set +e
 # --config overrides any in-repo osv-scanner.toml so [[IgnoredVulns]]/[[PackageOverrides]] cannot suppress or
 # downgrade a finding (D-037, verified against v2.7.0).
-osv-scanner scan source -r --config "$OSV_CONFIG" --format json --output-file "$OSV_JSON" "$CHECKOUT" >"$WORK/osv.log" 2>&1
+osv-scanner scan source -r --config "$OSV_CONFIG" --format json --output-file "$OSV_JSON" "$CHECKOUT" "$SYNTH" >"$WORK/osv.log" 2>&1
 OSV_EXIT=$?
 set -e
 END="$(date +%s)"
@@ -210,9 +232,11 @@ jq -nc \
     --argjson cadur "$OSV_DUR_MS" \
     --argjson nopkg "$OSV_NO_PACKAGES" \
     --slurpfile warnings "$WORK/warnings.json" \
+    --slurpfile synth "$SYNTH_MAP" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
       toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv},
       warnings: ($warnings[0] // []),
+      syntheticPoms: ($synth[0] // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

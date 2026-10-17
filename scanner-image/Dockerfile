@@ -13,7 +13,10 @@ FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f
 
 # sh (busybox), base64, sha256sum, cut, awk, date are all provided by busybox; add git, jq, certs, and
 # xmllint (libxml2-utils) for reading direct <PackageReference> versions out of .csproj for SCA warnings (M4).
-RUN apk add --no-cache git jq ca-certificates libxml2-utils
+# python3 is the static Gradle/.NET resolver runtime (D-039): stdlib only (tomllib needs >= 3.11). It is PINNED
+# to the exact Alpine 3.21 package version (3.12.15-r0, which ships tomllib) -- the one apk we pin by version,
+# per D-039; the others still follow the pinned Alpine branch (Known gap until we snapshot a mirror).
+RUN apk add --no-cache git jq ca-certificates libxml2-utils python3=3.12.15-r0
 
 # --- Betterleaks (pinned version + checksum, verified against the release checksums.txt before use; D-036).
 # Betterleaks (betterleaks/betterleaks, MIT, by the original Gitleaks author) replaces Gitleaks 8.21.2 as the
@@ -63,6 +66,12 @@ COPY betterleaks.toml /etc/secscan/betterleaks.toml
 COPY osv-scanner.toml /etc/secscan/osv-scanner.toml
 COPY betterleaks-empty.ignore /etc/secscan/betterleaks-empty.ignore
 RUN chmod 0444 /etc/secscan/betterleaks.toml /etc/secscan/osv-scanner.toml /etc/secscan/betterleaks-empty.ignore
+
+# The static Gradle resolver (D-038/D-039): read-only data file, run as `python3 -I gradle_resolver.py` so the
+# scanned tree is never on sys.path (D-004). Its unit tests (gradle_resolver_test.py) are NOT shipped -- they
+# run on the host under ./gradlew build (gradleResolverTest).
+COPY gradle_resolver.py /usr/local/bin/gradle_resolver.py
+RUN chmod 0444 /usr/local/bin/gradle_resolver.py
 
 COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh

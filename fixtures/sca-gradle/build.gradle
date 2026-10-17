@@ -1,0 +1,20 @@
+// Synthetic Gradle project with NO lockfile: OSV-Scanner resolves nothing from build.gradle directly, so the
+// static resolver (D-039) emits a synthetic Maven pom and OSV resolves the TRANSITIVE dependency. The direct
+// dependency commons-text:1.12.0 is itself clean; it pulls commons-lang3 (transitive, undeclared) which carries
+// CVE-2025-48924. The resulting SCA finding anchors to THIS build.gradle, never the synthetic /work path (D-038).
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Version comes from gradle.properties, exercising the resolver's property interpolation.
+    implementation "org.apache.commons:commons-text:${commonsTextVersion}"
+
+    // A test-scope dependency with its OWN known CVE (commons-collections 3.2.1 -> CVE-2015-7501). It must NEVER
+    // surface: dev/test dependencies are excluded by the resolver, so this proves the exclusion end to end.
+    testImplementation 'commons-collections:commons-collections:3.2.1'
+}
