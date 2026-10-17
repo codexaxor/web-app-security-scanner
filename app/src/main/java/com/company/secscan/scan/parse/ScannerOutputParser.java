@@ -63,6 +63,20 @@ public class ScannerOutputParser {
             }
         }
 
+        // D-038: the scanner emits a synthetic Maven pom (outside the clone) per lockfile-less Gradle build file
+        // so OSV can resolve it transitively. OSV reports the synthetic pom's /work path; this map rewrites it
+        // back to the originating build.gradle (repo-relative) before fingerprinting, so a Gradle SCA finding
+        // anchors to the build file. An OSV source path that is NOT in this map and not under the checkout still
+        // hits the UNRESOLVED_PATH guard below and is dropped.
+        Map<String, String> syntheticPoms = new java.util.HashMap<>();
+        if (m.syntheticPoms != null) {
+            for (ManifestSyntheticPom sp : m.syntheticPoms) {
+                if (sp.syntheticPath != null && sp.buildFile != null) {
+                    syntheticPoms.put(sp.syntheticPath, sp.buildFile);
+                }
+            }
+        }
+
         List<ScannerTaskResult> tasks = new ArrayList<>();
         List<RawFinding> findings = new ArrayList<>();
         List<ManifestScanner> scanners = m.scanners == null ? List.of() : m.scanners;
@@ -76,7 +90,7 @@ public class ScannerOutputParser {
                 findings.addAll(readSecretFindings(outDir.resolve(s.findingsFile)));
             } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
                 findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile,
-                        warnings));
+                        warnings, syntheticPoms));
             }
         }
 
@@ -107,11 +121,16 @@ public class ScannerOutputParser {
      * (D-035).
      */
     List<RawFinding> parseOsv(Path osvJson, String checkoutPath) {
-        return parseOsv(osvJson, checkoutPath, java.util.Set.of(), new ArrayList<>());
+        return parseOsv(osvJson, checkoutPath, java.util.Set.of(), new ArrayList<>(), Map.of());
     }
 
     List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile) {
-        return parseOsv(osvJson, checkoutPath, csprojMissingLockfile, new ArrayList<>());
+        return parseOsv(osvJson, checkoutPath, csprojMissingLockfile, new ArrayList<>(), Map.of());
+    }
+
+    List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile,
+                             List<ScanWarning> warningsOut) {
+        return parseOsv(osvJson, checkoutPath, csprojMissingLockfile, warningsOut, Map.of());
     }
 
     /**
@@ -130,7 +149,7 @@ public class ScannerOutputParser {
      * (every source path is under the checkout); it is defense in depth.
      */
     List<RawFinding> parseOsv(Path osvJson, String checkoutPath, java.util.Set<String> csprojMissingLockfile,
-                             List<ScanWarning> warningsOut) {
+                             List<ScanWarning> warningsOut, Map<String, String> syntheticPoms) {
         if (!Files.exists(osvJson)) {
             return List.of();
         }
@@ -140,7 +159,12 @@ public class ScannerOutputParser {
         }
         List<RawFinding> out = new ArrayList<>();
         for (OsvResult result : report.results) {
-            String manifestPath = relativize(result.source == null ? null : result.source.path, checkoutPath);
+            String rawPath = result.source == null ? null : result.source.path;
+            // D-038: a synthetic Gradle pom's /work path maps back to its originating build.gradle
+            // (repo-relative) BEFORE the path guard and fingerprinting; everything else is relativized to the
+            // checkout as usual.
+            String mappedBuildFile = rawPath == null ? null : syntheticPoms.get(rawPath);
+            String manifestPath = mappedBuildFile != null ? mappedBuildFile : relativize(rawPath, checkoutPath);
             if (result.packages == null) {
                 continue;
             }
@@ -361,6 +385,14 @@ public class ScannerOutputParser {
         public Map<String, String> toolVersions;
         public List<ManifestScanner> scanners;
         public List<ManifestWarning> warnings;
+        public List<ManifestSyntheticPom> syntheticPoms;
+    }
+
+    /** Maps a synthetic Gradle pom's container path to its originating {@code build.gradle} (repo-relative). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestSyntheticPom {
+        public String syntheticPath;
+        public String buildFile;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

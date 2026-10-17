@@ -30,6 +30,17 @@ class OsvCommandTest {
         assertThat(invocation).contains("--config").contains("$OSV_CONFIG");
         // The pinned config path is defined and points at the baked file.
         assertThat(SCRIPT).contains("OSV_CONFIG=/etc/secscan/osv-scanner.toml");
+        // D-038: OSV also scans the synthetic-pom dir so static Gradle resolution reaches it.
+        assertThat(invocation).contains("\"$SYNTH\"");
+    }
+
+    @Test
+    void gradleResolverRunsIsolatedAndWritesOutsideTheClone() {
+        assumeTrue(SCRIPT != null, "run-scan.sh not found");
+        // D-039: the resolver is invoked with `python3 -I` (scanned tree off sys.path; D-004), reading the
+        // checkout and writing synthetic poms to $SYNTH under tmpfs /work (outside the clone; D-038).
+        assertThat(SCRIPT).contains("python3 -I /usr/local/bin/gradle_resolver.py \"$CHECKOUT\" \"$SYNTH\"");
+        assertThat(SCRIPT).contains("SYNTH=\"$WORK/synthetic\"");
     }
 
     private static String readScript() {

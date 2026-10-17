@@ -93,6 +93,28 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
         });
     }
 
+    @Test
+    void gradleTransitiveCveIsFoundAndAnchoredToTheBuildFile() throws Exception {
+        // M4b "Done when": a Gradle repo WITHOUT a lockfile yields its expected TRANSITIVE CVEs. OSV cannot read
+        // build.gradle, so the static resolver (D-039) emits a synthetic Maven pom and OSV resolves it: the
+        // direct commons-text:1.12.0 is clean but pulls commons-lang3 (CVE-2025-48924). D-038: the finding
+        // anchors to build.gradle, never the synthetic /work path. Gradle findings are in the Maven ecosystem.
+        List<SubIssue> subs = scanFixture("sca-gradle");
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getType()).isEqualTo("sca");
+            assertThat(s.getPackageName()).isEqualTo("org.apache.commons:commons-lang3");
+            assertThat(s.getVulnId()).isEqualTo("CVE-2025-48924");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
+        // No SCA finding may carry a container/synthetic path (D-038).
+        assertThat(subs).filteredOn(s -> "sca".equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
+        // The test-scope dependency (commons-collections 3.2.1 -> CVE-2015-7501) is excluded, so it never
+        // surfaces — dev/test dependencies are not scanned.
+        assertThat(subs).noneSatisfy(s ->
+                assertThat(s.getPackageName()).isEqualTo("commons-collections:commons-collections"));
+    }
+
     /** Builds a throwaway git repo from the named fixture, scans it through the real container, returns subs. */
     private List<SubIssue> scanFixture(String fixtureName) throws Exception {
         Path fixtureRepo = buildFixtureRepo(fixtureName);

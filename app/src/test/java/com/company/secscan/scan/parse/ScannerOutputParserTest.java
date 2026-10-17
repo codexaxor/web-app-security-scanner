@@ -6,6 +6,7 @@ import com.company.secscan.finding.RawFinding;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -218,6 +219,33 @@ class ScannerOutputParserTest {
             assertThat(w.code()).isEqualTo("UNRESOLVED_PATH");
             assertThat(w.message()).contains("/work/outside/pom.xml");
             assertThat(w.filePath()).isNull();
+        });
+    }
+
+    @Test
+    void syntheticGradlePomPathIsRewrittenToTheBuildFileBeforeFingerprinting(@TempDir Path outDir)
+            throws Exception {
+        // D-038: OSV reports the synthetic pom's /work path; the manifest maps it to the originating
+        // build.gradle (repo-relative). The mapped finding must anchor to that build file (never the /work
+        // path). The unmapped /work/synthetic/9/pom.xml is NOT in the map, so it is dropped (UNRESOLVED_PATH).
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "app/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic.json", outDir), "/work/checkout",
+                java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).singleElement().satisfies(f -> {
+            assertThat(f.type()).isEqualTo(RawFinding.TYPE_SCA);
+            // Gradle findings surface in OSV's Maven ecosystem (Maven coordinates, Maven Central).
+            assertThat(f.ecosystem()).isEqualTo("Maven");
+            assertThat(f.packageName()).isEqualTo("org.apache.commons:commons-text");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42889");
+            // The fingerprint anchors to the build file, never the synthetic /work path.
+            assertThat(f.filePath()).isEqualTo("app/build.gradle").doesNotContain("/work").doesNotContain("synthetic");
+        });
+        // The unmapped synthetic pom escaped the checkout and had no mapping -> dropped with a warning.
+        assertThat(warnings).singleElement().satisfies(w -> {
+            assertThat(w.code()).isEqualTo("UNRESOLVED_PATH");
+            assertThat(w.message()).contains("/work/synthetic/9/pom.xml");
         });
     }
 
