@@ -1,11 +1,17 @@
 #!/bin/sh
-# SecScan scanner entrypoint (M2): clone one repo at one commit, run Gitleaks, and write SANITIZED results.
+# SecScan scanner entrypoint (M2 + M4b): clone one repo at one commit, run Betterleaks, and write SANITIZED
+# results.
 #
-# Security contract (CLAUDE.md + D-014 + D-024):
+# Security contract (CLAUDE.md + D-014 + D-024 + D-036 + D-037):
 #   - The token (if any) arrives only as a read-only file, never an env var or the clone URL, and is sent as a
 #     basic-auth header via a git config file on tmpfs — never on the command line, never logged.
-#   - Gitleaks runs UNREDACTED into tmpfs /work, but the raw secret NEVER leaves this container: we compute a
+#   - Betterleaks runs UNREDACTED into tmpfs /work, but the raw secret NEVER leaves this container: we compute a
 #     SHA-256 and a masked preview here and write only those to /out. /work is tmpfs and dies with the container.
+#   - In-repo suppressors are IGNORED (D-037): a pinned --config overrides any .betterleaks.toml/.gitleaks.toml,
+#     --ignore-gitleaks-allow ignores inline allow comments, and --gitleaks-ignore-path points at a baked empty
+#     file so the repo's .betterleaksignore/.gitleaksignore is never read.
+#   - Validation is OFF: we never pass --validation (or any --validation-* flag), so no live provider calls are
+#     made. Betterleaks' rule validate() blocks only run under --validation.
 #   - Tracing is never enabled (no `set -x`), and no secret value is ever echoed.
 #
 # Inputs (env):   SCAN_CLONE_URL (required), SCAN_BRANCH (optional), SCAN_CLONE_DEPTH (default 1)
@@ -19,14 +25,19 @@ WORK=/work
 OUT=/out
 CHECKOUT="$WORK/checkout"
 TOKEN_FILE=/run/secrets/gitlab-token
-RAW="$WORK/gitleaks-raw.json"
+RAW="$WORK/betterleaks-raw.json"
+
+# Pinned scanner configs baked into the image (D-037). Passed with --config so in-repo suppressors are ignored.
+BL_CONFIG=/etc/secscan/betterleaks.toml
+BL_IGNORE=/etc/secscan/betterleaks-empty.ignore
+OSV_CONFIG=/etc/secscan/osv-scanner.toml
 
 : "${SCAN_CLONE_URL:?SCAN_CLONE_URL is required}"
 BRANCH="${SCAN_BRANCH:-}"
 DEPTH="${SCAN_CLONE_DEPTH:-1}"
 
 GIT_VERSION="$(git --version | awk '{print $3}')"
-GITLEAKS_VERSION="$(gitleaks version 2>/dev/null || echo unknown)"
+BETTERLEAKS_VERSION="$(betterleaks version 2>/dev/null || echo unknown)"
 
 # --- Clone (token, if present, via a tmpfs git config header; never in the URL/argv/env) ---
 GIT_CONFIG_GLOBAL="$WORK/gitconfig"
@@ -61,23 +72,30 @@ fi
 
 COMMIT="$(git -C "$CHECKOUT" rev-parse HEAD)"
 
-# --- Secret scan (Gitleaks, unredacted into tmpfs) ---
-# `gitleaks dir` does NOT follow symlinks unless --follow-symlinks is passed (which we deliberately do not):
-# a symlink in the repo must never make the scanner read a file outside the checkout.
-# --exit-code 2 is returned when leaks are found, so we can tell "leaks found" (2) apart from a real gitleaks
-# error (gitleaks returns 1 on error); 0 = clean. The JSON report is written to a file only (never stdout).
+# --- Secret scan (Betterleaks, unredacted into tmpfs; D-036) ---
+# `betterleaks dir` does NOT follow symlinks unless asked to (we never do): a symlink in the repo must never
+# make the scanner read a file outside the checkout.
+# --exit-code 2 is returned when leaks are found, so we can tell "leaks found" (2) apart from a real betterleaks
+# error (betterleaks returns 1 on error, e.g. a bad config/unreadable target); 0 = clean. The JSON report is
+# written to a file only (never stdout). In-repo suppressors are ignored (D-037): --config (precedence #1)
+# overrides any in-repo config, --ignore-gitleaks-allow ignores inline allow comments, and --gitleaks-ignore-path
+# points at a baked empty file so the repo's ignore file is not read. We never pass --validation (no live calls).
 START="$(date +%s)"
 set +e
-gitleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 2 >"$WORK/gitleaks.log" 2>&1
+betterleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 2 \
+    --config "$BL_CONFIG" --ignore-gitleaks-allow --gitleaks-ignore-path "$BL_IGNORE" \
+    >"$WORK/betterleaks.log" 2>&1
 GL_EXIT=$?
 set -e
 END="$(date +%s)"
 DUR_MS=$(( (END - START) * 1000 ))
 
-# A run is successful only when gitleaks exited 0 (clean) or 2 (leaks found) AND wrote a valid JSON array
-# report. Any other exit code, or a missing/invalid report, is a scanner failure (status "failed", exit 20).
+# A run is successful only when betterleaks exited 0 (clean) or 2 (leaks found) AND wrote a valid JSON report.
+# Betterleaks writes an ARRAY when there are findings but the JSON literal `null` when there are none, so both
+# "array" and "null" are valid; any other exit code, or a missing/invalid report, is a scanner failure
+# (status "failed", exit 20).
 if { [ "$GL_EXIT" -eq 0 ] || [ "$GL_EXIT" -eq 2 ]; } \
-        && [ -f "$RAW" ] && jq -e 'type == "array"' "$RAW" >/dev/null 2>&1; then
+        && [ -f "$RAW" ] && jq -e 'type == "array" or type == "null"' "$RAW" >/dev/null 2>&1; then
     SECRET_STATUS="ok"
 else
     SECRET_STATUS="failed"
@@ -87,9 +105,11 @@ fi
 : > "$WORK/secrets.ndjson"
 if [ "$SECRET_STATUS" = "ok" ] && [ -s "$RAW" ]; then
     # Emit tab-separated rows with the secret base64-encoded, so arbitrary bytes survive the read loop. File
-    # paths are made repo-relative (the checkout prefix stripped) for stable fingerprints in M3.
+    # paths are made repo-relative (the checkout prefix stripped) for stable fingerprints in M3. `// []` turns a
+    # `null` (no findings) report into an empty list. Betterleaks' JSON fields (RuleID/File/StartLine/Secret)
+    # are Gitleaks-compatible.
     jq -r --arg prefix "$CHECKOUT/" \
-        '.[] | [.RuleID, (.File|ltrimstr($prefix)), (.StartLine|tostring), (.Secret|@base64)] | @tsv' \
+        '(. // []) | .[] | [.RuleID, (.File|ltrimstr($prefix)), (.StartLine|tostring), (.Secret|@base64)] | @tsv' \
         "$RAW" > "$WORK/findings.tsv"
     while IFS="$(printf '\t')" read -r rule file line secret_b64; do
         [ -n "$rule" ] || continue
@@ -150,7 +170,9 @@ OSV_JSON="$OUT/osv.json"
 OSV_VERSION="$(osv-scanner --version 2>/dev/null | awk '/osv-scanner version/{print $3; exit}')"
 START="$(date +%s)"
 set +e
-osv-scanner scan source -r --format json --output-file "$OSV_JSON" "$CHECKOUT" >"$WORK/osv.log" 2>&1
+# --config overrides any in-repo osv-scanner.toml so [[IgnoredVulns]]/[[PackageOverrides]] cannot suppress or
+# downgrade a finding (D-037, verified against v2.7.0).
+osv-scanner scan source -r --config "$OSV_CONFIG" --format json --output-file "$OSV_JSON" "$CHECKOUT" >"$WORK/osv.log" 2>&1
 OSV_EXIT=$?
 set -e
 END="$(date +%s)"
@@ -178,7 +200,7 @@ jq -nc \
     --arg commit "$COMMIT" \
     --arg checkout "$CHECKOUT" \
     --arg git "$GIT_VERSION" \
-    --arg gitleaks "$GITLEAKS_VERSION" \
+    --arg betterleaks "$BETTERLEAKS_VERSION" \
     --arg osv "$OSV_VERSION" \
     --arg sstatus "$SECRET_STATUS" \
     --argjson sexit "$GL_EXIT" \
@@ -189,7 +211,7 @@ jq -nc \
     --argjson nopkg "$OSV_NO_PACKAGES" \
     --slurpfile warnings "$WORK/warnings.json" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
-      toolVersions:{git:$git, gitleaks:$gitleaks, "osv-scanner":$osv},
+      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv},
       warnings: ($warnings[0] // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
