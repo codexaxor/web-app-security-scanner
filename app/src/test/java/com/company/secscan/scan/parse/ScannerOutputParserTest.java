@@ -21,13 +21,13 @@ class ScannerOutputParserTest {
     @Test
     void parsesSecretFindingFromSamples(@TempDir Path outDir) throws Exception {
         copyResource("/samples/scanner/result.json", outDir.resolve("result.json"));
-        copyResource("/samples/gitleaks/secrets.json", outDir.resolve("secrets.json"));
+        copyResource("/samples/betterleaks/secrets.json", outDir.resolve("secrets.json"));
 
         ParsedScan parsed = parser.parse(outDir);
 
         assertThat(parsed.cloneFailed()).isFalse();
         assertThat(parsed.commit()).isEqualTo("ab49a433ddc6c8b5e243ef26187b7eb30583a4c5");
-        assertThat(parsed.toolVersions()).containsEntry("gitleaks", "8.21.2");
+        assertThat(parsed.toolVersions()).containsEntry("betterleaks", "1.7.3");
         assertThat(parsed.tasks()).singleElement()
                 .satisfies(t -> {
                     assertThat(t.name()).isEqualTo("secret");
@@ -36,12 +36,12 @@ class ScannerOutputParserTest {
                 });
         assertThat(parsed.findings()).singleElement().satisfies(f -> {
             assertThat(f.type()).isEqualTo(RawFinding.TYPE_SECRET);
-            assertThat(f.ruleId()).isEqualTo("aws-access-token");
+            assertThat(f.ruleId()).isEqualTo("github-pat");
             assertThat(f.filePath()).isEqualTo("config/application.properties");
-            assertThat(f.line()).isEqualTo(5);
+            assertThat(f.line()).isEqualTo(4);
             assertThat(f.secretHash())
-                    .isEqualTo("91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d");
-            assertThat(f.secretPreview()).isEqualTo("AKIA");
+                    .isEqualTo("e810c94de3e7621be6d97a3d5bd08eadaf66803e591fc7b11afef3e9aa9017b2");
+            assertThat(f.secretPreview()).isEqualTo("ghp_");
             assertThat(f.installedVersion()).isNull();
         });
     }

@@ -4,7 +4,7 @@
   "commit": "ab49a433ddc6c8b5e243ef26187b7eb30583a4c5",
   "toolVersions": {
     "git": "2.47.3",
-    "gitleaks": "8.21.2"
+    "betterleaks": "1.7.3"
   },
   "scanners": [
     {

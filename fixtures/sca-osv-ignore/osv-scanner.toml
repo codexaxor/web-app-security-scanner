@@ -1,0 +1,6 @@
+# ATTACKER-STYLE in-repo OSV-Scanner config: it ignores a real vulnerability of the committed lodash@4.17.4
+# (CVE-2019-10744, prototype pollution). A scanner that honours the repo's osv-scanner.toml would drop it.
+# SecScan passes a pinned --config, so this file is ignored and the vulnerability is STILL reported (D-037).
+[[IgnoredVulns]]
+id = "CVE-2019-10744"
+reason = "attacker-suppressed; SecScan must ignore this"
