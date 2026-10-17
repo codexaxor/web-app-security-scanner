@@ -172,15 +172,22 @@ done
 # the checkout, plus the MISSING_GRADLE_LOCKFILE inventory warning). The parser rewrites OSV's synthetic-pom
 # source path back to the build file before fingerprinting (D-038); an unmapped /work path is dropped (D-035).
 SYNTH="$WORK/synthetic"
+RESOLVER_OUT="$WORK/resolver-out.json"
 SYNTH_MAP="$WORK/synthetic-map.json"
 mkdir -p "$SYNTH"
 set +e
-python3 -I /usr/local/bin/gradle_resolver.py "$CHECKOUT" "$SYNTH" > "$SYNTH_MAP" 2>"$WORK/resolver.log"
+python3 -I /usr/local/bin/gradle_resolver.py "$CHECKOUT" "$SYNTH" > "$RESOLVER_OUT" 2>"$WORK/resolver.log"
 RESOLVER_EXIT=$?
 set -e
-if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "array"' "$SYNTH_MAP" >/dev/null 2>&1; then
-    printf '[]' > "$SYNTH_MAP"
+# The resolver prints {poms:[{syntheticPath,buildFile}], warnings:[{code,message,filePath}]}. On any failure,
+# fall back to an empty result.
+if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "object" and (.poms | type == "array")' "$RESOLVER_OUT" >/dev/null 2>&1; then
+    printf '{"poms":[],"warnings":[]}' > "$RESOLVER_OUT"
 fi
+jq -c '.poms' "$RESOLVER_OUT" > "$SYNTH_MAP"
+# Surface every skipped construct/non-concrete version as a scan warning (GRADLE_UNPARSEABLE_CONSTRUCT, D-030):
+# append the resolver's warnings to the inventory warnings so they reach the manifest and the issue feed.
+jq -c '.warnings[]?' "$RESOLVER_OUT" >> "$WORK/warnings.ndjson"
 
 # --- SCA scan (OSV-Scanner over the whole tree; deps.dev online, D-006/D-034) ---
 # Structure-agnostic: nested modules, monorepos and mixed ecosystems all work; "no manifests" is a warning

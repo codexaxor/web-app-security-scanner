@@ -10,8 +10,11 @@ Maven `pom.xml` outside the clone, and OSV resolves that pom **transitively**:
 - `implementation "org.apache.commons:commons-text:${commonsTextVersion}"` (version `1.12.0` from
   `gradle.properties`) is itself clean, but pulls the transitive `commons-lang3`, which carries
   **CVE-2025-48924**. The finding anchors to `build.gradle` (never the synthetic `/work` path — D-038).
-- `testImplementation 'commons-collections:commons-collections:3.2.1'` has its own CVE (CVE-2015-7501) but is
-  **test scope**, so the resolver excludes it and it must NOT surface.
+- `testImplementation 'commons-collections:commons-collections:3.2.1'` has its own CVE (CVE-2015-7501). Per the
+  slice-1 review the resolver **over-includes** every non-`buildSrc` configuration (production and test) and
+  lets OSV decide — matching how M4 scans real poms (OSV is scope-agnostic and reports `<scope>test</scope>`
+  deps too). So this surfaces as well, anchored to `build.gradle`; the principled dev/test exclusion switch is
+  M7, not M4b.
 
 Gradle coordinates are Maven coordinates, so these findings appear in OSV's **Maven** ecosystem.
 

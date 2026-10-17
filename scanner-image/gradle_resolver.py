@@ -13,23 +13,33 @@ Invoked in the scanner container as::
 ``-I`` (isolated) keeps the scanned tree and the CWD off ``sys.path`` so a planted ``json.py``/``tomllib.py``
 can never be imported; only the standard library is used (``tomllib`` for version catalogs -- Python >= 3.11).
 
-It prints a JSON array on stdout mapping each synthetic pom to its originating build file (repo-relative)::
+It prints a JSON OBJECT on stdout::
 
-    [{"syntheticPath": "/work/synthetic/0/pom.xml", "buildFile": "app/build.gradle"}, ...]
+    {"poms":     [{"syntheticPath": "/work/synthetic/0/pom.xml", "buildFile": "app/build.gradle"}, ...],
+     "warnings": [{"code": "GRADLE_UNPARSEABLE_CONSTRUCT", "message": "...", "filePath": "app/build.gradle"}, ...]}
 
-run-scan.sh passes ``<synthetic_out_dir>`` to OSV and records this array in the manifest; the parser rewrites
-OSV's ``source.path`` back to the build file before fingerprinting (D-038).
+run-scan.sh records ``poms`` in the manifest (``syntheticPoms``) and passes ``<synthetic_out_dir>`` to OSV; the
+parser rewrites OSV's ``source.path`` back to the build file before fingerprinting (D-038). ``warnings`` are
+appended to the scan's warnings so every skipped construct is a VISIBLE coverage gap (D-030), never silent.
 
-Scope and safety (D-031 / D-035 -- never guess):
+Config selection (reviewed for slice 1):
+  * We resolve EVERY non-``buildSrc`` dependency-declaration configuration -- production AND test -- and let OSV
+    decide what to report. OSV is scope-agnostic (it reports a Maven ``<scope>test</scope>`` dependency too), so
+    this MATCHES how M4 already scans real ``pom.xml`` files. We over-include rather than silently drop (D-030);
+    a package in a production config is always kept even if it also appears in a test config (keep wins). The
+    principled dev/test exclusion (the ``include_dev_deps`` switch / ``DEV_DEPENDENCY`` reason) is M7, not here.
+
+Never guess (D-031 / D-035):
   * Only build files WITHOUT a sibling lockfile are resolved; a locked Gradle project is resolved by OSV
     natively, so resolving it here would double-count.
-  * Only PRODUCTION configurations are read (``implementation``, ``api``, ``compileOnly``, ``runtimeOnly``,
-    ...); anything whose configuration name contains ``test`` (and build-only configs) is excluded, matching
-    the dev/test exclusion rule.
-  * Only CONCRETE versions are emitted. A dynamic version (``1.2.+``, ``latest.release``), a range
-    (``[1.0,2.0)``) or an unresolved property (``$ver``) is skipped, never guessed.
-  * The resolver is best-effort: a parse error on one file is logged to stderr and that file is skipped; it
-    never raises to the caller and never fails the scan.
+  * Only CONCRETE versions are emitted. A dependency with no version (BOM-managed), a dynamic version
+    (``1.2.+``, ``latest.release``), a range (``[1.0,2.0)``) or an unresolved property (``$ver``) is skipped and
+    raises ``GRADLE_UNPARSEABLE_CONSTRUCT`` -- never guessed.
+  * Constructs the static reader cannot follow (``buildSrc``, ``apply from:``, ``resolutionStrategy``, an
+    unresolved version-catalog alias) raise ``GRADLE_UNPARSEABLE_CONSTRUCT`` too.
+
+Best-effort: a parse error on one file is logged to stderr and that file is skipped; it never raises to the
+caller and never fails the scan.
 """
 
 import json
@@ -42,15 +52,20 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - the image pins a python3 that has tomllib
     tomllib = None
 
-# Production configurations we read, as Gradle's exact (camelCase) configuration names. A positive allowlist
-# avoids picking up random lines; custom configurations are not resolved (bounded for M4b). Test/dev
-# configurations (testImplementation, androidTestImplementation, annotationProcessor, developmentOnly, ...) are
-# deliberately absent so their dependencies never surface -- and whole-word matching (\b...\b, case-sensitive)
-# means "implementation" never matches inside "testImplementation".
-PRODUCTION_CONFIGS = (
-    "implementation", "api", "compileOnlyApi", "compileOnly", "runtimeOnly",
-    "providedCompile", "providedRuntime", "compile", "runtime",
-)
+# The scan_warning code for a Gradle construct/version the static resolver cannot resolve (free text, no
+# migration). Each one is a coverage gap we SHOW, never hide (D-030).
+WARN_CODE = "GRADLE_UNPARSEABLE_CONSTRUCT"
+
+# A dependency-declaration configuration keyword. We over-include every non-buildSrc configuration (production
+# and test alike -- see the module docstring), so this matches the standard base configurations plus any
+# source-set/variant prefix of a known camelCase suffix (testImplementation, integrationTestImplementation,
+# debugRuntimeOnly, testFixturesApi, ...). It does NOT match arbitrary identifiers (classpath, id, exclude).
+_BASE_CONFIGS = frozenset({
+    "implementation", "api", "compile", "runtime", "compileOnly", "compileOnlyApi", "runtimeOnly",
+    "providedCompile", "providedRuntime", "annotationProcessor", "developmentOnly", "kapt", "ksp",
+})
+_CONFIG_VARIANT = re.compile(
+    r"^[a-z][A-Za-z0-9]*(Implementation|CompileOnlyApi|CompileOnly|RuntimeOnly|AnnotationProcessor|Api|Compile|Runtime)$")
 
 # A concrete, pinned version OSV can match: non-empty and only version-safe characters. This single rule rejects
 # every non-concrete form at once -- a range ("[", "]", "(", ")", ","), a dynamic "+"/"*", an unresolved "$ver"
@@ -63,6 +78,10 @@ _MAX_FILE_BYTES = 5 * 1024 * 1024  # never read an absurdly large build file int
 def log(message):
     """Diagnostic to stderr only (captured to resolver.log in the container); never touches stdout (the map)."""
     print("gradle_resolver: " + message, file=sys.stderr)
+
+
+def _is_config(token):
+    return token in _BASE_CONFIGS or bool(_CONFIG_VARIANT.match(token))
 
 
 # --- Comment stripping -------------------------------------------------------------------------------------
@@ -110,7 +129,7 @@ def parse_properties(path):
 def collect_variables(checkout, build_dir, build_text):
     """Version variables visible to a build file: root + module ``gradle.properties`` plus simple string
     assignments in the build file itself (Groovy ``def``/``ext.``, Kotlin ``val``). Only literal string values
-    are captured; anything computed stays unresolved and its dependency is skipped."""
+    are captured; anything computed stays unresolved and its dependency is skipped (and warned)."""
     variables = {}
     variables.update(parse_properties(os.path.join(checkout, "gradle.properties")))
     if os.path.abspath(build_dir) != os.path.abspath(checkout):
@@ -214,109 +233,101 @@ _MAP_GROUP = re.compile(r"""\bgroup\s*:\s*["']([^"']+)["']""")
 _MAP_NAME = re.compile(r"""\bname\s*:\s*["']([^"']+)["']""")
 _MAP_VERSION = re.compile(r"""\bversion\s*:\s*["']([^"']+)["']""")
 _LIBS_RE = re.compile(r"\blibs((?:\.[A-Za-z0-9_]+)+)")
-# A production configuration used anywhere on a line (not only at its start), so `dependencies { implementation
-# '...' }` on one line is caught. Whole-word and case-sensitive, so it never fires inside testImplementation.
-_CONFIG_SCAN = re.compile(r"\b(" + "|".join(PRODUCTION_CONFIGS) + r")\b")
+# A dependency configuration used anywhere on a line (not only at its start), so `dependencies { implementation
+# '...' }` on one line is caught. The matched word is validated by _is_config.
+_CONFIG_SCAN = re.compile(r"\b([a-zA-Z][A-Za-z0-9]*)\b")
+# Recognized non-dependency argument forms on a config line (internal/local): never a Maven coordinate, so they
+# are ignored WITHOUT a warning (they are not a coverage gap).
+_INTERNAL_RE = re.compile(r"\b(project|files|fileTree|gradleApi|localGroovy|kotlin|gradleTestKit)\s*\(")
 
 
-def _concrete_coord(group, artifact, version, variables):
-    """A validated ``(group, artifact, version)`` tuple, or None when any part is missing/non-concrete."""
-    if not group or not artifact or not version:
-        return None
+def _concrete_version(version, variables):
+    """The concrete version string, or None when it is not a resolvable concrete pin."""
     version = resolve_interpolation(version, variables)
-    # A dynamic "latest.*" selector is version-safe by characters but is NOT a concrete pin -- skip it (D-035).
     if version.startswith("latest.") or version == "latest":
-        return None
-    if not (_SAFE_TOKEN.match(group) and _SAFE_TOKEN.match(artifact) and _SAFE_TOKEN.match(version)):
-        return None
-    return (group, artifact, version)
+        return None  # dynamic selector: version-safe by characters, but not a concrete pin
+    return version if _SAFE_TOKEN.match(version) else None
 
 
 def extract_from_line(line, variables, libraries, bundles):
-    """All concrete coordinates declared on one line. Each production-configuration keyword on the line
-    contributes the first coordinate in its argument region (to end of line); a ``libs.bundles`` accessor may
-    yield several."""
+    """``(coords, warnings)`` for one line. Each dependency-configuration keyword contributes the first
+    coordinate in its argument region (to end of line); a ``libs.bundles`` accessor may yield several. A
+    recognized dependency that cannot be resolved to a concrete coordinate yields a warning detail string."""
     coords = []
+    warnings = []
     for match in _CONFIG_SCAN.finditer(line):
-        coords.extend(_extract_argument(line[match.end():], variables, libraries, bundles))
-    return coords
+        if not _is_config(match.group(1)):
+            continue
+        rest = line[match.end():]
+        c, w = _extract_argument(rest, variables, libraries, bundles)
+        coords.extend(c)
+        warnings.extend(w)
+    return coords, warnings
 
 
 def _extract_argument(rest, variables, libraries, bundles):
-    """The coordinate(s) in one configuration's argument region ``rest`` (the text after the keyword)."""
+    """``(coords, warnings)`` for one configuration's argument region ``rest`` (the text after the keyword)."""
     # 1) Version-catalog accessor: libs.foo.bar / libs.bundles.x (no quoted coordinate in the argument).
     libs_match = _LIBS_RE.search(rest)
     if libs_match:
         segments = [s for s in libs_match.group(1).split(".") if s]
-        if not segments:
-            return []
-        head = segments[0]
-        if head in ("versions", "plugins"):
-            return []  # a version/plugin accessor is not a dependency
-        if head == "bundles":
+        if not segments or segments[0] in ("versions", "plugins"):
+            return [], []  # a version/plugin accessor is not a dependency
+        if segments[0] == "bundles":
             alias = _norm(".".join(segments[1:]))
-            coords = []
-            for member in bundles.get(alias, []):
-                coords.extend(_from_library(member, libraries, variables))
-            return coords
-        return _from_library(_norm(".".join(segments)), libraries, variables)
+            if alias not in bundles:
+                return [], ["unresolved version-catalog bundle 'libs.bundles." + ".".join(segments[1:]) + "'"]
+            coords, warnings = [], []
+            for member in bundles[alias]:
+                c, w = _from_library(member, libraries, variables, "libs.bundles." + ".".join(segments[1:]))
+                coords.extend(c)
+                warnings.extend(w)
+            return coords, warnings
+        return _from_library(_norm(".".join(segments)), libraries, variables, "libs." + ".".join(segments))
 
     # 2) Map notation: group: 'g', name: 'a', version: 'v' (version optional).
     if _MAP_NAME.search(rest):
         g = _MAP_GROUP.search(rest)
         n = _MAP_NAME.search(rest)
         v = _MAP_VERSION.search(rest)
-        coord = _concrete_coord(g.group(1) if g else None, n.group(1) if n else None,
-                                v.group(1) if v else None, variables)
-        return [coord] if coord else []
+        group = g.group(1) if g else None
+        name = n.group(1) if n else None
+        if group and name:
+            return _coord_or_warning(group, name, v.group(1) if v else None, variables)
+        return [], []
 
     # 3) String notation: the first quoted token is the g:a:v coordinate (platform('g:a:v') unwraps for free).
+    #    Ignore recognized internal/local forms (project/files/...), which are never Maven coordinates.
+    if _INTERNAL_RE.search(rest):
+        return [], []
     coord_match = _COORD_RE.search(rest)
     if coord_match:
         parts = coord_match.group(1).split(":")
-        if len(parts) >= 3:
-            coord = _concrete_coord(parts[0], parts[1], parts[2], variables)
-            return [coord] if coord else []
-    return []
+        if len(parts) >= 2 and _SAFE_TOKEN.match(parts[0]) and _SAFE_TOKEN.match(parts[1]):
+            version = parts[2] if len(parts) >= 3 else None
+            return _coord_or_warning(parts[0], parts[1], version, variables)
+    return [], []
 
 
-def _from_library(alias, libraries, variables):
-    """Resolve a catalog library alias to a concrete coordinate (or nothing)."""
+def _coord_or_warning(group, artifact, version, variables):
+    """A concrete ``[(g, a, v)]`` coordinate, or ``([], [warning])`` when the version is missing/non-concrete
+    (a visible coverage gap -- never guessed; D-035)."""
+    ga = group + ":" + artifact
+    if version is None:
+        return [], ["dependency '" + ga + "' declared with no version (not resolved; e.g. BOM-managed)"]
+    concrete = _concrete_version(version, variables)
+    if concrete is None:
+        return [], ["dependency '" + ga + "' has a non-concrete version '" + version + "' (skipped, not guessed)"]
+    return [(group, artifact, concrete)], []
+
+
+def _from_library(alias, libraries, variables, accessor):
+    """Resolve a catalog library alias to a concrete coordinate, or warn that it is unresolved."""
     entry = libraries.get(alias)
     if entry is None:
-        return []
+        return [], ["unresolved version-catalog reference '" + accessor + "'"]
     group, artifact, version = entry
-    coord = _concrete_coord(group, artifact, version, variables)
-    return [coord] if coord else []
-
-
-def resolve_build_file(checkout, build_path, libraries, bundles):
-    """All concrete, de-duplicated production coordinates declared in one build file."""
-    try:
-        size = os.path.getsize(build_path)
-    except OSError:
-        return []
-    if size > _MAX_FILE_BYTES:
-        log("skipping oversized build file: " + build_path)
-        return []
-    try:
-        with open(build_path, "r", encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
-    except OSError as exc:
-        log("could not read " + build_path + ": " + str(exc))
-        return []
-
-    text = strip_comments(text)
-    variables = collect_variables(checkout, os.path.dirname(build_path), text)
-
-    seen = set()
-    coords = []
-    for line in text.splitlines():
-        for coord in extract_from_line(line, variables, libraries, bundles):
-            if coord not in seen:
-                seen.add(coord)
-                coords.append(coord)
-    return coords
+    return _coord_or_warning(group, artifact, version, variables)
 
 
 # --- Synthetic pom -----------------------------------------------------------------------------------------
@@ -352,6 +363,49 @@ def write_synthetic_pom(out_dir, index, coords):
     return os.path.abspath(pom_path)
 
 
+# --- Per-file resolution -----------------------------------------------------------------------------------
+
+def resolve_build_file(checkout, build_path, libraries, bundles):
+    """``(coords, warning_details)`` for one build file. ``coords`` are concrete, de-duplicated (keep wins:
+    a package kept once regardless of how many configurations declare it). ``warning_details`` is one string per
+    skipped dependency/construct, to be surfaced as GRADLE_UNPARSEABLE_CONSTRUCT."""
+    try:
+        size = os.path.getsize(build_path)
+    except OSError:
+        return [], []
+    if size > _MAX_FILE_BYTES:
+        return [], ["build file skipped: larger than " + str(_MAX_FILE_BYTES) + " bytes"]
+    try:
+        with open(build_path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError as exc:
+        log("could not read " + build_path + ": " + str(exc))
+        return [], []
+
+    text = strip_comments(text)
+    variables = collect_variables(checkout, os.path.dirname(build_path), text)
+
+    seen = set()
+    coords = []
+    warnings = []
+    for line in text.splitlines():
+        line_coords, line_warnings = extract_from_line(line, variables, libraries, bundles)
+        for coord in line_coords:
+            if coord not in seen:
+                seen.add(coord)
+                coords.append(coord)
+        warnings.extend(line_warnings)
+
+    # Constructs a static reader cannot follow -- surfaced so the gap is visible (D-030), not silent.
+    if re.search(r"\bapply\s+from\s*:", text):
+        warnings.append("`apply from:` applies an external script that was not followed")
+    if "resolutionStrategy" in text:
+        warnings.append("`resolutionStrategy` version pinning/substitution was not applied")
+
+    # De-duplicate identical warnings within a file (e.g. the same unresolved alias on several lines).
+    return coords, list(dict.fromkeys(warnings))
+
+
 # --- Walk --------------------------------------------------------------------------------------------------
 
 def _has_lockfile(directory):
@@ -360,45 +414,69 @@ def _has_lockfile(directory):
 
 
 def find_build_files(checkout):
-    """Repo build files eligible for static resolution: ``build.gradle``/``build.gradle.kts`` with NO sibling
-    lockfile (a locked project is resolved by OSV natively). Symlinks are never followed or read; ``buildSrc``
-    (build-logic, not runtime) is skipped."""
-    results = []
+    """``(eligible, buildsrc)``: repo build files eligible for static resolution
+    (``build.gradle``/``build.gradle.kts`` with NO sibling lockfile -- a locked project is resolved by OSV
+    natively), and the ``buildSrc`` build files that were skipped (build logic, surfaced as a warning).
+    Symlinks are never followed or read."""
+    eligible = []
+    buildsrc = []
     for root, dirs, files in os.walk(checkout, followlinks=False):
-        dirs[:] = [d for d in dirs if d != "buildSrc" and not os.path.islink(os.path.join(root, d))]
-        if ".git" in dirs:
-            dirs.remove(".git")
-        if _has_lockfile(root):
-            continue
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d)) and d != ".git"]
+        in_buildsrc = ("buildSrc" + os.sep) in (root + os.sep).replace(checkout, "", 1) \
+            or os.path.basename(root) == "buildSrc"
         for name in ("build.gradle", "build.gradle.kts"):
             candidate = os.path.join(root, name)
-            if os.path.isfile(candidate) and not os.path.islink(candidate):
-                results.append(candidate)
-    results.sort()  # stable synthetic indices regardless of walk order
-    return results
+            if not (os.path.isfile(candidate) and not os.path.islink(candidate)):
+                continue
+            if in_buildsrc:
+                buildsrc.append(candidate)
+            elif not _has_lockfile(root):
+                eligible.append(candidate)
+    eligible.sort()  # stable synthetic indices regardless of walk order
+    buildsrc.sort()
+    return eligible, buildsrc
+
+
+def _rel(checkout, path):
+    return os.path.relpath(path, checkout).replace(os.sep, "/")
+
+
+def resolve(checkout, out_dir):
+    """Resolve the whole checkout: ``{"poms": [...], "warnings": [...]}``. Never raises."""
+    poms = []
+    warnings = []
+
+    def warn(detail, build_file):
+        warnings.append({"code": WARN_CODE, "message": build_file + ": " + detail, "filePath": build_file})
+
+    try:
+        libraries, bundles = load_version_catalog(checkout)
+        eligible, buildsrc = find_build_files(checkout)
+        for build_path in buildsrc:
+            warn("buildSrc build logic is not resolved (dependencies declared here are not scanned)",
+                 _rel(checkout, build_path))
+        index = 0
+        for build_path in eligible:
+            rel = _rel(checkout, build_path)
+            coords, details = resolve_build_file(checkout, build_path, libraries, bundles)
+            for detail in details:
+                warn(detail, rel)
+            if not coords:
+                continue  # nothing concrete to resolve -> no synthetic pom (warnings above record the gaps)
+            synthetic_path = write_synthetic_pom(out_dir, index, coords)
+            poms.append({"syntheticPath": synthetic_path, "buildFile": rel})
+            index += 1
+    except Exception as exc:  # best-effort: never fail the scan on a resolver bug
+        log("unexpected error, emitting partial result: " + repr(exc))
+    return {"poms": poms, "warnings": warnings}
 
 
 def main(argv):
     if len(argv) != 3:
         log("usage: gradle_resolver.py <checkout_dir> <synthetic_out_dir>")
-        print("[]")
+        print(json.dumps({"poms": [], "warnings": []}))
         return 2
-    checkout, out_dir = argv[1], argv[2]
-    mapping = []
-    try:
-        libraries, bundles = load_version_catalog(checkout)
-        index = 0
-        for build_path in find_build_files(checkout):
-            coords = resolve_build_file(checkout, build_path, libraries, bundles)
-            if not coords:
-                continue  # nothing concrete to resolve -> no synthetic pom (MISSING_GRADLE_LOCKFILE still warns)
-            synthetic_path = write_synthetic_pom(out_dir, index, coords)
-            rel = os.path.relpath(build_path, checkout).replace(os.sep, "/")
-            mapping.append({"syntheticPath": synthetic_path, "buildFile": rel})
-            index += 1
-    except Exception as exc:  # best-effort: never fail the scan on a resolver bug
-        log("unexpected error, emitting partial map: " + repr(exc))
-    print(json.dumps(mapping))
+    print(json.dumps(resolve(argv[1], argv[2])))
     return 0
 
 

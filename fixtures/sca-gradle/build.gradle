@@ -14,7 +14,8 @@ dependencies {
     // Version comes from gradle.properties, exercising the resolver's property interpolation.
     implementation "org.apache.commons:commons-text:${commonsTextVersion}"
 
-    // A test-scope dependency with its OWN known CVE (commons-collections 3.2.1 -> CVE-2015-7501). It must NEVER
-    // surface: dev/test dependencies are excluded by the resolver, so this proves the exclusion end to end.
+    // A test-scope dependency with its OWN known CVE (commons-collections 3.2.1 -> CVE-2015-7501). The resolver
+    // over-includes every non-buildSrc config (slice-1 review) and lets OSV decide, matching how M4 scans real
+    // poms (OSV is scope-agnostic), so this surfaces too, anchored to build.gradle. Dev/test exclusion is M7.
     testImplementation 'commons-collections:commons-collections:3.2.1'
 }

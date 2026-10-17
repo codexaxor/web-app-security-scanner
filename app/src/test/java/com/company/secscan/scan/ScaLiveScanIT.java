@@ -109,10 +109,13 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
         // No SCA finding may carry a container/synthetic path (D-038).
         assertThat(subs).filteredOn(s -> "sca".equals(s.getType()))
                 .allSatisfy(s -> assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
-        // The test-scope dependency (commons-collections 3.2.1 -> CVE-2015-7501) is excluded, so it never
-        // surfaces — dev/test dependencies are not scanned.
-        assertThat(subs).noneSatisfy(s ->
-                assertThat(s.getPackageName()).isEqualTo("commons-collections:commons-collections"));
+        // The test-scope dependency (commons-collections 3.2.1) is OVER-INCLUDED (slice-1 review): we resolve
+        // every non-buildSrc configuration and let OSV decide, matching how M4 scans real poms (OSV is
+        // scope-agnostic). So it DOES surface, anchored to build.gradle; principled dev/test exclusion is M7.
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getPackageName()).isEqualTo("commons-collections:commons-collections");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
     }
 
     /** Builds a throwaway git repo from the named fixture, scans it through the real container, returns subs. */

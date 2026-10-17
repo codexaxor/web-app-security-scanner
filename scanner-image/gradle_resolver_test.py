@@ -3,7 +3,7 @@
 
 Offline, stdlib ``unittest`` only. Wired into ``./gradlew build`` via the ``gradleResolverTest`` task
 (app/build.gradle.kts), so a resolver regression fails the DEFAULT build. The behavioural end-to-end proof
-(real transitive CVEs via OSV) is the live-osv ``GradleResolverIT``.
+(real transitive CVEs via OSV) is the live-osv ``ScaLiveScanIT``.
 
 Run directly: ``python3 gradle_resolver_test.py`` (NOT ``-I`` -- the harness imports the resolver module from
 this directory; ``-I`` is for the container invocation against untrusted repos, not for our own test harness).
@@ -33,7 +33,15 @@ def write(root, rel, text):
 def resolve(root, rel):
     """Concrete coordinates the resolver extracts from one build file in ``root``."""
     libraries, bundles = gr.load_version_catalog(root)
-    return gr.resolve_build_file(root, os.path.join(root, rel), libraries, bundles)
+    coords, _ = gr.resolve_build_file(root, os.path.join(root, rel), libraries, bundles)
+    return coords
+
+
+def details(root, rel):
+    """Warning detail strings the resolver emits for one build file in ``root``."""
+    libraries, bundles = gr.load_version_catalog(root)
+    _, warnings = gr.resolve_build_file(root, os.path.join(root, rel), libraries, bundles)
+    return warnings
 
 
 class StringNotationTests(unittest.TestCase):
@@ -56,7 +64,6 @@ class StringNotationTests(unittest.TestCase):
             write(root, "build.gradle.kts", """
                 dependencies {
                     implementation("com.google.guava:guava:30.1-jre")
-                    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
                 }
             """)
             coords = resolve(root, "build.gradle.kts")
@@ -97,25 +104,43 @@ class StringNotationTests(unittest.TestCase):
         self.assertEqual(coords, [("org.apache.commons", "commons-text", "1.9")])
 
 
-class ExclusionTests(unittest.TestCase):
-    def test_test_scope_is_excluded(self):
+class ConfigSelectionTests(unittest.TestCase):
+    """Reviewed rule (slice 1): over-include EVERY non-buildSrc configuration (production and test); OSV decides
+    what to report, matching how M4 scans real poms. Keep wins: a package in a production config is always kept
+    even if it also appears in a test config. Principled dev/test exclusion is M7."""
+
+    def test_package_in_both_production_and_test_configs_is_kept(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                dependencies {
+                    implementation 'com.google.guava:guava:30.1-jre'
+                    testImplementation 'com.google.guava:guava:30.1-jre'
+                }
+            """)
+            coords = resolve(root, "build.gradle")
+        # Kept once (keep wins + de-dup), never dropped because it also appears in a test config.
+        self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
+
+    def test_test_only_package_is_included_over_included(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 dependencies {
                     implementation 'com.google.guava:guava:30.1-jre'
                     testImplementation 'org.mockito:mockito-core:5.0.0'
-                    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
-                    integrationTestImplementation 'io.rest-assured:rest-assured:5.3.0'
+                    integrationTestRuntimeOnly 'io.rest-assured:rest-assured:5.3.0'
                 }
             """)
             coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
+        self.assertIn(("com.google.guava", "guava", "30.1-jre"), coords)
+        self.assertIn(("org.mockito", "mockito-core", "5.0.0"), coords)   # test config, over-included
+        self.assertIn(("io.rest-assured", "rest-assured", "5.3.0"), coords)  # custom source-set config
 
-    def test_non_dependency_lines_ignored(self):
+    def test_non_config_keywords_and_internal_forms_ignored(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 plugins { id 'java' }
                 repositories { mavenCentral() }
+                buildscript { dependencies { classpath 'com.example:plugin:1.0' } }
                 dependencies {
                     implementation project(':core')
                     implementation files('libs/local.jar')
@@ -124,6 +149,7 @@ class ExclusionTests(unittest.TestCase):
                 }
             """)
             coords = resolve(root, "build.gradle")
+        # `classpath` is not a declarable dependency configuration; project()/files()/gradleApi() are internal.
         self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
 
 
@@ -136,7 +162,6 @@ class VersionResolutionTests(unittest.TestCase):
                     implementation 'g:latest:latest.release'
                     implementation 'g:range:[1.0,2.0)'
                     implementation 'g:unresolved:$missingVersion'
-                    implementation 'g:noversion'
                     implementation 'g:concrete:1.2.3'
                 }
             """)
@@ -229,8 +254,72 @@ class VersionCatalogTests(unittest.TestCase):
                 dependencies { implementation("g:a:" + libs.versions.guava.get()) }
             """)
             coords = resolve(root, "build.gradle.kts")
-        # libs.versions.* is a version accessor, not a library; nothing concrete is declared here.
         self.assertEqual(coords, [])
+
+
+class WarningTests(unittest.TestCase):
+    """Item #2: every skipped construct / non-concrete version is a VISIBLE coverage gap (D-030), never silent.
+    One warning per skipped item."""
+
+    def test_one_warning_per_non_concrete_version(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                dependencies {
+                    implementation 'g:dynamic:1.2.+'
+                    implementation 'g:range:[1.0,2.0)'
+                    implementation 'g:unresolved:$missingVersion'
+                    implementation 'g:concrete:1.2.3'
+                }
+            """)
+            warnings = details(root, "build.gradle")
+        self.assertEqual(len(warnings), 3)  # concrete one does not warn
+        self.assertTrue(all("non-concrete version" in w for w in warnings))
+
+    def test_warning_for_version_less_bom_managed_dependency(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
+            """)
+            warnings = details(root, "build.gradle")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("no version", warnings[0])
+        self.assertIn("spring-boot-starter-web", warnings[0])
+
+    def test_warning_for_unresolved_catalog_reference(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "gradle/libs.versions.toml", "[libraries]\n")
+            write(root, "build.gradle.kts", """
+                dependencies {
+                    implementation(libs.not.in.catalog)
+                    implementation(libs.bundles.missing)
+                }
+            """)
+            warnings = details(root, "build.gradle.kts")
+        self.assertEqual(len(warnings), 2)
+        self.assertTrue(any("libs.not.in.catalog" in w for w in warnings))
+        self.assertTrue(any("libs.bundles.missing" in w for w in warnings))
+
+    def test_warning_for_apply_from_and_resolution_strategy(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                apply from: 'versions.gradle'
+                configurations.all { resolutionStrategy { force 'g:a:1.0' } }
+                dependencies { implementation 'com.google.guava:guava:30.1-jre' }
+            """)
+            warnings = details(root, "build.gradle")
+        self.assertTrue(any("apply from" in w for w in warnings))
+        self.assertTrue(any("resolutionStrategy" in w for w in warnings))
+
+    def test_buildsrc_build_file_is_warned_as_unresolved(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
+            write(root, "buildSrc/build.gradle", "dependencies { implementation 'g:b:2.0' }\n")
+            result = gr.resolve(root, out)
+        self.assertEqual([p["buildFile"] for p in result["poms"]], ["build.gradle"])  # buildSrc not resolved
+        buildsrc_warnings = [w for w in result["warnings"] if "buildSrc" in w["message"]]
+        self.assertEqual(len(buildsrc_warnings), 1)
+        self.assertEqual(buildsrc_warnings[0]["code"], gr.WARN_CODE)
+        self.assertEqual(buildsrc_warnings[0]["filePath"], "buildSrc/build.gradle")
 
 
 class WalkAndOutputTests(unittest.TestCase):
@@ -238,14 +327,8 @@ class WalkAndOutputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", "dependencies { implementation 'g:a:1.0' }\n")
             write(root, "gradle.lockfile", "# locked\n")
-            self.assertEqual(gr.find_build_files(root), [])
-
-    def test_buildsrc_is_skipped(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", "dependencies { implementation 'g:a:1.0' }\n")
-            write(root, "buildSrc/build.gradle", "dependencies { implementation 'g:b:2.0' }\n")
-            found = gr.find_build_files(root)
-            self.assertEqual(found, [os.path.join(root, "build.gradle")])
+            eligible, _ = gr.find_build_files(root)
+            self.assertEqual(eligible, [])
 
     def test_mapping_is_repo_relative_and_poms_are_written(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
@@ -254,10 +337,10 @@ class WalkAndOutputTests(unittest.TestCase):
                   'dependencies { implementation("org.apache.commons:commons-text:1.9") }\n')
             result = subprocess.run([sys.executable, "-I", RESOLVER, root, out],
                                     capture_output=True, text=True, check=True)
-            mapping = json.loads(result.stdout)
-            build_files = sorted(entry["buildFile"] for entry in mapping)
+            poms = json.loads(result.stdout)["poms"]
+            build_files = sorted(entry["buildFile"] for entry in poms)
             self.assertEqual(build_files, ["app/build.gradle.kts", "build.gradle"])
-            for entry in mapping:
+            for entry in poms:
                 self.assertTrue(entry["syntheticPath"].startswith(out))
                 self.assertTrue(os.path.isfile(entry["syntheticPath"]))
                 with open(entry["syntheticPath"], encoding="utf-8") as handle:
@@ -270,7 +353,9 @@ class WalkAndOutputTests(unittest.TestCase):
             write(root, "build.gradle", "dependencies { implementation 'g:a:1.2.+' }\n")
             result = subprocess.run([sys.executable, "-I", RESOLVER, root, out],
                                     capture_output=True, text=True, check=True)
-            self.assertEqual(json.loads(result.stdout), [])
+            parsed = json.loads(result.stdout)
+        self.assertEqual(parsed["poms"], [])
+        self.assertTrue(any("non-concrete version" in w["message"] for w in parsed["warnings"]))
 
     def test_isolated_mode_runs_against_a_tree_with_a_planted_json_module(self):
         # D-004: reading the scanned tree must never import code from it. Plant a hostile json.py in the
@@ -281,8 +366,8 @@ class WalkAndOutputTests(unittest.TestCase):
             write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
             result = subprocess.run([sys.executable, "-I", RESOLVER, root, out],
                                     capture_output=True, text=True, cwd=root, check=True)
-            mapping = json.loads(result.stdout)
-        self.assertEqual([e["buildFile"] for e in mapping], ["build.gradle"])
+            poms = json.loads(result.stdout)["poms"]
+            self.assertEqual([p["buildFile"] for p in poms], ["build.gradle"])
 
 
 class SafetyTests(unittest.TestCase):
@@ -300,8 +385,7 @@ class SafetyTests(unittest.TestCase):
     def test_malformed_build_file_does_not_raise(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", "dependencies { implementation 'g:a:1.0'\n/* unterminated")
-            # Must not raise; returns whatever it could parse (possibly empty).
-            resolve(root, "build.gradle")
+            resolve(root, "build.gradle")  # must not raise
 
 
 if __name__ == "__main__":
