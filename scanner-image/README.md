@@ -52,7 +52,22 @@ lockfile-less `build.gradle`/`build.gradle.kts` **as data** and emits a syntheti
 `/work/synthetic/<n>/` (outside the clone, so a scanned repo cannot plant one). OSV then scans both the
 checkout and `/work/synthetic`, resolving the synthetic poms **transitively** (deps.dev). It is invoked
 `python3 -I` so the scanned tree and CWD are off `sys.path` and a planted `json.py`/`tomllib.py` can never be
-imported (D-004); no build is ever executed. It resolves **every non-`buildSrc` dependency configuration**
+imported (D-004); no build is ever executed.
+
+**BOM-managed versions (D-041, draft).** Spring Boot/Cloud Gradle builds declare most dependencies with no
+inline version (managed by a BOM). The resolver imports the relevant BOM(s) into the synthetic pom's
+`<dependencyManagement>` as `<scope>import</scope><type>pom</type>` and emits those dependencies **version-less**
+so OSV's transitive resolver fills the versions. BOMs come from the Spring Boot Gradle plugin version
+(`id 'org.springframework.boot' version 'X'`, Kotlin/`plugins`/legacy `spring-boot-gradle-plugin:X` forms) →
+`spring-boot-dependencies:X`; a `platform(...)`/`enforcedPlatform(...)` coordinate; and a `mavenBom "..."`
+import — with `${prop}` resolved from `ext{}` (incl. `set('p','v')`), `extra[...]` and `gradle.properties`.
+OSV's resolver only engages when the pom has a concrete-versioned dependency, so when every dependency is
+BOM-managed the resolver adds the first BOM as a versioned `<type>pom</type>` dependency purely to trigger
+resolution (a BOM pom contributes no packages of its own). A dependency with an EXPLICIT non-concrete version
+(range/dynamic/unresolved `$`) is still skipped+warned, and a version-less dependency with no BOM to manage it
+is skipped+warned.
+
+It resolves **every non-`buildSrc` dependency configuration**
 (production and test) and lets OSV decide what to report — OSV is scope-agnostic (it reports a Maven
 `<scope>test</scope>` dependency too), so this matches how M4 scans real poms; a package in a production config
 is always kept even if it also appears in a test config (keep wins). The principled dev/test exclusion switch

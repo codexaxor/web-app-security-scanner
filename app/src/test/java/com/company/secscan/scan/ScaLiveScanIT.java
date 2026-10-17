@@ -118,6 +118,23 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
         });
     }
 
+    @Test
+    void bomManagedGradleDependencyIsResolvedAndAnchoredToTheBuildFile() throws Exception {
+        // D-041: a Spring Boot + Cloud build with NO inline versions. The resolver imports the Boot and Cloud
+        // BOMs into the synthetic pom's <dependencyManagement>, emits the starters version-less, and injects the
+        // Boot BOM as a <type>pom> trigger (no inline-versioned dep exists). OSV then resolves the managed
+        // versions transitively, e.g. spring-boot-starter-web -> tomcat-embed-core (9.0.60, known CVEs).
+        List<SubIssue> subs = scanFixture("sca-gradle-bom");
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getType()).isEqualTo("sca");
+            // A BOM-managed transitive — declared with no version in build.gradle, resolved only via the BOM.
+            assertThat(s.getPackageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
+        assertThat(subs).filteredOn(s -> "sca".equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
+    }
+
     /** Builds a throwaway git repo from the named fixture, scans it through the real container, returns subs. */
     private List<SubIssue> scanFixture(String fixtureName) throws Exception {
         Path fixtureRepo = buildFixtureRepo(fixtureName);

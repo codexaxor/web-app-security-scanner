@@ -1,0 +1,26 @@
+// Synthetic Spring Boot + Spring Cloud Gradle project with NO lockfile and NO inline dependency versions:
+// every dependency is BOM-managed. Proves the D-041 BOM-import path end to end — the static resolver imports
+// spring-boot-dependencies (from the Boot plugin version) and spring-cloud-dependencies (mavenBom + ext prop)
+// into the synthetic pom's <dependencyManagement>, emits the starters version-less, and (since there is no
+// inline-versioned dependency to trigger OSV's transitive resolver) injects the Boot BOM as a <type>pom>
+// dependency as the trigger. OSV then resolves the full transitive graph, e.g. spring-boot-starter-web ->
+// tomcat-embed-core, which carries known CVEs. Findings anchor to THIS build.gradle (D-038), Maven ecosystem.
+plugins {
+    id 'org.springframework.boot' version '2.6.5'
+    id 'io.spring.dependency-management' version '1.0.11.RELEASE'
+}
+
+ext {
+    set('springCloudVersion', '2021.0.4')
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+}
