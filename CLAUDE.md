@@ -18,7 +18,7 @@ If the spec, this file and a decision disagree, stop and ask.
   - `worker`: claims `scan_job` rows, launches one disposable scanner container per scan, parses, enriches,
     scores and reconciles findings.
 - PostgreSQL is both the database and the job queue (`SELECT … FOR UPDATE SKIP LOCKED`). No Redis, no broker.
-- Scanner = separate Docker image (`scanner-image/`) with git, OSV-Scanner, Gitleaks, Opengrep, Checkov. Writes
+- Scanner = separate Docker image (`scanner-image/`) with git, OSV-Scanner, Betterleaks, Opengrep, Checkov. Writes
   JSON/SARIF to `/out`, destroyed after every scan. Only `/out` and logs leave it.
 - React + Vite + TypeScript UI in `ui/`.
 

@@ -58,7 +58,7 @@ flowchart LR
   API -- daily sync --> INTEL[Intel feeds<br/>CISA KEV · FIRST EPSS · endoflife.date]
   API -- enqueue scans --> PG[(PostgreSQL<br/>issues · scans · rules<br/>scan_job queue)]
   W["Worker (Spring Boot)<br/>claim job · launch scanner<br/>parse · enrich · score · reconcile"] -- claim job, write findings --> PG
-  W --> SC[["Scanner container (throwaway)<br/>OSV-Scanner · Gitleaks · Opengrep · Checkov · EOL<br/>JSON to /out · destroyed after scan"]]
+  W --> SC[["Scanner container (throwaway)<br/>OSV-Scanner · Betterleaks · Opengrep · Checkov · EOL<br/>JSON to /out · destroyed after scan"]]
   SC -- shallow clone --> GL
 ```
 
@@ -72,7 +72,7 @@ comes back.
 | Database | PostgreSQL 16, Flyway, Spring Data JPA | One store for data and queue |
 | Job queue | `scan_job` table claimed with `SELECT … FOR UPDATE SKIP LOCKED` | No Redis/RabbitMQ; enough for hundreds of repos |
 | Scheduling | `@Scheduled` + ShedLock | Safe when the API runs as several instances |
-| Scanner runtime | One `scanner` Docker image (git, OSV-Scanner, Gitleaks, Opengrep, Checkov) launched per scan via docker-java | Isolation, pinned tool versions |
+| Scanner runtime | One `scanner` Docker image (git, OSV-Scanner, Betterleaks, Opengrep, Checkov) launched per scan via docker-java | Isolation, pinned tool versions |
 | Frontend | React + Vite + TypeScript | Separate SPA |
 | Secrets at rest | AES-256-GCM, key from env var (Vault later) | Tokens never stored in plain text |
 | Local dev | Docker Compose: postgres, api, worker, ui | One command to run everything |
@@ -134,7 +134,7 @@ to include them.
 
 | Type | Tool | Notes |
 | --- | --- | --- |
-| Secrets | Gitleaks | Default rules + our own; store only a hash and a masked preview, never the value |
+| Secrets | Betterleaks (MIT Gitleaks successor, D-036) | Default rules + our own; in-repo suppressors ignored (D-037); store only a hash and a masked preview, never the value |
 | SAST | [Opengrep](https://github.com/opengrep/opengrep) (LGPL-2.1 fork of Semgrep) | Rule bundle pinned in the scanner image: Java/Spring, C#/ASP.NET Core, JS/TS (Express, React, Next.js) + our custom rules folder |
 | IaC | Checkov | Dockerfiles, Kubernetes manifests, Helm charts, Terraform, docker-compose |
 | End-of-life | Our detector + endoflife.date data | Java release (pom/Gradle toolchain), Spring Boot version, .NET `TargetFramework`, Node version (`.nvmrc`, `engines`, Dockerfile `FROM`), Dockerfile base images, known products found as dependencies (e.g. Keycloak) |

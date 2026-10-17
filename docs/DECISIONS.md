@@ -14,6 +14,72 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-039 Gradle/NuGet static resolver is a Python 3 script in the scanner image (2026-10-17, accepted)
+Context: the M4b static Gradle resolver (and NuGet transitive resolution) must run where the clone exists and
+where OSV runs — inside the scanner container — so it cannot live in `core` as unit-testable Java. The existing
+in-container parsing precedent is POSIX sh + xmllint (`secscan-lib.sh`), but ≥95% accuracy on Gradle Groovy/
+Kotlin DSL plus TOML (`libs.versions.toml`) is not viable in busybox sh.
+Decision: implement the resolver as a Python 3 script shipped in the scanner image (slices 1–2). Binding
+constraints: stdlib only (TOML via `tomllib`, Python ≥ 3.11 — confirmed: Alpine 3.21 ships **python3 3.12.15**
+with `tomllib`); invoke as `python3 -I`; read scanned-repo files as DATA only, never import/exec/eval from the
+scanned tree (D-004); pin the `python3` apk version and record it when it is added; resolver unit tests run
+under `./gradlew build` (wired via a Gradle task) or, if impractical, `GradleResolverIT` is the gate. Python is
+NOT added to the image in slice 0 (no resolver yet) — only when slice 1 lands.
+Consequences: a maintainable, testable resolver; one new image dependency (python3) arriving in slice 1.
+
+## D-038 Gradle synthetic-pom path mapping anchors SCA fingerprints to the build file (2026-10-17, accepted)
+Context: the M4b Gradle resolver emits a synthetic `pom.xml` for OSV to resolve transitively, written OUTSIDE
+the clone so a scanned repo cannot plant one. OSV then reports the synthetic pom's `/work` path, which the
+parser's `UNRESOLVED_PATH` guard (D-035) would drop, and which must never enter a fingerprint anyway.
+Decision: synthetic poms live at `/work/synthetic/<n>/pom.xml` (outside the clone); the scanner manifest maps
+each to its originating `build.gradle` repo-relative path; the parser rewrites OSV's `source.path` to that
+build-file path BEFORE fingerprinting, so a Gradle SCA finding's fingerprint anchors to the real `build.gradle`.
+Anything that does not map (a stray `/work` path) still hits the `UNRESOLVED_PATH` guard and is dropped.
+Consequences: stable, meaningful Gradle SCA identities; the path-escape guard remains in force. (Implemented in
+slice 1.)
+
+## D-037 Scanned-repo suppressions are ignored for every engine (2026-10-17, accepted; resolves OD-8 and the repo-config should-fix)
+Context: a scanned repository could otherwise hide its own findings via in-repo scanner config, ignore files or
+inline allow comments — unacceptable for a security product, where only SecScan's own audited triage may
+suppress.
+Decision: all in-repo suppressors are ignored for every current and future engine. A pinned config is baked
+into the scanner image and passed with `--config`; every in-repo config file, ignore file and inline allow
+comment is ignored. Only SecScan's own audited ignore rules suppress a finding (reason code + `triage_event`).
+Implemented in slice 0 for both current engines (verified against the real tools):
+- Betterleaks: `--config /etc/secscan/betterleaks.toml` (precedence #1, so an in-repo `.betterleaks.toml`/
+  `.gitleaks.toml` is ignored; `[extend] useDefault = true` keeps the full default rule set), plus
+  `--ignore-gitleaks-allow` (ignore inline `gitleaks:allow`/`betterleaks:allow`) and `--gitleaks-ignore-path`
+  pointed at a baked EMPTY file (so the repo's `.gitleaksignore`/`.betterleaksignore` is never read).
+- OSV-Scanner: `--config /etc/secscan/osv-scanner.toml` overrides any in-repo `osv-scanner.toml`
+  (`[[IgnoredVulns]]`/`[[PackageOverrides]]`) — verified against v2.7.0: an in-repo `[[IgnoredVulns]]` drops a
+  finding, and adding `--config` brings it back.
+Proven by `BetterleaksConfigInjectionIT` (secrets, default build) and `OsvConfigInjectionIT` (SCA, `live-osv`).
+Consequences: a repo cannot weaken its own scan; the pinned configs may only keep detection strong, never relax
+it.
+
+## D-036 Secrets engine Gitleaks 8.21.2 -> Betterleaks v1.7.3 (2026-10-17, accepted; resolves OD-7)
+Context: Gitleaks' name/repo control changed hands; the original author started Betterleaks
+(github.com/betterleaks/betterleaks, MIT) as its successor. Our rule is to pin every scanner by version +
+checksum (D-023/D-034). Done now (not later) because the secret group key is the rule id and the only stored
+secret is the test fixture, so the swap re-fingerprints nothing of value (D-029).
+Decision: adopt Betterleaks **v1.7.3** (no v2 exists yet). The release ships per-arch tarballs verified against
+the published `checksums.txt` before use:
+`linux_x64  (amd64) = 9d2ed6fc387bc1c3f95557d5539077b1ce422f0db5ec38db5f14a141ad2947bf`,
+`linux_arm64        = 0541cd2980964a6fb8ea768e8b9507c91a3c06229193462f33a3ecd9cb146b99`.
+The version is recorded in `scan.tool_versions` (key `betterleaks`). Validation stays OFF (no `--validation`
+flag → no live provider calls; `BetterleaksCommandTest` guards against it being added). In-repo suppressors are
+ignored (D-037). The scanner image tag stays `secscan-scanner:8.21.2` — a HISTORICAL identifier, not the engine
+version (D-034). Revisit at Betterleaks v2.
+Probed facts (v1.7.3, recorded not trusted): directory scan is `betterleaks dir <path>`; JSON report is an
+array of objects (Gitleaks-compatible fields `RuleID`/`File`/`StartLine`/`Secret`) or the literal `null` when
+clean (run-scan.sh tolerates both); exit codes with `--exit-code 2` are 0 = clean, 2 = leaks found, 1 (and any
+other) = error. AWS detection changed: `aws-access-token` is now a COMPOSITE rule (an access key ID paired with
+a validatable secret access key) and does not fire offline on a lone fake key, so the secrets fixture moved from
+a fake AWS key to a fake GitHub token (`github-pat`), whose rule id is identical across both engines (no id-map
+needed; see the M4b report).
+Consequences: a maintained, MIT secrets engine; one new pinned tool version + two new checksums. Any bump is new
+checksums + a new decision.
+
 ## D-035 .NET SCA uses OSV-Scanner's native .csproj/CPM extraction, not a custom input file (2026-10-16, accepted; supersedes the .NET fallback mechanism of D-031)
 Context: D-031 (and the SPEC) assumed OSV-Scanner could not read `.csproj` and that we would parse direct
 `<PackageReference>` versions ourselves and feed OSV a custom `osv-scanner.json` (`--lockfile osv-scanner:…`,
