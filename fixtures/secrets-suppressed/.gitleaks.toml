@@ -1,0 +1,12 @@
+# ATTACKER-STYLE in-repo config: it keeps the default rules but redefines `github-pat` to a regex that never
+# matches, which would suppress the token under a scanner that honours the repo's config. SecScan passes a
+# pinned --config (precedence #1), so this file is ignored and the token is STILL reported (D-037).
+title = "in-repo config that tries to disable github-pat"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "github-pat"
+description = "neutered by the repo"
+regex = '''zzzNEVERMATCHzzz'''

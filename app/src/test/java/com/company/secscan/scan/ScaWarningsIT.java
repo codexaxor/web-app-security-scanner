@@ -110,12 +110,15 @@ class ScaWarningsIT extends AbstractScanWorkerIT {
                 .filteredOn(t -> ScanTask.SCANNER_SCA.equals(t.getScanner()))
                 .singleElement().satisfies(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_FAILED));
 
-        // One warning per build file, with the correct repo-relative path (from the inventory step).
+        // One warning per build file, with the correct repo-relative path (from the inventory step). The
+        // lockfile-less .csproj carries BOTH NuGet warnings (D-043): MISSING_NUGET_LOCKFILE and the honest
+        // transitive-gap NUGET_NO_LOCKFILE_TRANSITIVE_GAP; they coexist.
         assertThat(warnings.findByScanId(scan.id()))
                 .extracting(ScanWarning::getCode, ScanWarning::getFilePath)
                 .contains(
                         tuple("MISSING_GRADLE_LOCKFILE", "infra/importer/build.gradle"),
                         tuple("MISSING_NUGET_LOCKFILE", "src/App/App.csproj"),
+                        tuple("NUGET_NO_LOCKFILE_TRANSITIVE_GAP", "src/App/App.csproj"),
                         tuple("UNRESOLVED_VERSION", "src/App/App.csproj"));
 
         // A failed SCA scanner stores no SCA finding and closes nothing: the open issue is still open.
@@ -124,15 +127,85 @@ class ScaWarningsIT extends AbstractScanWorkerIT {
         assertThat(subIssues.findById(open.getId()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
     }
 
+    @Test
+    void nugetWithLockfileEmitsNeitherNugetWarning() throws Exception {
+        // D-043: a .csproj WITH a sibling packages.lock.json gets NEITHER NuGet warning -- OSV reads the lockfile
+        // (full transitives); there is no coverage gap to surface. Offline, so OSV itself fails, but the
+        // inventory step still runs and (correctly) raises no NuGet warning for this project.
+        Path repo = Files.createTempDirectory("secscan-fixture-nuget-lock");
+        copyDir(locateFixture("sca-nuget"), repo);
+        git(repo, "init", "-q", "-b", "main");
+        git(repo, "config", "user.email", "test@example.com");
+        git(repo, "config", "user.name", "Test");
+        git(repo, "add", "-A");
+        git(repo, "commit", "-q", "-m", "fixture");
+
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file://" + repo.toAbsolutePath(), "svc/nuget", 203L, "ct",
+                "read_api,read_repository", null));
+        Repository repository = repositories.save(new Repository(WORKSPACE, conn.getId(), 203L, "svc/nuget",
+                "main", List.of("C#")));
+
+        ScanView scan = scanService.startManual(repository.getId());
+        List<UUID> claimed = claimer.claimBatch(10);
+        assertThat(claimed).hasSize(1);
+        processor.process(claimed.get(0));
+
+        assertThat(warnings.findByScanId(scan.id()))
+                .extracting(ScanWarning::getCode)
+                .doesNotContain("MISSING_NUGET_LOCKFILE", "NUGET_NO_LOCKFILE_TRANSITIVE_GAP");
+    }
+
+    @Test
+    void privateRegistryWarningsCarryHostOnlyAndNeverLeakCredentials() throws Exception {
+        // D-032 (slice 3): private Maven/NuGet feeds are detected and warned (host only); credentials are never
+        // read or stored, and the resolver never fetches a private host. Offline is fine -- detection is pure
+        // parsing. HARD hygiene check: no credential substring anywhere in the stored warnings (/out).
+        Path repo = Files.createTempDirectory("secscan-fixture-privreg");
+        copyDir(locateFixture("sca-private-registry"), repo);
+        git(repo, "init", "-q", "-b", "main");
+        git(repo, "config", "user.email", "test@example.com");
+        git(repo, "config", "user.name", "Test");
+        git(repo, "add", "-A");
+        git(repo, "commit", "-q", "-m", "fixture");
+
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file://" + repo.toAbsolutePath(), "svc/priv", 204L, "ct",
+                "read_api,read_repository", null));
+        Repository repository = repositories.save(new Repository(WORKSPACE, conn.getId(), 204L, "svc/priv",
+                "main", List.of("Java")));
+
+        ScanView scan = scanService.startManual(repository.getId());
+        List<UUID> claimed = claimer.claimBatch(10);
+        assertThat(claimed).hasSize(1);
+        processor.process(claimed.get(0));
+
+        List<ScanWarning> stored = warnings.findByScanId(scan.id());
+        // One PRIVATE_REGISTRY per distinct private host: the two Gradle feeds + the one NuGet feed.
+        assertThat(stored).filteredOn(w -> "PRIVATE_REGISTRY".equals(w.getCode()))
+                .extracting(ScanWarning::getMessage)
+                .anyMatch(m -> m.contains("nexus.corp.example"))
+                .anyMatch(m -> m.contains("artifactory.corp.example"))
+                .anyMatch(m -> m.contains("nuget.corp.example"));
+        // HARD: no credential/token/password and no credential-bearing URL ("@") in ANY stored warning (/out).
+        assertThat(stored).extracting(ScanWarning::getMessage).allSatisfy(m -> assertThat(m)
+                .doesNotContain("s3cr3tT0ken").doesNotContain("svcuser").doesNotContain("svc-account")
+                .doesNotContain("p@ssw0rd-TOPSECRET").doesNotContain("ClearTextPassword").doesNotContain("@"));
+    }
+
     // --- fixture helpers ---
 
     private static Path locateFixture() {
-        for (Path base : List.of(Path.of("fixtures/sca-warnings"), Path.of("../fixtures/sca-warnings"))) {
+        return locateFixture("sca-warnings");
+    }
+
+    private static Path locateFixture(String name) {
+        for (Path base : List.of(Path.of("fixtures", name), Path.of("../fixtures", name))) {
             if (Files.isDirectory(base)) {
                 return base;
             }
         }
-        throw new IllegalStateException("Could not locate fixtures/sca-warnings from "
+        throw new IllegalStateException("Could not locate fixtures/" + name + " from "
                 + Path.of("").toAbsolutePath());
     }
 

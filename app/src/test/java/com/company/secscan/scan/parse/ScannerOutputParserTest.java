@@ -6,6 +6,7 @@ import com.company.secscan.finding.RawFinding;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,13 +22,13 @@ class ScannerOutputParserTest {
     @Test
     void parsesSecretFindingFromSamples(@TempDir Path outDir) throws Exception {
         copyResource("/samples/scanner/result.json", outDir.resolve("result.json"));
-        copyResource("/samples/gitleaks/secrets.json", outDir.resolve("secrets.json"));
+        copyResource("/samples/betterleaks/secrets.json", outDir.resolve("secrets.json"));
 
         ParsedScan parsed = parser.parse(outDir);
 
         assertThat(parsed.cloneFailed()).isFalse();
         assertThat(parsed.commit()).isEqualTo("ab49a433ddc6c8b5e243ef26187b7eb30583a4c5");
-        assertThat(parsed.toolVersions()).containsEntry("gitleaks", "8.21.2");
+        assertThat(parsed.toolVersions()).containsEntry("betterleaks", "1.7.3");
         assertThat(parsed.tasks()).singleElement()
                 .satisfies(t -> {
                     assertThat(t.name()).isEqualTo("secret");
@@ -36,12 +37,12 @@ class ScannerOutputParserTest {
                 });
         assertThat(parsed.findings()).singleElement().satisfies(f -> {
             assertThat(f.type()).isEqualTo(RawFinding.TYPE_SECRET);
-            assertThat(f.ruleId()).isEqualTo("aws-access-token");
+            assertThat(f.ruleId()).isEqualTo("github-pat");
             assertThat(f.filePath()).isEqualTo("config/application.properties");
-            assertThat(f.line()).isEqualTo(5);
+            assertThat(f.line()).isEqualTo(4);
             assertThat(f.secretHash())
-                    .isEqualTo("91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d");
-            assertThat(f.secretPreview()).isEqualTo("AKIA");
+                    .isEqualTo("e810c94de3e7621be6d97a3d5bd08eadaf66803e591fc7b11afef3e9aa9017b2");
+            assertThat(f.secretPreview()).isEqualTo("ghp_");
             assertThat(f.installedVersion()).isNull();
         });
     }
@@ -219,6 +220,153 @@ class ScannerOutputParserTest {
             assertThat(w.message()).contains("/work/outside/pom.xml");
             assertThat(w.filePath()).isNull();
         });
+    }
+
+    @Test
+    void syntheticGradlePomPathIsRewrittenToTheBuildFileBeforeFingerprinting(@TempDir Path outDir)
+            throws Exception {
+        // D-038: OSV reports the synthetic pom's /work path; the manifest maps it to the originating
+        // build.gradle (repo-relative). The mapped finding must anchor to that build file (never the /work
+        // path). The unmapped /work/synthetic/9/pom.xml is NOT in the map, so it is dropped (UNRESOLVED_PATH).
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "app/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic.json", outDir), "/work/checkout",
+                java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).singleElement().satisfies(f -> {
+            assertThat(f.type()).isEqualTo(RawFinding.TYPE_SCA);
+            // Gradle findings surface in OSV's Maven ecosystem (Maven coordinates, Maven Central).
+            assertThat(f.ecosystem()).isEqualTo("Maven");
+            assertThat(f.packageName()).isEqualTo("org.apache.commons:commons-text");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42889");
+            // The fingerprint anchors to the build file, never the synthetic /work path.
+            assertThat(f.filePath()).isEqualTo("app/build.gradle").doesNotContain("/work").doesNotContain("synthetic");
+        });
+        // The unmapped synthetic pom escaped the checkout and had no mapping -> dropped with a warning.
+        assertThat(warnings).singleElement().satisfies(w -> {
+            assertThat(w.code()).isEqualTo("UNRESOLVED_PATH");
+            assertThat(w.message()).contains("/work/synthetic/9/pom.xml");
+        });
+    }
+
+    @Test
+    void multipleSyntheticPomsAreEachRewrittenToTheirOwnBuildFile(@TempDir Path outDir) throws Exception {
+        // M4b multi-module regression (D-038): TWO synthetic poms (/work/synthetic/0 and /1) map to TWO distinct
+        // build files. Both must be rewritten and anchored to their OWN build file; none may be dropped as
+        // UNRESOLVED_PATH. A single-entry map cannot catch a lookup that only works for n == 0.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of(
+                "/work/synthetic/0/pom.xml", "service/build.gradle",
+                "/work/synthetic/1/pom.xml", "gateway/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-multi.json", outDir), "/work/checkout",
+                java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).hasSize(2);
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42252");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.yaml:snakeyaml");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-1471");
+            assertThat(f.filePath()).isEqualTo("gateway/build.gradle");
+        });
+        assertThat(findings).allSatisfy(f ->
+                assertThat(f.filePath()).doesNotContain("/work").doesNotContain("synthetic"));
+        // Both poms mapped, so nothing was dropped.
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
+    void syntheticPomKeyMatchesDespiteCosmeticSlashDifferences(@TempDir Path outDir) throws Exception {
+        // Defense in depth: a doubled slash in OSV's source.path must not orphan a synthetic pom. The map key is
+        // clean (as parse() stores it, normalized); OSV's path here has doubled slashes. The lookup normalizes
+        // the OSV path to the clean key, so the finding still anchors to the build file rather than being dropped
+        // as UNRESOLVED_PATH.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "app/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-slashes.json", outDir),
+                "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).singleElement().satisfies(f ->
+                assertThat(f.filePath()).isEqualTo("app/build.gradle").doesNotContain("/work"));
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
+    void multipleOsvResultsSharingOneSyntheticPathAreAllRewritten(@TempDir Path outDir) throws Exception {
+        // OSV emits SEPARATE result entries for the same source path (a direct block and a transitive block), so
+        // one synthetic pom appears in two results. The map lookup must be non-consuming and apply to EVERY
+        // result on that path -- the second (transitive) block carries the CVEs. Before the fix the second block
+        // was dropped as UNRESOLVED_PATH, leaving 0 SCA. Both blocks must anchor to the build file; none dropped.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "service/build.gradle");
+        Path osvJson = sample("/samples/osv/gradle-synthetic-dup.json", outDir);
+        // Guard the regression shape: the sample must actually have the SAME synthetic path in >= 2 results, or
+        // it cannot reproduce the bug (a single-result-per-path sample would pass trivially).
+        long sharedPathResults = java.util.regex.Pattern.compile("/work/synthetic/0/pom\\.xml")
+                .matcher(Files.readString(osvJson)).results().count();
+        assertThat(sharedPathResults).isGreaterThanOrEqualTo(2);
+        var findings = parser.parseOsv(osvJson, "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        // Both the direct and the transitive block were rewritten and kept.
+        assertThat(findings).extracting(RawFinding::packageName).contains(
+                "org.springframework.boot:spring-boot-starter-web",
+                "org.apache.tomcat.embed:tomcat-embed-core");
+        // The transitive-block finding (tomcat) is anchored to the build file, not the /work path.
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42252");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        assertThat(findings).allSatisfy(f ->
+                assertThat(f.filePath()).isEqualTo("service/build.gradle"));
+        // A second legitimate result on an already-mapped path is NOT an unresolved path.
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
+    void realOsvMultiModuleOutputAnchorsEveryFindingToItsOwnBuildFile(@TempDir Path outDir) throws Exception {
+        // REAL osv-scanner v2.7.0 output (scanner image, fixtures/sca-gradle-multimodule; free-text vuln fields
+        // trimmed). It has the shape the hand-written samples above only model: /work/synthetic/1/pom.xml is
+        // emitted as TWO results (a direct block with spring-boot-starter-web, then the transitive block).
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of(
+                "/work/synthetic/0/pom.xml", "gateway/build.gradle",
+                "/work/synthetic/1/pom.xml", "service/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-multimodule-real.json", outDir),
+                "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(warnings).isEmpty(); // no UNRESOLVED_PATH: both blocks on the shared path were rewritten
+        assertThat(findings).isNotEmpty().allSatisfy(f ->
+                assertThat(f.filePath()).isIn("gateway/build.gradle", "service/build.gradle"));
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.yaml:snakeyaml");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-1471");
+            assertThat(f.filePath()).isEqualTo("gateway/build.gradle");
+        });
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        // The direct block on the shared path is kept too.
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.springframework.boot:spring-boot-starter-web");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+    }
+
+    @Test
+    void normalizeSyntheticKeyCollapsesSlashesAndTrailingSlash() {
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/pom.xml"))
+                .isEqualTo("/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work//synthetic///0/pom.xml"))
+                .isEqualTo("/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/")).isEqualTo("/work/synthetic/0");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("C:\\work\\synthetic\\0\\pom.xml"))
+                .isEqualTo("C:/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey(null)).isNull();
     }
 
     @Test

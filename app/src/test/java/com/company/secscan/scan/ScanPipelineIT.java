@@ -27,23 +27,22 @@ import org.springframework.test.context.DynamicPropertySource;
 /**
  * The M2 "Done when": Start Scan on a fixture with a fake AWS key stores a finding, and the scanner container is
  * gone afterwards. Runs the real, hardened scanner container (built by the {@code buildScannerImage} Gradle
- * task) against the synthetic {@code fixtures/secrets-aws} repository, cloned offline over {@code file://} with
+ * task) against the synthetic {@code fixtures/secrets-token} repository, cloned offline over {@code file://} with
  * {@code network=none}. The token one-time-file + https clone path is verified in the manual real-GitLab run
  * (see the M2 report / D-021).
  */
 class ScanPipelineIT extends AbstractScanWorkerIT {
 
     private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
-    // sha256 of the fixture's fake key AKIA3K7HB9QO2PX5TL4D (computed in the scanner container, not here).
+    // sha256 of the fixture's fake GitHub token ghp_0123…wXyZ (computed in the scanner container, not here).
     private static final String CONTAINER_SHA =
-            "91bca0a22047b5d052ba8324cbe895460270fb64cb26ee2d6d47d85d9a6cb78d";
+            "e810c94de3e7621be6d97a3d5bd08eadaf66803e591fc7b11afef3e9aa9017b2";
     // What the worker actually stores: HMAC-SHA256(fingerprint key, CONTAINER_SHA) under the test's all-zero
     // 32-byte key (SECSCAN_FINGERPRINT_KEY in AbstractScanWorkerIT) — the bare digest is never persisted (D-027).
     private static final String EXPECTED_STORED_HASH =
-            "ba0975bc436fa197ac88b7f761f60b5faba43d99110db898fb06b547a7a289e4";
-    private static final String RAW_KEY = "AKIA3K7HB9QO2PX5TL4D";
-    // The AWS secret-access-key value also present in the fixture; neither it nor RAW_KEY may reach the log.
-    private static final String RAW_SECRET_PART = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+            "3de3e8dc1462110d0002325c561e0b4369fd8c28c842069bdb204a5e2d4242b5";
+    // The fake GitHub token in the fixture; it must never reach the stored log excerpt (point 7).
+    private static final String RAW_KEY = "ghp_0123456789abcdefABCDEF0123456789wXyZ";
 
     static Path workRoot;
     static Path fixtureRepo;
@@ -105,17 +104,17 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_COMPLETED);
         assertThat(finished.getCommitSha()).isEqualTo(fixtureCommit);
         // tool_versions records every scanner's version, including OSV-Scanner (plan change #9).
-        assertThat(finished.getToolVersions()).containsKeys("gitleaks", "osv-scanner");
+        assertThat(finished.getToolVersions()).containsKeys("betterleaks", "osv-scanner");
 
         List<ScanFinding> stored = findings.findByScanId(scan.id());
         assertThat(stored).singleElement().satisfies(f -> {
             assertThat(f.getType()).isEqualTo(ScanFinding.TYPE_SECRET);
-            assertThat(f.getRuleId()).isEqualTo("aws-access-token");
+            assertThat(f.getRuleId()).isEqualTo("github-pat");
             assertThat(f.getFilePath()).isEqualTo("config/application.properties");
             // Stored hash is the keyed HMAC, never the raw key and never the bare container SHA-256 (D-027).
             assertThat(f.getSecretHash()).isEqualTo(EXPECTED_STORED_HASH);
             assertThat(f.getSecretHash()).isNotEqualTo(RAW_KEY).isNotEqualTo(CONTAINER_SHA);
-            assertThat(f.getSecretPreview()).isEqualTo("AKIA").isNotEqualTo(RAW_KEY);
+            assertThat(f.getSecretPreview()).isEqualTo("ghp_").isNotEqualTo(RAW_KEY);
         });
 
         // Two scanners now run in the one container: the secret scanner and OSV-Scanner (SCA). The fixture has
@@ -126,10 +125,9 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         assertThat(scanTasks).allSatisfy(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK));
         ScanTask secretTask = scanTasks.stream()
                 .filter(t -> ScanTask.SCANNER_SECRET.equals(t.getScanner())).findFirst().orElseThrow();
-        // The stored log excerpt must never contain the raw secret or any part of it (point 7).
+        // The stored log excerpt must never contain the raw secret (point 7).
         assertThat(secretTask.getLogExcerpt() == null ? "" : secretTask.getLogExcerpt())
-                .doesNotContain(RAW_KEY)
-                .doesNotContain(RAW_SECRET_PART);
+                .doesNotContain(RAW_KEY);
         assertThat(jobs.findByScanId(scan.id()).orElseThrow().getState()).isEqualTo(ScanJob.STATE_DONE);
 
         // Container is gone afterwards.
@@ -142,12 +140,13 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
     // --- fixture helpers ---
 
     private static Path locateFixture() {
-        for (Path base : List.of(Path.of("fixtures/secrets-aws"), Path.of("../fixtures/secrets-aws"))) {
+        for (Path base : List.of(Path.of("fixtures/secrets-token"), Path.of("../fixtures/secrets-token"))) {
             if (Files.isDirectory(base)) {
                 return base;
             }
         }
-        throw new IllegalStateException("Could not locate fixtures/secrets-aws from " + Path.of("").toAbsolutePath());
+        throw new IllegalStateException("Could not locate fixtures/secrets-token from "
+                + Path.of("").toAbsolutePath());
     }
 
     private static void copyDir(Path src, Path dest) throws IOException {
