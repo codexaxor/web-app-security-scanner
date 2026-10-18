@@ -8,9 +8,11 @@ import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.issue.api.SubIssueView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scoring.ScoreLine;
 import com.company.secscan.support.AbstractGitLabIT;
 import com.company.secscan.workspace.Workspace;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -94,6 +96,45 @@ class IssueApiIT extends AbstractGitLabIT {
         assertThatThrownBy(() -> service.listSubIssues(UUID.randomUUID(), 0, 50))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("No such issue group");
+    }
+
+    @Test
+    void subIssueApiExposesTheScoringFieldsIncludingKevAndEpssAttribution() throws Exception {
+        Repository repo = seedRepository(405L, "svc/scored");
+        IssueGroup group = seedGroup(repo.getId(), "sca", "sca|Maven/org.apache.commons:commons-text",
+                "org.apache.commons:commons-text");
+        SubIssue s = new SubIssue(WORKSPACE, group.getId(), repo.getId(), "sca", "sca", "fp-sca-scored", null);
+        s.setVulnId("CVE-2022-42889");
+        s.setPackageName("org.apache.commons:commons-text");
+        s.setInstalledVersion("1.9");
+        s.setFixedVersion("1.10.0");
+        s.setToolSeverity("9.8");
+        s.setCvss("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H");
+        s.setSeverityLabel("CRITICAL");
+        s.setCwe(List.of("CWE-94"));
+        s.setCveAliases(List.of("CVE-2022-42889"));
+        s.setScore(100);
+        s.setInKev(true);
+        s.setEpss(new BigDecimal("0.94412"));
+        s.setScoreBreakdown(List.of(new ScoreLine("base_cvss", "CVSS base 9.8 × 10", 98),
+                new ScoreLine("on_kev", "Listed in the CISA KEV catalog", 5),
+                new ScoreLine("clamp", "Clamped to the 1–100 range (was 103)", -3)));
+        subIssues.save(s);
+
+        SubIssueView v = service.listSubIssues(group.getId(), 0, 50).content().get(0);
+        assertThat(v.score()).isEqualTo(100);
+        assertThat(v.band()).isEqualTo("critical");
+        assertThat(v.inKev()).isTrue();
+        assertThat(v.cvss()).startsWith("CVSS:3.1/");
+        assertThat(v.cwe()).containsExactly("CWE-94");
+        assertThat(v.cwePhrase()).isEqualTo("Code injection can lead to arbitrary code execution");
+        assertThat(v.epss()).isEqualByComparingTo("0.94412");
+        assertThat(v.epssAttribution()).contains("FIRST.org");
+        assertThat(v.scoreBreakdown()).anyMatch(l -> l.code().equals("on_kev") && l.delta() == 5);
+
+        String json = objectMapper.writeValueAsString(v);
+        assertThat(json).contains("\"score\":100").contains("\"inKev\":true").contains("on_kev")
+                .contains("FIRST.org");
     }
 
     @Test
