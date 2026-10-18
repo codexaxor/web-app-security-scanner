@@ -15,5 +15,8 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** All sub-issues in a group — used when recomputing the group's derived status. Workspace-scoped (rule 1). */
     List<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId);
 
+    /** All sub-issues in a workspace with the given status — the re-score job loads the OPEN ones (D-049). */
+    List<SubIssue> findByWorkspaceIdAndStatus(UUID workspaceId, String status);
+
     Page<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId, Pageable pageable);
 }

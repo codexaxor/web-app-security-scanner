@@ -1,8 +1,6 @@
 package com.company.secscan.issue;
 
 import com.company.secscan.config.SecretFingerprinterHolder;
-import com.company.secscan.intel.FixTimeConfig;
-import com.company.secscan.intel.FixTimeConfigRepository;
 import com.company.secscan.reconcile.Fingerprints;
 import com.company.secscan.reconcile.Reconciler;
 import com.company.secscan.reconcile.Reconciler.Existing;
@@ -16,8 +14,6 @@ import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
-import com.company.secscan.scoring.CweDictionary;
-import com.company.secscan.scoring.FixTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -52,13 +48,13 @@ public class ReconcileService {
     private final SecretFingerprinterHolder fingerprinter;
     private final SubIssueScorer scorer;
     private final RepositoryRepository repositories;
-    private final FixTimeConfigRepository fixTimeConfig;
+    private final GroupRollupService rollup;
     private final Reconciler reconciler = new Reconciler();
 
     public ReconcileService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                             IssueGroupRepository groups, SubIssueRepository subIssues, TriageEventRepository events,
                             SecretFingerprinterHolder fingerprinter, SubIssueScorer scorer,
-                            RepositoryRepository repositories, FixTimeConfigRepository fixTimeConfig) {
+                            RepositoryRepository repositories, GroupRollupService rollup) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
@@ -68,7 +64,7 @@ public class ReconcileService {
         this.fingerprinter = fingerprinter;
         this.scorer = scorer;
         this.repositories = repositories;
-        this.fixTimeConfig = fixTimeConfig;
+        this.rollup = rollup;
     }
 
     /**
@@ -136,7 +132,7 @@ public class ReconcileService {
         // Scoring inputs (M5): repo sensitivity (adjustment) and the tunable fix-time config, loaded once.
         String sensitivity = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
                 .map(Repository::getSensitivity).orElse("normal");
-        Map<String, Integer> fixConfig = loadFixTimeConfig();
+        Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
 
         Set<UUID> touchedGroups = new HashSet<>();
         for (String fp : plan.newOpen()) {
@@ -178,7 +174,7 @@ public class ReconcileService {
         }
 
         for (UUID groupId : touchedGroups) {
-            recomputeGroup(workspaceId, groupId, fixConfig);
+            rollup.recompute(workspaceId, groupId, fixConfig);
         }
 
         scan.markReconciled();
@@ -287,77 +283,6 @@ public class ReconcileService {
         if (ScanFinding.TYPE_SECRET.equals(f.getType()) && fingerprinter.isConfigured()) {
             sub.setKeyId(fingerprinter.require().keyId());
         }
-    }
-
-    /**
-     * Recomputes a group's derived status (M3) and its M5 rollup: {@code severity_score} = the max open
-     * sub-issue score, {@code fix_time_minutes} = the sum of open sub-issues' fix times (SPEC "Issue
-     * lifecycle"/"Fix time"), and, for sca/sast/iac, the subtitle from the worst OPEN sub-issue's CWE phrase
-     * (secret/eol keep their title behaviour and never break on empty cwe, change #4).
-     */
-    private void recomputeGroup(UUID workspaceId, UUID groupId, Map<String, Integer> fixConfig) {
-        List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, groupId);
-        boolean anyOpen = subs.stream().anyMatch(s -> SubIssue.STATUS_OPEN.equals(s.getStatus()));
-        boolean allIgnored = !subs.isEmpty()
-                && subs.stream().allMatch(s -> SubIssue.STATUS_IGNORED.equals(s.getStatus()));
-        String status = anyOpen ? IssueGroup.STATUS_OPEN
-                : allIgnored ? IssueGroup.STATUS_IGNORED : IssueGroup.STATUS_SOLVED;
-
-        List<SubIssue> open = subs.stream().filter(s -> SubIssue.STATUS_OPEN.equals(s.getStatus())).toList();
-        Integer severity = open.stream().map(SubIssue::getScore).filter(java.util.Objects::nonNull)
-                .max(Integer::compareTo).orElse(null);
-        Integer fixMinutes = open.isEmpty() ? null : open.stream()
-                .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
-                        fixConfig))
-                .sum();
-
-        groups.findByIdAndWorkspaceId(groupId, workspaceId).ifPresent(g -> {
-            g.setStatus(status);
-            g.setSeverityScore(severity);
-            g.setFixTimeMinutes(fixMinutes);
-            String subtitle = subtitleFor(g.getType(), worstOpen(open));
-            if (subtitle != null) {
-                g.setSubtitle(subtitle);
-            }
-            groups.save(g);
-        });
-    }
-
-    /** The worst (highest-scored) open sub-issue, or null when none is open; nulls sort lowest, ties keep first. */
-    private static SubIssue worstOpen(List<SubIssue> open) {
-        SubIssue worst = null;
-        for (SubIssue s : open) {
-            int score = s.getScore() == null ? -1 : s.getScore();
-            int best = worst == null ? -2 : (worst.getScore() == null ? -1 : worst.getScore());
-            if (worst == null || score > best) {
-                worst = s;
-            }
-        }
-        return worst;
-    }
-
-    /**
-     * The subtitle for a group type (change #4): sca/sast/iac derive it from the worst open sub-issue's CWE
-     * phrase (first cwe id, else the advisory summary); secret/eol keep their existing title behaviour (null →
-     * the caller leaves the subtitle untouched). Never throws on empty/absent cwe.
-     */
-    private static String subtitleFor(String groupType, SubIssue worst) {
-        if (worst == null) {
-            return null;
-        }
-        return switch (groupType) {
-            case ScanFinding.TYPE_SCA, ScanFinding.TYPE_SAST, ScanFinding.TYPE_IAC ->
-                    CweDictionary.getInstance().phrase(worst.getCwe(), worst.getAdvisorySummary());
-            default -> null; // secret, eol: keep the SPEC title behaviour
-        };
-    }
-
-    private Map<String, Integer> loadFixTimeConfig() {
-        Map<String, Integer> config = new HashMap<>();
-        for (FixTimeConfig c : fixTimeConfig.findAll()) {
-            config.put(c.getCategory(), c.getMinutes());
-        }
-        return config;
     }
 
     private static ScanFinding findByFp(Map<String, ScanFinding> findingByFp, String fp) {
