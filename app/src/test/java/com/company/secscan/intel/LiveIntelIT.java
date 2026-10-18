@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.company.secscan.intel.IntelRows.EpssRow;
 import com.company.secscan.intel.IntelRows.KevFeed;
 import com.company.secscan.intel.IntelRows.KevRow;
+import com.company.secscan.scoring.ScoreInput;
+import com.company.secscan.scoring.ScoreResult;
+import com.company.secscan.scoring.Scoring;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -65,6 +68,7 @@ class LiveIntelIT {
     @Test
     void fixtureCvesIntersectedWithLiveKev() {
         Set<String> fixtureCves = loadFixtureCves();
+        assertThat(fixtureCves).isNotEmpty(); // /fixtures-cves.txt is committed
         KevFeed feed = fetcher.fetchKev();
         Set<String> kev = feed.rows().stream().map(KevRow::cve).collect(Collectors.toSet());
 
@@ -74,11 +78,18 @@ class LiveIntelIT {
         log.info("Fixture CVEs: {}; live KEV: {}; intersection ({}): {}",
                 fixtureCves.size(), kev.size(), intersection.size(), intersection);
 
-        // If any fixture CVE is on the live KEV list it can drive a live end-to-end done-when; the offline
-        // seeded kev_entry (ScoringReconcileIT) proves the criterion regardless of today's live KEV contents.
-        if (fixtureCves.isEmpty()) {
-            log.warn("No fixture CVE list recorded (/fixtures-cves.txt); run the live-osv fixture sweep to fill it.");
-        }
+        // Fixture CVEs ARE on the live KEV list (e.g. Spring4Shell), so there is a live end-to-end done-when:
+        // a real KEV CVE our fixtures produce. Spring4Shell has been on KEV since 2022 and is in our Spring
+        // fixtures — assert it is in both, then that the scorer adds the +5 KEV bump for it (the offline seeded
+        // ScoringReconcileIT remains the default-build proof; advisory contents drift so we assert the stable one).
+        assertThat(intersection).isNotEmpty();
+        assertThat(fixtureCves).contains("CVE-2022-22965");
+        assertThat(kev).contains("CVE-2022-22965");
+
+        ScoreResult withKev = Scoring.score(new ScoreInput("sca", "9.8", "CRITICAL", null, true, "normal"));
+        ScoreResult withoutKev = Scoring.score(new ScoreInput("sca", "9.8", "CRITICAL", null, false, "normal"));
+        assertThat(withKev.breakdown()).anyMatch(l -> l.code().equals("on_kev") && l.delta() == 5);
+        assertThat(withoutKev.breakdown()).noneMatch(l -> l.code().equals("on_kev"));
     }
 
     private static Set<String> loadFixtureCves() {
