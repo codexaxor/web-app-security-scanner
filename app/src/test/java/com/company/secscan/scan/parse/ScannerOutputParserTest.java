@@ -327,6 +327,37 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void realOsvMultiModuleOutputAnchorsEveryFindingToItsOwnBuildFile(@TempDir Path outDir) throws Exception {
+        // REAL osv-scanner v2.7.0 output (scanner image, fixtures/sca-gradle-multimodule; free-text vuln fields
+        // trimmed). It has the shape the hand-written samples above only model: /work/synthetic/1/pom.xml is
+        // emitted as TWO results (a direct block with spring-boot-starter-web, then the transitive block).
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of(
+                "/work/synthetic/0/pom.xml", "gateway/build.gradle",
+                "/work/synthetic/1/pom.xml", "service/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-multimodule-real.json", outDir),
+                "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(warnings).isEmpty(); // no UNRESOLVED_PATH: both blocks on the shared path were rewritten
+        assertThat(findings).isNotEmpty().allSatisfy(f ->
+                assertThat(f.filePath()).isIn("gateway/build.gradle", "service/build.gradle"));
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.yaml:snakeyaml");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-1471");
+            assertThat(f.filePath()).isEqualTo("gateway/build.gradle");
+        });
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        // The direct block on the shared path is kept too.
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.springframework.boot:spring-boot-starter-web");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+    }
+
+    @Test
     void normalizeSyntheticKeyCollapsesSlashesAndTrailingSlash() {
         assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/pom.xml"))
                 .isEqualTo("/work/synthetic/0/pom.xml");
