@@ -165,7 +165,12 @@ public class ScannerOutputParser {
             String rawPath = result.source == null ? null : result.source.path;
             // D-038: a synthetic Gradle pom's /work path maps back to its originating build.gradle
             // (repo-relative) BEFORE the path guard and fingerprinting; everything else is relativized to the
-            // checkout as usual.
+            // checkout as usual. OSV emits SEPARATE result entries for the same source path (a direct block and
+            // a transitive block), so one synthetic pom appears in several results here — the transitive block
+            // carries the resolved CVEs. The lookup is a plain map read, applied independently to EVERY result
+            // and NEVER consuming the entry, so all blocks on a mapped path are rewritten and kept;
+            // UNRESOLVED_PATH fires only for a path genuinely absent from the map. (Duplicate package+vuln across
+            // the two blocks share a fingerprint and are deduped downstream by the reconciler, not dropped.)
             String mappedBuildFile = rawPath == null ? null : syntheticPoms.get(normalizeSyntheticKey(rawPath));
             String manifestPath = mappedBuildFile != null ? mappedBuildFile : relativize(rawPath, checkoutPath);
             if (result.packages == null) {

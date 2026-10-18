@@ -295,6 +295,38 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void multipleOsvResultsSharingOneSyntheticPathAreAllRewritten(@TempDir Path outDir) throws Exception {
+        // OSV emits SEPARATE result entries for the same source path (a direct block and a transitive block), so
+        // one synthetic pom appears in two results. The map lookup must be non-consuming and apply to EVERY
+        // result on that path -- the second (transitive) block carries the CVEs. Before the fix the second block
+        // was dropped as UNRESOLVED_PATH, leaving 0 SCA. Both blocks must anchor to the build file; none dropped.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "service/build.gradle");
+        Path osvJson = sample("/samples/osv/gradle-synthetic-dup.json", outDir);
+        // Guard the regression shape: the sample must actually have the SAME synthetic path in >= 2 results, or
+        // it cannot reproduce the bug (a single-result-per-path sample would pass trivially).
+        long sharedPathResults = java.util.regex.Pattern.compile("/work/synthetic/0/pom\\.xml")
+                .matcher(Files.readString(osvJson)).results().count();
+        assertThat(sharedPathResults).isGreaterThanOrEqualTo(2);
+        var findings = parser.parseOsv(osvJson, "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        // Both the direct and the transitive block were rewritten and kept.
+        assertThat(findings).extracting(RawFinding::packageName).contains(
+                "org.springframework.boot:spring-boot-starter-web",
+                "org.apache.tomcat.embed:tomcat-embed-core");
+        // The transitive-block finding (tomcat) is anchored to the build file, not the /work path.
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42252");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        assertThat(findings).allSatisfy(f ->
+                assertThat(f.filePath()).isEqualTo("service/build.gradle"));
+        // A second legitimate result on an already-mapped path is NOT an unresolved path.
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
     void normalizeSyntheticKeyCollapsesSlashesAndTrailingSlash() {
         assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/pom.xml"))
                 .isEqualTo("/work/synthetic/0/pom.xml");

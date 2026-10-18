@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "source": { "path": "/work/synthetic/0/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "org.springframework.boot:spring-boot-starter-web",
+            "version": "2.6.5",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.5"
+          },
+          "groups": [
+            { "ids": ["CVE-2022-22965"], "aliases": ["CVE-2022-22965"], "max_severity": "9.8" }
+          ]
+        }
+      ]
+    },
+    {
+      "source": { "path": "/work/synthetic/0/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "org.apache.tomcat.embed:tomcat-embed-core",
+            "version": "9.0.60",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/org.apache.tomcat.embed/tomcat-embed-core@9.0.60"
+          },
+          "groups": [
+            { "ids": ["CVE-2022-42252"], "aliases": ["CVE-2022-42252"], "max_severity": "7.5" }
+          ]
+        }
+      ]
+    }
+  ]
+}

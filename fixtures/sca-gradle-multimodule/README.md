@@ -20,3 +20,9 @@ from a `buildfile` sidecar written beside each synthetic pom on disk, so each fi
 The fixture is intentionally tiny and declares **no inline versions**, so it also exercises BOM fetching
 (D-042). It is only meaningful with live network (`live-osv`), because OSV resolves the transitive graph via
 deps.dev. All coordinates are public OSS; there are no secrets.
+
+It also reproduces a second shape that regressed: OSV emits **separate result entries for the same synthetic
+`source.path`** — a direct block and a transitive block — so the `service` pom appears in two OSV results, and
+the transitive block (the one carrying `tomcat-embed-core`'s CVEs) must map to `service/build.gradle` just like
+the direct block. The parser's synthetic-pom rewrite is a non-consuming per-result map lookup, so every block on
+a mapped path is kept; `UNRESOLVED_PATH` fires only for a path genuinely absent from the map.
