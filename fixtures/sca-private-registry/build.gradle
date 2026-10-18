@@ -1,0 +1,15 @@
+// Declares both PUBLIC repositories (mavenCentral/google -> never warned) and PRIVATE feeds (non-public hosts
+// -> PRIVATE_REGISTRY, host only). One private URL embeds credentials to prove they are redacted: only the host
+// is ever surfaced, never user:pass. The resolver NEVER fetches from these hosts (stays Maven-Central-only).
+plugins { id 'java' }
+
+repositories {
+    mavenCentral()
+    google()
+    maven { url 'https://nexus.corp.example/repository/maven-releases/' }
+    maven { url 'https://svcuser:s3cr3tT0ken@artifactory.corp.example/libs-release' }
+}
+
+dependencies {
+    implementation 'com.google.guava:guava:30.1-jre'
+}

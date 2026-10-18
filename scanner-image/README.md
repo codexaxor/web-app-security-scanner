@@ -75,6 +75,15 @@ verification always ON (never disabled) and cross-host redirects blocked. Fetche
 15s, total cap 200 POMs/run, parent depth 8, import depth 6, 10 MB response cap, and an in-run cache. No other
 host is contacted by the resolver; the rest of the scan keeps its existing network posture.
 
+**Private registries (D-032).** The resolver also DETECTS private/internal package feeds and WARNS
+(`PRIVATE_REGISTRY`) — Gradle `repositories {}` / `maven { url }` in `build.gradle(.kts)` and
+`settings.gradle(.kts)`, and NuGet `<packageSources>` in `nuget.config`. A non-public host (anything other than
+Maven Central, `dl.google.com`/`maven.google.com`, `plugins.gradle.org`, `api.nuget.org`) is reported **host
+only** (`urlsplit().hostname` strips any `user:pass@` and the port). The resolver **never fetches** a private
+host (it stays Maven-Central-only), and it **never reads or emits** a credential — `<packageSourceCredentials>`
+and any token/property value stay out of warnings and `/out`. An unresolvable repository URL (built from an
+unresolved property) still warns, without leaking the expression.
+
 It resolves **every non-`buildSrc` dependency configuration**
 (production and test) and lets OSV decide what to report — OSV is scope-agnostic (it reports a Maven
 `<scope>test</scope>` dependency too), so this matches how M4 scans real poms; a package in a production config

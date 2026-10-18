@@ -38,6 +38,12 @@ cap, parent/import recursion depth, response-size cap, in-run cache); a fetch fa
 ``GRADLE_BOM_FETCH_FAILED`` for that BOM and the scan continues best-effort. No build is ever executed; fetched
 POMs are parsed as data, never imported/executed (D-004).
 
+Private registries (D-032): private/internal Maven repositories (``repositories {}`` / ``maven { url }`` in
+build.gradle(.kts) and settings.gradle(.kts)) and NuGet sources (``nuget.config <packageSources>``) are DETECTED
+and WARNED (``PRIVATE_REGISTRY``, HOST ONLY -- ``urlsplit().hostname`` strips any ``user:pass@`` and the port;
+credentials/tokens/property values are never read or emitted). The resolver NEVER fetches a private host -- it
+stays Maven-Central-only -- so a scanned repo cannot steer the fetcher at an arbitrary host (SSRF-shaped risk).
+
 Config selection (slice-1 review): resolve EVERY non-``buildSrc`` dependency configuration -- production AND
 test -- and let OSV decide what to report (OSV is scope-agnostic, matching how M4 scans real poms); keep wins.
 Principled dev/test exclusion (``include_dev_deps`` / ``DEV_DEPENDENCY``) is M7.
@@ -63,6 +69,17 @@ except ModuleNotFoundError:  # pragma: no cover - the image pins a python3 that 
 # scan_warning codes (free text, no migration). Coverage gaps we SHOW, never hide (D-030).
 WARN_CODE = "GRADLE_UNPARSEABLE_CONSTRUCT"
 WARN_FETCH = "GRADLE_BOM_FETCH_FAILED"
+WARN_PRIVATE_REGISTRY = "PRIVATE_REGISTRY"
+
+# Known PUBLIC package hosts (D-032): a repository on one of these is normal and never warned. Any OTHER host
+# declared as a Maven repository / NuGet source is a private feed we DETECT and WARN about -- we never fetch
+# from it (the resolver stays Maven-Central-only, D-042), so a scanned repo cannot steer our fetcher at an
+# arbitrary host.
+_PUBLIC_MAVEN_HOSTS = frozenset({
+    "repo.maven.apache.org", "repo1.maven.org", "repo.maven.org", "central.maven.org",
+    "dl.google.com", "maven.google.com", "plugins.gradle.org",
+})
+_PUBLIC_NUGET_HOSTS = frozenset({"api.nuget.org", "nuget.org", "www.nuget.org"})
 
 _BOOT_DEPENDENCIES = ("org.springframework.boot", "spring-boot-dependencies")
 
@@ -109,9 +126,17 @@ def strip_comments(text):
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     out_lines = []
     for line in text.splitlines():
-        idx = line.find("//")
-        if idx != -1:
-            line = line[:idx]
+        # Strip a `//` line comment, but NOT the `//` in a URL scheme (`https://`) -- a repository url on the
+        # line must survive for private-registry detection (D-032).
+        search = 0
+        while True:
+            idx = line.find("//", search)
+            if idx == -1:
+                break
+            if idx == 0 or line[idx - 1] != ":":
+                line = line[:idx]
+                break
+            search = idx + 2
         out_lines.append(line)
     return "\n".join(out_lines)
 
@@ -530,6 +555,96 @@ def detect_boot_bom(text, variables):
     return None, False
 
 
+# --- Private registry detection (D-032, slice 3) -----------------------------------------------------------
+# A scanned repo may declare private/internal package feeds. We DETECT and WARN (host only), NEVER fetch from
+# them, and NEVER read or emit any credential. Only the HOST is ever surfaced -- urlsplit().hostname drops any
+# user:pass@ and the port, so a credential-bearing URL can never leak into a warning or /out.
+
+# A Maven repository URL argument: `url '...'` / `url = "..."` / `url = uri("...")` / `setUrl("...")` /
+# `maven("...")`. Captures the raw argument (which may be a ${property}); never a bare dependency coordinate.
+_REPO_URL_RE = re.compile(
+    r"""(?:\burl\b\s*=?\s*(?:uri\s*\(\s*)?|\bsetUrl\s*\(\s*|\bmaven\s*\(\s*)["']([^"']+)["']""")
+_NUGET_MAX_BYTES = 1 * 1024 * 1024
+
+
+def _host_of(url):
+    """The hostname of a URL (credentials and port stripped), or None if it has none / is invalid."""
+    if "://" not in url:
+        return None
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return None
+    if not host or "\x00" in host or "$" in host:
+        return None
+    return host
+
+
+def _private_registry_message(where):
+    return ("A private package registry is declared (" + where + "); its artifacts and their transitive "
+            "dependencies may not be resolved (not fetched). (D-032)")
+
+
+def private_registry_messages(text, variables):
+    """PRIVATE_REGISTRY messages for a Gradle build/settings file: one per distinct non-public Maven repository
+    host (host only; credentials/port stripped), plus one if a repository URL could not be resolved statically.
+    The resolver never requests any of these hosts."""
+    hosts = []
+    unresolved = False
+    for raw in _REPO_URL_RE.findall(text):
+        host = _host_of(resolve_interpolation(raw, variables))
+        if host is None:
+            unresolved = True
+        elif host not in _PUBLIC_MAVEN_HOSTS and host not in hosts:
+            hosts.append(host)
+    messages = [_private_registry_message(host) for host in hosts]
+    if unresolved:
+        messages.append(_private_registry_message("URL could not be resolved statically"))
+    return messages
+
+
+def nuget_private_registry_hosts(path):
+    """Distinct non-public NuGet source hosts from a ``nuget.config`` ``<packageSources>`` (host only). The
+    ``<packageSourceCredentials>`` section is NEVER read."""
+    try:
+        if os.path.getsize(path) > _NUGET_MAX_BYTES:
+            return []
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return []
+    if "<!doctype" in text[:4096].lower() or "<!entity" in text[:4096].lower():
+        return []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    hosts = []
+    for sources in root.iter():
+        if _ln(sources.tag) != "packageSources":
+            continue
+        for add in sources:
+            if _ln(add.tag) != "add":
+                continue
+            host = _host_of(add.get("value") or "")
+            if host is not None and host not in _PUBLIC_NUGET_HOSTS and host not in hosts:
+                hosts.append(host)
+    return hosts
+
+
+def find_nuget_configs(checkout):
+    configs = []
+    for root, dirs, files in os.walk(checkout, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d)) and d != ".git"]
+        for name in files:
+            if name.lower() == "nuget.config":
+                path = os.path.join(root, name)
+                if not os.path.islink(path):
+                    configs.append(path)
+    configs.sort()
+    return configs
+
+
 def _bom_coords(text, bom_candidates, variables, warnings):
     """Concrete BOM coordinates to import, from the Boot plugin, mavenBom "..." and platform(...)."""
     coords = []
@@ -658,6 +773,8 @@ def resolve_build_file(checkout, build_path, libraries, bundles, fetcher):
         warnings.append((WARN_CODE, "`apply from:` applies an external script that was not followed"))
     if "resolutionStrategy" in text:
         warnings.append((WARN_CODE, "`resolutionStrategy` version pinning/substitution was not applied"))
+    for message in private_registry_messages(text, variables):
+        warnings.append((WARN_PRIVATE_REGISTRY, message))
 
     return deps, boms, list(dict.fromkeys(warnings))
 
@@ -731,6 +848,25 @@ def resolve(checkout, out_dir, fetcher=None):
                 continue
             poms.append({"syntheticPath": os.path.abspath(pom_path), "buildFile": rel})
             index += 1
+
+        # Private-registry detection (D-032) beyond the build files: settings-level repositories
+        # (dependencyResolutionManagement / pluginManagement) and NuGet package sources. Host only, never
+        # fetched (the resolver stays Maven-Central-only), never a credential.
+        for name in ("settings.gradle", "settings.gradle.kts"):
+            spath = os.path.join(checkout, name)
+            if os.path.isfile(spath) and not os.path.islink(spath):
+                try:
+                    with open(spath, "r", encoding="utf-8", errors="replace") as handle:
+                        stext = strip_comments(handle.read())
+                except OSError:
+                    continue
+                svars = collect_variables(checkout, checkout, stext)
+                for message in private_registry_messages(stext, svars):
+                    warn(WARN_PRIVATE_REGISTRY, message, name)
+        for config in find_nuget_configs(checkout):
+            rel = _rel(checkout, config)
+            for host in nuget_private_registry_hosts(config):
+                warn(WARN_PRIVATE_REGISTRY, _private_registry_message(host), rel)
     except Exception as exc:  # best-effort: never fail the scan on a resolver bug
         log("unexpected error, emitting partial result: " + repr(exc))
     return {"poms": poms, "warnings": warnings}

@@ -372,6 +372,127 @@ class NetworkTargetTests(unittest.TestCase):
         self.assertIsNone(f.fetch("g", "a", "1.0"))  # cap 0 -> never performs a network call
 
 
+class PrivateRegistryTests(unittest.TestCase):
+    """D-032 (slice 3): detect private feeds and WARN (host only); never fetch them, never leak credentials."""
+
+    FIXTURE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "fixtures", "sca-private-registry")
+
+    def test_private_maven_repo_warns_host_only_public_repos_do_not(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                repositories {
+                    mavenCentral()
+                    google()
+                    gradlePluginPortal()
+                    maven { url 'https://repo.maven.apache.org/maven2' }
+                    maven { url 'https://nexus.corp.example/repository/maven-releases/' }
+                }
+                dependencies { implementation 'com.google.guava:guava:30.1-jre' }
+            """)
+            msgs = [d for c, d in _resolve(root, "build.gradle")[2] if c == gr.WARN_PRIVATE_REGISTRY]
+        self.assertEqual(len(msgs), 1)  # only the non-public host; mavenCentral()/google()/public url do not warn
+        self.assertIn("nexus.corp.example", msgs[0])
+        self.assertIn("(D-032)", msgs[0])
+
+    def test_kotlin_and_uri_and_shorthand_forms(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle.kts", """
+                repositories {
+                    maven { url = uri("https://a.corp.example/repo") }
+                    maven("https://b.corp.example/repo")
+                    maven { setUrl("https://c.corp.example/repo") }
+                }
+            """)
+            hosts = sorted(d.split("(")[1].split(")")[0]
+                           for c, d in _resolve(root, "build.gradle.kts")[2] if c == gr.WARN_PRIVATE_REGISTRY)
+        self.assertEqual(hosts, ["a.corp.example", "b.corp.example", "c.corp.example"])
+
+    def test_credential_bearing_url_surfaces_host_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle",
+                  "repositories { maven { url 'https://svcuser:s3cr3tT0ken@artifactory.corp.example/libs' } }\n")
+            msgs = [d for c, d in _resolve(root, "build.gradle")[2] if c == gr.WARN_PRIVATE_REGISTRY]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("artifactory.corp.example", msgs[0])
+        for secret in ("svcuser", "s3cr3tT0ken", "@"):
+            self.assertNotIn(secret, msgs[0])
+
+    def test_unresolved_url_still_warns_without_leaking_the_expression(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", "repositories { maven { url \"${nexusUrl}\" } }\n")
+            msgs = [d for c, d in _resolve(root, "build.gradle")[2] if c == gr.WARN_PRIVATE_REGISTRY]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("could not be resolved", msgs[0])
+
+    def test_private_registry_detection_makes_no_network_request(self):
+        # The private host must NEVER be fetched (SSRF-shaped risk). A build file with a private repo and NO BOM
+        # performs zero fetches; the fetcher's request log stays empty.
+        fetcher = DictFetcher()
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                repositories { maven { url 'https://nexus.corp.example/repo' } }
+                dependencies { implementation 'com.google.guava:guava:30.1-jre' }
+            """)
+            _, _, warns = gr.resolve_build_file(root, os.path.join(root, "build.gradle"), {}, {}, fetcher)
+        self.assertEqual(fetcher.requested, [])  # no fetch to the private host (or anywhere)
+        self.assertTrue(any(c == gr.WARN_PRIVATE_REGISTRY for c, _ in warns))
+
+    def test_settings_gradle_repositories_are_scanned(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "settings.gradle", """
+                dependencyResolutionManagement {
+                    repositories {
+                        mavenCentral()
+                        maven { url 'https://settings-nexus.corp.example/repo' }
+                    }
+                }
+            """)
+            result = gr.resolve(root, out, fetcher=DictFetcher())
+        msgs = [w for w in result["warnings"] if w["code"] == gr.WARN_PRIVATE_REGISTRY]
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["filePath"], "settings.gradle")
+        self.assertIn("settings-nexus.corp.example", msgs[0]["message"])
+
+    def test_nuget_private_source_warns_host_only_credentials_never_read(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "nuget.config", """<?xml version="1.0"?>
+                <configuration>
+                  <packageSources>
+                    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+                    <add key="corp" value="https://nuget.corp.example/v3/index.json" />
+                  </packageSources>
+                  <packageSourceCredentials>
+                    <corp><add key="ClearTextPassword" value="p@ssw0rd-TOPSECRET" /></corp>
+                  </packageSourceCredentials>
+                </configuration>""")
+            result = gr.resolve(root, out, fetcher=DictFetcher())
+        msgs = [w for w in result["warnings"] if w["code"] == gr.WARN_PRIVATE_REGISTRY]
+        self.assertEqual(len(msgs), 1)  # api.nuget.org is public, corp is private
+        self.assertEqual(msgs[0]["filePath"], "nuget.config")
+        self.assertIn("nuget.corp.example", msgs[0]["message"])
+        self.assertNotIn("TOPSECRET", json.dumps(result))
+
+    def test_nuget_org_only_config_does_not_warn(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "nuget.config", """<?xml version="1.0"?>
+                <configuration><packageSources>
+                  <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+                </packageSources></configuration>""")
+            result = gr.resolve(root, out, fetcher=DictFetcher())
+        self.assertEqual([w for w in result["warnings"] if w["code"] == gr.WARN_PRIVATE_REGISTRY], [])
+
+    def test_fixture_output_contains_hosts_but_no_credentials_anywhere(self):
+        # Hard hygiene check over the resolver's entire JSON output for the committed fixture.
+        with tempfile.TemporaryDirectory() as out:
+            result = gr.resolve(self.FIXTURE, out, fetcher=DictFetcher())
+        dumped = json.dumps(result)
+        for host in ("nexus.corp.example", "artifactory.corp.example", "nuget.corp.example"):
+            self.assertIn(host, dumped)
+        for secret in ("s3cr3tT0ken", "svcuser", "svc-account", "p@ssw0rd-TOPSECRET", "ClearTextPassword", "@"):
+            self.assertNotIn(secret, dumped)
+
+
 class WarningTests(unittest.TestCase):
     def test_one_warning_per_non_concrete_version(self):
         with tempfile.TemporaryDirectory() as root:

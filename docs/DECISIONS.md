@@ -232,6 +232,14 @@ Decision: M4 assumes public registries (osv.dev/deps.dev online, D-006) and stor
 Detecting and handling private registries is deferred to M4b.
 Consequences: packages served only from a private registry may be unresolved in M4; no registry credentials are
 held anywhere.
+Implemented (M4b slice 3, 2026-10-18): the resolver DETECTS private feeds and WARNS (`PRIVATE_REGISTRY`,
+free-text code, no migration) — Gradle `repositories {}`/`maven { url }` in build.gradle(.kts) and
+settings.gradle(.kts), and NuGet `nuget.config <packageSources>`. A non-public host is reported HOST ONLY
+(`urlsplit().hostname` strips any `user:pass@` and the port); `<packageSourceCredentials>` and any
+credential/token/property value are never read or emitted, and nothing credential-bearing reaches `/out`. The
+resolver NEVER fetches a private host (it stays Maven-Central-only, D-042), so a scanned repo cannot steer the
+fetcher at an arbitrary host (SSRF-shaped risk). Public hosts (Maven Central, google, gradlePluginPortal,
+api.nuget.org) never warn. This completes OD-3.
 
 ## D-031 Gradle/.NET without lockfiles in M4: warn + partial; static Gradle resolver is M4b (2026-10-16, accepted; partly resolves OD-1/OD-2)
 Context: OD-1 (Gradle without a lockfile) and OD-2 (.NET without `packages.lock.json`) had to be settled before
