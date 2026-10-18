@@ -7,7 +7,10 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * A raw normalized finding from one scanner (D-024, pipeline step 7). Stored per scan with no dedup or
@@ -80,6 +83,22 @@ public class ScanFinding {
 
     @Column(name = "tool_severity")
     private String toolSeverity;
+
+    // --- M5 OSV enrichment (descriptive; carried to the sub-issue, never a fingerprint input) ---
+
+    @Column(name = "cvss")
+    private String cvss;
+
+    @Column(name = "severity_label")
+    private String severityLabel;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cwe", columnDefinition = "jsonb")
+    private List<String> cwe;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cve_aliases", columnDefinition = "jsonb")
+    private List<String> cveAliases;
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
@@ -204,6 +223,30 @@ public class ScanFinding {
 
     public String getToolSeverity() {
         return toolSeverity;
+    }
+
+    public String getCvss() {
+        return cvss;
+    }
+
+    public String getSeverityLabel() {
+        return severityLabel;
+    }
+
+    public List<String> getCwe() {
+        return cwe;
+    }
+
+    public List<String> getCveAliases() {
+        return cveAliases;
+    }
+
+    /** Sets the OSV-derived descriptive enrichment (M5) after the SCA factory builds the row. */
+    public void setOsvEnrichment(String cvss, String severityLabel, List<String> cwe, List<String> cveAliases) {
+        this.cvss = cvss;
+        this.severityLabel = severityLabel;
+        this.cwe = cwe;
+        this.cveAliases = cveAliases;
     }
 
     public Instant getCreatedAt() {

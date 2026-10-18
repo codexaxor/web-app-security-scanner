@@ -1,13 +1,18 @@
 package com.company.secscan.issue;
 
+import com.company.secscan.scoring.ScoreLine;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * One concrete finding (SPEC data model). Its identity is {@link #fingerprint} — status changes only by
@@ -83,6 +88,43 @@ public class SubIssue {
 
     @Column(name = "tool_severity")
     private String toolSeverity;
+
+    // --- M5 scoring fields (derived; NEVER part of the fingerprint) ---
+
+    /** 0-100 severity (SPEC bands). Recomputed at scan time and by the re-score job. */
+    @Column(name = "score")
+    private Integer score;
+
+    /** Itemized breakdown of how {@link #score} was reached (base + each adjustment); jsonb. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "score_breakdown", columnDefinition = "jsonb")
+    private List<ScoreLine> scoreBreakdown;
+
+    /** The chosen CVSS vector string (v4 preferred over v3), or null when OSV supplied no vector (D-044). */
+    @Column(name = "cvss")
+    private String cvss;
+
+    /** OSV {@code database_specific.severity} (CRITICAL/HIGH/MODERATE/LOW): the no-CVSS base source (D-044). */
+    @Column(name = "severity_label")
+    private String severityLabel;
+
+    /** CWE ids from OSV {@code database_specific.cwe_ids}, in array order; jsonb (may be empty). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cwe", columnDefinition = "jsonb")
+    private List<String> cwe;
+
+    /** FIRST EPSS probability for this finding (stored + displayed; adjustments OFF in M5, D-047). */
+    @Column(name = "epss")
+    private BigDecimal epss;
+
+    /** True when the vuln id or any {@link #cveAliases} is in the CISA KEV catalog (D-046). */
+    @Column(name = "in_kev", nullable = false)
+    private boolean inKev = false;
+
+    /** The group's CVE aliases, for KEV "any CVE alias" matching and DB-only re-score (D-051). NOT a fingerprint input. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cve_aliases", columnDefinition = "jsonb")
+    private List<String> cveAliases;
 
     @Column(name = "status", nullable = false)
     private String status = STATUS_OPEN;
@@ -187,6 +229,40 @@ public class SubIssue {
         this.toolSeverity = toolSeverity;
     }
 
+    public void setCvss(String cvss) {
+        this.cvss = cvss;
+    }
+
+    public void setSeverityLabel(String severityLabel) {
+        this.severityLabel = severityLabel;
+    }
+
+    public void setCwe(List<String> cwe) {
+        this.cwe = cwe;
+    }
+
+    public void setCveAliases(List<String> cveAliases) {
+        this.cveAliases = cveAliases;
+    }
+
+    // --- scoring outputs, set by the scorer (scan-time reconcile and the api re-score job) ---
+
+    public void setScore(Integer score) {
+        this.score = score;
+    }
+
+    public void setScoreBreakdown(List<ScoreLine> scoreBreakdown) {
+        this.scoreBreakdown = scoreBreakdown;
+    }
+
+    public void setEpss(BigDecimal epss) {
+        this.epss = epss;
+    }
+
+    public void setInKev(boolean inKev) {
+        this.inKev = inKev;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -261,6 +337,38 @@ public class SubIssue {
 
     public String getToolSeverity() {
         return toolSeverity;
+    }
+
+    public Integer getScore() {
+        return score;
+    }
+
+    public List<ScoreLine> getScoreBreakdown() {
+        return scoreBreakdown;
+    }
+
+    public String getCvss() {
+        return cvss;
+    }
+
+    public String getSeverityLabel() {
+        return severityLabel;
+    }
+
+    public List<String> getCwe() {
+        return cwe;
+    }
+
+    public BigDecimal getEpss() {
+        return epss;
+    }
+
+    public boolean isInKev() {
+        return inKev;
+    }
+
+    public List<String> getCveAliases() {
+        return cveAliases;
     }
 
     public String getStatus() {
