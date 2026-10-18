@@ -151,6 +151,13 @@ find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
         add_warning MISSING_NUGET_LOCKFILE \
             "No packages.lock.json next to the project; only direct PackageReference versions are scanned, not transitive (M4b)." \
             "$rel"
+        # Full NuGet transitive resolution is deferred (D-043): OSV v2.7.0 resolves transitive NuGet deps only
+        # from a lockfile, and we do NOT build a deps.dev resolver / synthetic lockfile. Make the gap HONEST
+        # (D-030): this is ADDITIONAL to MISSING_NUGET_LOCKFILE above; both coexist (and the D-035 dedup keys on
+        # MISSING_NUGET_LOCKFILE only, so it is unaffected).
+        add_warning NUGET_NO_LOCKFILE_TRANSITIVE_GAP \
+            "Without a NuGet lockfile, transitive NuGet dependencies are not resolved; only direct PackageReferences are scanned (D-043)." \
+            "$rel"
     fi
     csproj_package_versions "$csproj" | while IFS="$(printf '\t')" read -r pkg ver; do
         # Empty version = central package management (version in Directory.Packages.props), which OSV resolves;

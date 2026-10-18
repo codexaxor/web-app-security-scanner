@@ -14,6 +14,22 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-043 Full NuGet transitive resolution deferred; lockfile-less .csproj surfaces an honest gap (2026-10-18, accepted)
+Context: OSV-Scanner v2.7.0 does transitive dependency resolution only for Maven `pom.xml` and Python
+`requirements.txt`. NuGet is lockfile-only: a bare `.csproj` yields DIRECT `<PackageReference>` versions only,
+under any flag (D-035). The Gradle BOM-fetch approach (D-042) does not transfer to NuGet, and no real .NET repo
+is onboarded yet to validate a NuGet resolver against.
+Decision: defer full NuGet transitive resolution. Build NO deps.dev NuGet resolver, NO synthetic
+`packages.lock.json`, NO `.csproj` transitive expansion. Instead make the lockfile-less case HONEST (D-030): a
+`.csproj` with no sibling `packages.lock.json` raises a new `NUGET_NO_LOCKFILE_TRANSITIVE_GAP` warning (free-text
+code, no migration) stating that transitive NuGet deps are not resolved without a lockfile. This is ADDITIONAL
+to the existing `MISSING_NUGET_LOCKFILE` warning (both coexist, same gating); the D-035 dedup keys on
+`MISSING_NUGET_LOCKFILE` only and is unchanged. A `.csproj` WITH a lockfile is unchanged — OSV reads it for full
+transitives and neither NuGet warning fires.
+Consequences: lockfile-less .NET repos still get their direct-dependency findings plus a visible, named coverage
+gap instead of a silent partial result; full NuGet transitive resolution is revisited when a real .NET repo is
+onboarded. Resolve-it-ourselves (as in D-042 for Gradle) remains an option then.
+
 ## D-042 Gradle resolver fetches BOM POMs from Maven Central to pin every version (2026-10-18, accepted)
 Context: D-041 imported the governing BOM into the synthetic pom's `<dependencyManagement>` and emitted
 BOM-managed dependencies version-less, expecting OSV's `pomxml` transitive enricher to inherit the versions.
