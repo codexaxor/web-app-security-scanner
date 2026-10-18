@@ -17,9 +17,14 @@ BOM fetch). It prints a JSON OBJECT on stdout::
     {"poms":     [{"syntheticPath": "/work/synthetic/0/pom.xml", "buildFile": "app/build.gradle"}, ...],
      "warnings": [{"code": "GRADLE_UNPARSEABLE_CONSTRUCT", "message": "...", "filePath": "app/build.gradle"}, ...]}
 
-run-scan.sh records ``poms`` in the manifest (``syntheticPoms``) and passes ``<synthetic_out_dir>`` to OSV; the
-parser rewrites OSV's ``source.path`` back to the build file before fingerprinting (D-038). ``warnings`` are
-appended to the scan's warnings so every skipped construct is a VISIBLE coverage gap (D-030), never silent.
+Beside every synthetic pom it writes a ``buildfile`` sidecar (``<synthetic_out_dir>/<n>/buildfile``) holding the
+same repo-relative build-file path. run-scan.sh builds the manifest's ``syntheticPoms`` map from THOSE sidecars
+on disk -- keyed on each synthetic pom's real path, exactly what OSV scans and reports -- not from this stdout,
+so a lost or truncated stdout (e.g. an OOM/timeout kill after some poms are written) can never orphan a
+synthetic pom into an UNRESOLVED_PATH drop; the ``poms`` array stays on stdout for diagnostics/tests. OSV then
+scans ``<synthetic_out_dir>`` and the parser rewrites OSV's ``source.path`` back to the build file before
+fingerprinting (D-038). ``warnings`` are appended to the scan's warnings so every skipped construct is a VISIBLE
+coverage gap (D-030), never silent.
 
 BOM version expansion (D-042, supersedes D-041's version-less approach): OSV's pomxml enricher does NOT inherit
 versions from a ``<dependencyManagement>`` BOM import -- it filters version-less dependencies -- so the resolver
@@ -840,6 +845,13 @@ def resolve(checkout, out_dir, fetcher=None):
             pom_path = os.path.join(pom_dir, "pom.xml")
             try:
                 os.makedirs(pom_dir, exist_ok=True)
+                # Write the build-file sidecar BEFORE the pom, so a synthetic pom on disk ALWAYS has its mapping
+                # on disk beside it. run-scan.sh derives the synthetic->build-file map from these sidecars (not
+                # from this process's stdout), so a lost or truncated resolver stdout -- e.g. an OOM/timeout kill
+                # after some poms are already written -- can never orphan a synthetic pom into an UNRESOLVED_PATH
+                # drop. This is what makes multi-module resolution robust (D-038).
+                with open(os.path.join(pom_dir, "buildfile"), "w", encoding="utf-8") as sidecar:
+                    sidecar.write(rel)
                 with open(pom_path, "w", encoding="utf-8") as handle:
                     handle.write(build_synthetic_pom(index, deps, boms))
             except OSError as exc:

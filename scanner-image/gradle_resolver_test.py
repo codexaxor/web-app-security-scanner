@@ -601,6 +601,22 @@ class WalkAndOutputTests(unittest.TestCase):
             for entry in result["poms"]:
                 self.assertTrue(os.path.isfile(entry["syntheticPath"]))
 
+    def test_each_synthetic_pom_has_a_buildfile_sidecar_on_disk(self):
+        # run-scan.sh derives the synthetic->build-file map from a `buildfile` sidecar written BESIDE each pom
+        # (so a lost resolver stdout can never orphan a pom into UNRESOLVED_PATH). The contract: for every pom,
+        # `<pom_dir>/buildfile` exists and holds the same repo-relative build-file path as the stdout map.
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
+            write(root, "app/build.gradle.kts",
+                  'dependencies { implementation("org.apache.commons:commons-text:1.9") }\n')
+            result = gr.resolve(root, out, fetcher=DictFetcher())
+            self.assertTrue(result["poms"])
+            for entry in result["poms"]:
+                sidecar = os.path.join(os.path.dirname(entry["syntheticPath"]), "buildfile")
+                self.assertTrue(os.path.isfile(sidecar), sidecar)
+                with open(sidecar, encoding="utf-8") as handle:
+                    self.assertEqual(handle.read(), entry["buildFile"])
+
     def test_isolated_mode_runs_against_a_tree_with_a_planted_json_module(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
             write(root, "json.py", "raise SystemExit('hostile module executed')\n")

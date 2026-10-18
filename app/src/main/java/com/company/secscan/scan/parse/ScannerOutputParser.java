@@ -72,7 +72,10 @@ public class ScannerOutputParser {
         if (m.syntheticPoms != null) {
             for (ManifestSyntheticPom sp : m.syntheticPoms) {
                 if (sp.syntheticPath != null && sp.buildFile != null) {
-                    syntheticPoms.put(sp.syntheticPath, sp.buildFile);
+                    // Normalize the key the same way the OSV source path is normalized at lookup, so a cosmetic
+                    // difference (a doubled slash, a trailing slash) can never cause a multi-module synthetic pom
+                    // to miss the map and be dropped as UNRESOLVED_PATH.
+                    syntheticPoms.put(normalizeSyntheticKey(sp.syntheticPath), sp.buildFile);
                 }
             }
         }
@@ -163,7 +166,7 @@ public class ScannerOutputParser {
             // D-038: a synthetic Gradle pom's /work path maps back to its originating build.gradle
             // (repo-relative) BEFORE the path guard and fingerprinting; everything else is relativized to the
             // checkout as usual.
-            String mappedBuildFile = rawPath == null ? null : syntheticPoms.get(rawPath);
+            String mappedBuildFile = rawPath == null ? null : syntheticPoms.get(normalizeSyntheticKey(rawPath));
             String manifestPath = mappedBuildFile != null ? mappedBuildFile : relativize(rawPath, checkoutPath);
             if (result.packages == null) {
                 continue;
@@ -204,6 +207,26 @@ public class ScannerOutputParser {
             }
         }
         return out;
+    }
+
+    /**
+     * Canonical key for matching an OSV {@code source.path} against the synthetic-pom map (D-038): backslashes
+     * to forward slashes, repeated slashes collapsed, a trailing slash dropped. The scanner keys the map on each
+     * synthetic pom's real path and OSV reports that same path, so this is normally a no-op; it is defense in
+     * depth so a cosmetic path difference can never orphan a (multi-module) synthetic pom into UNRESOLVED_PATH.
+     */
+    static String normalizeSyntheticKey(String path) {
+        if (path == null) {
+            return null;
+        }
+        String p = path.replace('\\', '/');
+        while (p.contains("//")) {
+            p = p.replace("//", "/");
+        }
+        if (p.length() > 1 && p.endsWith("/")) {
+            p = p.substring(0, p.length() - 1);
+        }
+        return p;
     }
 
     /** Makes an OSV source path repo-relative by stripping the container checkout prefix. */

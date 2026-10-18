@@ -107,6 +107,19 @@ build-file path BEFORE fingerprinting, so a Gradle SCA finding's fingerprint anc
 Anything that does not map (a stray `/work` path) still hits the `UNRESOLVED_PATH` guard and is dropped.
 Consequences: stable, meaningful Gradle SCA identities; the path-escape guard remains in force. (Implemented in
 slice 1.)
+Multi-module robustness note (2026-10-19): a multi-module project (≥2 lockfile-less build files ⇒ ≥2 synthetic
+poms) produced 0 SCA issues — OSV reported findings under `/work/synthetic/0` and `/work/synthetic/1` but the
+map did not carry them, so every finding hit `UNRESOLVED_PATH`. Root cause: the map was carried on the
+resolver's **stdout**, and when that stdout did not survive (a killed/OOM'd resolver after some poms were
+already written to disk), `run-scan.sh` fell back to an empty map while the pom files remained for OSV to scan —
+orphaning every Gradle finding. A single synthetic pom was cheaper and did not trip it. Fix: the resolver writes
+a `buildfile` sidecar beside each synthetic pom, and `run-scan.sh` builds the map by walking `$SYNTH` on disk
+(each `pom.xml` paired with its sidecar). The map is thus keyed on the pom's real path — exactly what OSV scans
+and reports — and can never be lost while the poms exist. The parser also normalizes both sides of the key
+(collapse `//`, strip a trailing `/`) as defense in depth. Guarded by a live-osv multi-module regression
+(`fixtures/sca-gradle-multimodule`, each module's finding anchored to its own `build.gradle`, `UNRESOLVED_PATH`
+count 0) and a 2-entry parser unit test. Separately, OSV's own stdout/stderr is now echoed to the (scrubbed)
+container log excerpt on an SCA failure so it is debuggable. No schema change.
 
 ## D-037 Scanned-repo suppressions are ignored for every engine (2026-10-17, accepted; resolves OD-8 and the repo-config should-fix)
 Context: a scanned repository could otherwise hide its own findings via in-repo scanner config, ignore files or

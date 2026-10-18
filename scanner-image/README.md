@@ -97,8 +97,13 @@ Because Gradle uses Maven coordinates, **Gradle findings surface in OSV's `Maven
 `syntheticPoms` array maps each synthetic pom's `/work` path to its originating `build.gradle` (repo-relative);
 the parser rewrites OSV's `source.path` back to the build file before fingerprinting, so a Gradle SCA finding
 anchors to the real build file. An OSV source path that is neither under the checkout nor in this map is
-dropped (`UNRESOLVED_PATH`). The resolver is best-effort: any failure falls back to an empty map and the scan
-still runs. Its unit tests (`gradle_resolver_test.py`) run on the host under `./gradlew build`
+dropped (`UNRESOLVED_PATH`). **The map is built from the files on disk, not the resolver's stdout:** the
+resolver writes a `buildfile` sidecar beside each synthetic pom, and `run-scan.sh` walks `$SYNTH` to pair each
+`pom.xml` with its sidecar. Each entry is therefore keyed on the pom's real path — exactly what OSV scans and
+reports — so the rewrite always matches (single- **and** multi-module), and a lost or truncated resolver stdout
+(e.g. a killed resolver) can never orphan a synthetic pom into an `UNRESOLVED_PATH` drop. The resolver is
+best-effort: any failure falls back to an empty map and the scan still runs. When OSV itself fails, its
+stdout/stderr is echoed to the container's (scrubbed) log excerpt so the SCA failure is debuggable. Its unit tests (`gradle_resolver_test.py`) run on the host under `./gradlew build`
 (`gradleResolverTest`), not inside the image.
 
 ## Output format (`/out`)

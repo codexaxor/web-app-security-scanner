@@ -195,15 +195,29 @@ set +e
 python3 -I /usr/local/bin/gradle_resolver.py "$CHECKOUT" "$SYNTH" > "$RESOLVER_OUT" 2>"$WORK/resolver.log"
 RESOLVER_EXIT=$?
 set -e
-# The resolver prints {poms:[{syntheticPath,buildFile}], warnings:[{code,message,filePath}]}. On any failure,
-# fall back to an empty result.
-if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "object" and (.poms | type == "array")' "$RESOLVER_OUT" >/dev/null 2>&1; then
+# The resolver prints {poms:[...], warnings:[{code,message,filePath}]} on stdout AND writes, beside each
+# synthetic pom it emits, a `buildfile` sidecar naming the originating build file. On any stdout failure, fall
+# back to an empty object so the warnings read below is safe.
+if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "object"' "$RESOLVER_OUT" >/dev/null 2>&1; then
     printf '{"poms":[],"warnings":[]}' > "$RESOLVER_OUT"
 fi
-jq -c '.poms' "$RESOLVER_OUT" > "$SYNTH_MAP"
 # Surface every skipped construct/non-concrete version as a scan warning (GRADLE_UNPARSEABLE_CONSTRUCT, D-030):
 # append the resolver's warnings to the inventory warnings so they reach the manifest and the issue feed.
 jq -c '.warnings[]?' "$RESOLVER_OUT" >> "$WORK/warnings.ndjson"
+
+# Build the synthetic-pom -> build-file map (D-038) from the files ON DISK -- the `buildfile` sidecar beside
+# each synthetic pom -- NOT from the resolver's stdout. Each entry is keyed on the synthetic pom's real path,
+# which is EXACTLY what OSV scans under $SYNTH and reports as source.path, so the parser's rewrite always
+# matches (single- and multi-module alike). Deriving it from disk also means it survives a lost/truncated
+# resolver stdout (e.g. a killed resolver): any synthetic pom that exists for OSV to scan carries its mapping,
+# so a multi-module finding can never be orphaned into an UNRESOLVED_PATH drop.
+: > "$WORK/synth-map.ndjson"
+find "$SYNTH" -type f -name pom.xml 2>/dev/null | while read -r pom; do
+    bf="$(dirname "$pom")/buildfile"
+    [ -f "$bf" ] || continue
+    jq -nc --arg s "$pom" --arg b "$(cat "$bf")" '{syntheticPath:$s, buildFile:$b}' >> "$WORK/synth-map.ndjson"
+done
+jq -s '.' "$WORK/synth-map.ndjson" > "$SYNTH_MAP"
 
 # --- SCA scan (OSV-Scanner over the whole tree; deps.dev online, D-006/D-034) ---
 # Structure-agnostic: nested modules, monorepos and mixed ecosystems all work; "no manifests" is a warning
@@ -238,6 +252,16 @@ case "$OSV_EXIT" in
 esac
 # Guarantee a parseable findings file even when OSV wrote none (error/no-packages), so the parser never fails.
 [ -f "$OSV_JSON" ] || printf '{"results":[]}' > "$OSV_JSON"
+
+# On an OSV failure, surface its own stdout/stderr (captured to $WORK/osv.log) on the container's stderr so the
+# worker's log_excerpt is debuggable -- otherwise an SCA failure leaves an empty excerpt (it is redirected to a
+# tmpfs file that dies with the container). OSV's output is dependency/resolver data, never a secret value, and
+# the worker scrubs token-shaped strings from the excerpt regardless. A clean/normal run stays quiet so the
+# excerpt is not drowned out.
+if [ "$SCA_STATUS" = "failed" ] && [ -s "$WORK/osv.log" ]; then
+    echo "osv-scanner failed (exit $OSV_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/osv.log" >&2 || true
+fi
 
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"

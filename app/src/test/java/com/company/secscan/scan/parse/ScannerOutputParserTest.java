@@ -250,6 +250,63 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void multipleSyntheticPomsAreEachRewrittenToTheirOwnBuildFile(@TempDir Path outDir) throws Exception {
+        // M4b multi-module regression (D-038): TWO synthetic poms (/work/synthetic/0 and /1) map to TWO distinct
+        // build files. Both must be rewritten and anchored to their OWN build file; none may be dropped as
+        // UNRESOLVED_PATH. A single-entry map cannot catch a lookup that only works for n == 0.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of(
+                "/work/synthetic/0/pom.xml", "service/build.gradle",
+                "/work/synthetic/1/pom.xml", "gateway/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-multi.json", outDir), "/work/checkout",
+                java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).hasSize(2);
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42252");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle");
+        });
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("org.yaml:snakeyaml");
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-1471");
+            assertThat(f.filePath()).isEqualTo("gateway/build.gradle");
+        });
+        assertThat(findings).allSatisfy(f ->
+                assertThat(f.filePath()).doesNotContain("/work").doesNotContain("synthetic"));
+        // Both poms mapped, so nothing was dropped.
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
+    void syntheticPomKeyMatchesDespiteCosmeticSlashDifferences(@TempDir Path outDir) throws Exception {
+        // Defense in depth: a doubled slash in OSV's source.path must not orphan a synthetic pom. The map key is
+        // clean (as parse() stores it, normalized); OSV's path here has doubled slashes. The lookup normalizes
+        // the OSV path to the clean key, so the finding still anchors to the build file rather than being dropped
+        // as UNRESOLVED_PATH.
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "app/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/gradle-synthetic-slashes.json", outDir),
+                "/work/checkout", java.util.Set.of(), warnings, syntheticPoms);
+
+        assertThat(findings).singleElement().satisfies(f ->
+                assertThat(f.filePath()).isEqualTo("app/build.gradle").doesNotContain("/work"));
+        assertThat(warnings).isEmpty();
+    }
+
+    @Test
+    void normalizeSyntheticKeyCollapsesSlashesAndTrailingSlash() {
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/pom.xml"))
+                .isEqualTo("/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work//synthetic///0/pom.xml"))
+                .isEqualTo("/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("/work/synthetic/0/")).isEqualTo("/work/synthetic/0");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey("C:\\work\\synthetic\\0\\pom.xml"))
+                .isEqualTo("C:/work/synthetic/0/pom.xml");
+        assertThat(ScannerOutputParser.normalizeSyntheticKey(null)).isNull();
+    }
+
+    @Test
     void isPathOutsideCheckoutFlagsAbsoluteAndDotDotPaths() {
         assertThat(ScannerOutputParser.isPathOutsideCheckout("pom.xml")).isFalse();
         assertThat(ScannerOutputParser.isPathOutsideCheckout("sub/pom.xml")).isFalse();
