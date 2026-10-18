@@ -58,6 +58,8 @@ scripts/compose-smoke.sh           # isolated compose smoke (own project `secsca
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
 docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag must match ScannerProperties.image
 cd ui && npm ci && npm run dev
+./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"   # live-osv tests (osv.dev/deps.dev); excluded by default
+./gradlew :app:test -PliveIntel --tests "*LiveIntelIT"     # live-intel tests (CISA KEV / FIRST EPSS); excluded by default
 ```
 
 Update this section whenever a command changes.
