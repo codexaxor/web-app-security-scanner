@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -371,6 +372,67 @@ class NetworkTargetTests(unittest.TestCase):
         f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE, total_cap=0)
         self.assertIsNone(f.fetch("g", "a", "1.0"))  # cap 0 -> never performs a network call
 
+    def test_fetcher_honours_total_wall_clock_budget(self):
+        # A slow/black-holed Maven Central must not push the container past its hard scan timeout: once the
+        # run's budget is spent, no further request is made (fetched stays 0 -> no network call).
+        f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE, total_budget=0)
+        self.assertIsNone(f.fetch("g", "a", "1.0"))
+        self.assertEqual(f.fetched, 0)
+
+    def test_bounded_read_stops_on_size_cap_and_budget(self):
+        class Body:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+
+            def read(self, _n):
+                return self.chunks.pop(0) if self.chunks else b""
+
+        now = [0.0]
+        f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE, total_budget=10, clock=lambda: now[0])
+        self.assertEqual(f._read_bounded(Body([b"<pro", b"ject/>"])), b"<project/>")
+        self.assertIsNone(f._read_bounded(Body([b"x" * (gr._MAX_POM_BYTES + 1)])))
+        now[0] = 11.0  # budget spent mid-download (slow drip)
+        self.assertIsNone(f._read_bounded(Body([b"<pro", b"ject/>"])))
+
+    def test_unsafe_coordinates_are_never_put_in_a_url(self):
+        # Coordinates from map-notation platform(), the version catalog or a fetched POM's nested import are not
+        # pre-validated; the fetcher is the single choke point. Nothing is requested (fetched stays 0).
+        f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE)
+        for coord in [("..", "a", "1"), ("g", "..", "1"), ("g", "a", ".."), ("g/x", "a", "1"),
+                      ("g", "a?x=1", "1"), ("g", "a", "1#f"), ("g", "a%2f", "1"), ("u@evil.example", "a", "1"),
+                      ("g", "a", "")]:
+            self.assertIsNone(f.fetch(*coord), coord)
+        self.assertEqual(f.fetched, 0)
+
+    def test_platform_map_notation_with_traversal_is_not_fetched(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle",
+                  "dependencies { implementation platform(group: '../../x', name: 'b', version: '1') }\n")
+            f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE, total_cap=0)
+            ws = codes(root, "build.gradle", f)
+        self.assertIn(gr.WARN_FETCH, ws)  # surfaced as a fetch failure, never requested
+
+    def test_redirects_must_stay_on_the_host_and_on_https(self):
+        handler = gr._SameHostRedirect("repo.maven.apache.org")
+        req = urllib.request.Request("https://repo.maven.apache.org/maven2/a.pom")
+        self.assertIsNone(handler.redirect_request(req, None, 302, "Found", {}, "http://repo.maven.apache.org/a"))
+        self.assertIsNone(handler.redirect_request(req, None, 302, "Found", {}, "https://evil.example/a.pom"))
+        self.assertIsNotNone(handler.redirect_request(req, None, 302, "Found", {},
+                                                      "https://repo.maven.apache.org/maven2/b.pom"))
+
+    def test_non_https_mirror_is_refused(self):
+        old = os.environ.get("SECSCAN_MAVEN_BASE_URL")
+        try:
+            os.environ["SECSCAN_MAVEN_BASE_URL"] = "http://mirror.internal/m2"
+            self.assertEqual(gr.maven_base_url(), gr.DEFAULT_MAVEN_BASE)
+            os.environ["SECSCAN_MAVEN_BASE_URL"] = "https://mirror.internal/m2/"
+            self.assertEqual(gr.maven_base_url(), "https://mirror.internal/m2")
+        finally:
+            if old is None:
+                os.environ.pop("SECSCAN_MAVEN_BASE_URL", None)
+            else:
+                os.environ["SECSCAN_MAVEN_BASE_URL"] = old
+
 
 class PrivateRegistryTests(unittest.TestCase):
     """D-032 (slice 3): detect private feeds and WARN (host only); never fetch them, never leak credentials."""
@@ -416,6 +478,21 @@ class PrivateRegistryTests(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertIn("artifactory.corp.example", msgs[0])
         for secret in ("svcuser", "s3cr3tT0ken", "@"):
+            self.assertNotIn(secret, msgs[0])
+
+    def test_credential_with_url_delimiters_never_surfaces_as_the_host(self):
+        # urlsplit() ends the netloc at an unencoded '#', '?' or '/' inside the userinfo and would report part of
+        # the CREDENTIAL as the host. Only the real host after the last '@' may ever be emitted.
+        for url in ("https://deploy:s3cr#t@nexus.corp.example/repo",
+                    "https://glpat-abc?x@nexus.corp.example/r",
+                    "https://user:p/w@nexus.corp.example/r",
+                    "https://tok@nexus.corp.example:8443/r"):
+            self.assertEqual(gr._host_of(url), "nexus.corp.example", url)
+        msgs = gr.private_registry_messages('maven { url "https://${u}:${p}@nexus.corp.example/repo" }',
+                                            {"u": "deployer", "p": "pa#ss"})
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("nexus.corp.example", msgs[0])
+        for secret in ("deployer", "pa#ss", "@"):
             self.assertNotIn(secret, msgs[0])
 
     def test_unresolved_url_still_warns_without_leaking_the_expression(self):
@@ -652,6 +729,17 @@ class SafetyTests(unittest.TestCase):
                 }
             """)
             self.assertEqual(resolve(root, "build.gradle"), [("ok", "lib", "1.0")])
+
+    def test_internal_error_is_a_visible_warning_not_a_silent_partial_result(self):
+        class Exploding:
+            def fetch(self, *_):
+                raise RuntimeError("boom")
+
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "build.gradle", "plugins { id 'org.springframework.boot' version '2.6.5' }\n"
+                                        "dependencies { implementation 'g:a:1.0' }\n")
+            result = gr.resolve(root, out, fetcher=Exploding())
+        self.assertIn("stopped early", " ".join(w["message"] for w in result["warnings"]))
 
     def test_malformed_build_file_does_not_raise(self):
         with tempfile.TemporaryDirectory() as root:

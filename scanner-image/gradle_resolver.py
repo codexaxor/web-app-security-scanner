@@ -45,7 +45,7 @@ POMs are parsed as data, never imported/executed (D-004).
 
 Private registries (D-032): private/internal Maven repositories (``repositories {}`` / ``maven { url }`` in
 build.gradle(.kts) and settings.gradle(.kts)) and NuGet sources (``nuget.config <packageSources>``) are DETECTED
-and WARNED (``PRIVATE_REGISTRY``, HOST ONLY -- ``urlsplit().hostname`` strips any ``user:pass@`` and the port;
+and WARNED (``PRIVATE_REGISTRY``, HOST ONLY -- everything up to the last ``@`` and the port are dropped, and only a plain DNS hostname is emitted;
 credentials/tokens/property values are never read or emitted). The resolver NEVER fetches a private host -- it
 stays Maven-Central-only -- so a scanned repo cannot steer the fetcher at an arbitrary host (SSRF-shaped risk).
 
@@ -57,10 +57,12 @@ Best-effort: a parse error on one file is logged to stderr and skipped; a write 
 warning (never a silent empty result); it never raises to the caller and never fails the scan.
 """
 
+import http.client
 import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -94,7 +96,9 @@ _PER_POM_TIMEOUT = 15        # seconds per POM GET
 _TOTAL_FETCH_CAP = 200       # max POMs fetched per scan run
 _PARENT_DEPTH = 8            # max <parent> chain depth
 _IMPORT_DEPTH = 6            # max nested <scope>import</scope> recursion
+_TOTAL_FETCH_BUDGET = 120   # seconds of wall clock for ALL fetches in one run (well under the scan timeout)
 _MAX_POM_BYTES = 10 * 1024 * 1024
+_READ_CHUNK = 64 * 1024
 _PROP_RE = re.compile(r"\$\{([^}]+)\}")
 
 _BASE_CONFIGS = frozenset({
@@ -281,35 +285,57 @@ def load_version_catalog(checkout):
 # --- Maven Central BOM fetch + expansion (D-042) -----------------------------------------------------------
 
 def maven_base_url():
-    return (os.environ.get("SECSCAN_MAVEN_BASE_URL") or DEFAULT_MAVEN_BASE).rstrip("/")
+    """The Maven base URL: ``SECSCAN_MAVEN_BASE_URL`` if it is an https URL with a host, else Maven Central. A
+    non-https mirror is refused (TLS is ALWAYS on, D-042) rather than silently fetched in the clear."""
+    configured = (os.environ.get("SECSCAN_MAVEN_BASE_URL") or "").rstrip("/")
+    if configured:
+        parts = urlsplit(configured)
+        if parts.scheme == "https" and parts.hostname:
+            return configured
+        log("SECSCAN_MAVEN_BASE_URL is not an https URL; using Maven Central instead")
+    return DEFAULT_MAVEN_BASE
 
 
 def pom_url(base, group, artifact, version):
     return "/".join([base, group.replace(".", "/"), artifact, version, artifact + "-" + version + ".pom"])
 
 
+def _safe_coordinate(value):
+    """A coordinate segment that is safe to put in a fetch URL path: version-safe characters only (no ``/``,
+    ``?``, ``#``, ``%``, ``@``, whitespace) and not a bare dot segment (``.``/``..`` would walk the path)."""
+    return bool(value) and bool(_SAFE_TOKEN.match(value)) and value.strip(".") != ""
+
+
 class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
-    """Block cross-host redirects so the resolver can reach only the configured Maven host."""
+    """Block cross-host AND non-https redirects so the resolver can reach only the configured Maven host, and
+    only over TLS (a same-host https -> http downgrade is refused too)."""
 
     def __init__(self, allowed_host):
         self.allowed_host = allowed_host
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urlsplit(newurl).hostname != self.allowed_host:
+        target = urlsplit(newurl)
+        if target.scheme != "https" or target.hostname != self.allowed_host:
             return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class MavenFetcher:
     """Read-only HTTPS GET of ``.pom`` files from ONE host. TLS verification is ALWAYS on (urllib's default
-    context verifies certificates; it is never disabled). Bounded by a per-POM timeout and a total-fetch cap,
-    with an in-run cache. Returns the POM text, or None on any failure (cap reached, timeout, HTTP/TLS error)."""
+    context verifies certificates; it is never disabled). Bounded by a per-socket-operation timeout, a
+    total-fetch cap and a total wall-clock budget for the whole run (so a slow or black-holed Maven Central can
+    never push the container past its hard scan timeout and lose the other scanners' results), with an in-run
+    cache. Every coordinate is validated before it is put in a URL. Returns the POM text, or None on any failure
+    (unsafe coordinate, cap/budget reached, timeout, HTTP/TLS error)."""
 
-    def __init__(self, base_url, timeout=_PER_POM_TIMEOUT, total_cap=_TOTAL_FETCH_CAP):
+    def __init__(self, base_url, timeout=_PER_POM_TIMEOUT, total_cap=_TOTAL_FETCH_CAP,
+                 total_budget=_TOTAL_FETCH_BUDGET, clock=time.monotonic):
         self.base_url = base_url
         self.allowed_host = urlsplit(base_url).hostname
         self.timeout = timeout
         self.total_cap = total_cap
+        self.clock = clock
+        self.deadline = clock() + total_budget
         self.fetched = 0
         self.cache = {}
         self.opener = urllib.request.build_opener(_SameHostRedirect(self.allowed_host))
@@ -318,7 +344,11 @@ class MavenFetcher:
         key = (group, artifact, version)
         if key in self.cache:
             return self.cache[key]
-        if self.fetched >= self.total_cap:
+        if not all(_safe_coordinate(part) for part in key):
+            log("refusing to fetch a POM for an unsafe coordinate")
+            self.cache[key] = None
+            return None
+        if self.fetched >= self.total_cap or self.clock() >= self.deadline:
             self.cache[key] = None
             return None
         url = pom_url(self.base_url, group, artifact, version)
@@ -328,15 +358,29 @@ class MavenFetcher:
             req = urllib.request.Request(url, method="GET",
                                          headers={"User-Agent": "secscan-gradle-resolver"})
             with self.opener.open(req, timeout=self.timeout) as resp:  # default TLS context verifies certs
-                data = resp.read(_MAX_POM_BYTES + 1)
-            if len(data) <= _MAX_POM_BYTES:
-                text = data.decode("utf-8", errors="replace")
+                data = self._read_bounded(resp)
+            if data is None:
+                log("POM too large or over the fetch budget, skipping: " + url)
             else:
-                log("POM too large, skipping: " + url)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+                text = data.decode("utf-8", errors="replace")
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
             log("BOM fetch failed " + url + ": " + str(exc))
         self.cache[key] = text
         return text
+
+    def _read_bounded(self, resp):
+        """The response body, or None if it exceeds the size cap or the run's wall-clock budget runs out while
+        reading (the socket timeout bounds one read, not a slow drip of many)."""
+        chunks = []
+        size = 0
+        while True:
+            chunk = resp.read(_READ_CHUNK)
+            if not chunk:
+                return b"".join(chunks)
+            size += len(chunk)
+            if size > _MAX_POM_BYTES or self.clock() >= self.deadline:
+                return None
+            chunks.append(chunk)
 
 
 def _ln(tag):
@@ -562,8 +606,8 @@ def detect_boot_bom(text, variables):
 
 # --- Private registry detection (D-032, slice 3) -----------------------------------------------------------
 # A scanned repo may declare private/internal package feeds. We DETECT and WARN (host only), NEVER fetch from
-# them, and NEVER read or emit any credential. Only the HOST is ever surfaced -- urlsplit().hostname drops any
-# user:pass@ and the port, so a credential-bearing URL can never leak into a warning or /out.
+# them, and NEVER read or emit any credential. Only the HOST is ever surfaced -- _host_of() drops everything up to
+# the last '@' and the port, so a credential-bearing URL can never leak into a warning or /out.
 
 # A Maven repository URL argument: `url '...'` / `url = "..."` / `url = uri("...")` / `setUrl("...")` /
 # `maven("...")`. Captures the raw argument (which may be a ${property}); never a bare dependency coordinate.
@@ -572,15 +616,22 @@ _REPO_URL_RE = re.compile(
 _NUGET_MAX_BYTES = 1 * 1024 * 1024
 
 
+_HOSTNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$")
+
+
 def _host_of(url):
-    """The hostname of a URL (credentials and port stripped), or None if it has none / is invalid."""
-    if "://" not in url:
+    """The hostname of a URL (credentials and port stripped), or None if it has none / is invalid.
+
+    Not ``urlsplit().hostname``: an interpolated credential with an unencoded ``#``/``?``/``/`` (e.g.
+    ``https://user:p#ss@host``) ends urlsplit's netloc early and makes it report part of the CREDENTIAL as the
+    host. The host always follows the LAST ``@``, so everything before it is dropped first; the remainder must
+    then be a plain DNS hostname or it is treated as unresolved (never echoed)."""
+    _, sep, rest = url.partition("://")
+    if not sep:
         return None
-    try:
-        host = urlsplit(url).hostname
-    except ValueError:
-        return None
-    if not host or "\x00" in host or "$" in host:
+    rest = rest.rpartition("@")[2]
+    host = re.split(r"[/?#:\\]", rest, maxsplit=1)[0].lower()
+    if not _HOSTNAME_RE.match(host):
         return None
     return host
 
@@ -881,6 +932,11 @@ def resolve(checkout, out_dir, fetcher=None):
                 warn(WARN_PRIVATE_REGISTRY, _private_registry_message(host), rel)
     except Exception as exc:  # best-effort: never fail the scan on a resolver bug
         log("unexpected error, emitting partial result: " + repr(exc))
+        # The gap must be VISIBLE (D-030), not just a stderr line: later build files and the registry checks
+        # were skipped.
+        warnings.append({"code": WARN_CODE, "filePath": "",
+                         "message": "the Gradle resolver stopped early on an internal error; remaining build "
+                                    "files and private-registry checks were not processed"})
     return {"poms": poms, "warnings": warnings}
 
 

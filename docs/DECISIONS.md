@@ -248,7 +248,9 @@ held anywhere.
 Implemented (M4b slice 3, 2026-10-18): the resolver DETECTS private feeds and WARNS (`PRIVATE_REGISTRY`,
 free-text code, no migration) — Gradle `repositories {}`/`maven { url }` in build.gradle(.kts) and
 settings.gradle(.kts), and NuGet `nuget.config <packageSources>`. A non-public host is reported HOST ONLY
-(`urlsplit().hostname` strips any `user:pass@` and the port); `<packageSourceCredentials>` and any
+(everything up to the last `@` and the port are dropped and only a plain DNS hostname is emitted — not
+`urlsplit().hostname`, which reports part of a credential containing an unencoded `#`/`?`/`/` as the host;
+M4b review fix); `<packageSourceCredentials>` and any
 credential/token/property value are never read or emitted, and nothing credential-bearing reaches `/out`. The
 resolver NEVER fetches a private host (it stays Maven-Central-only, D-042), so a scanned repo cannot steer the
 fetcher at an arbitrary host (SSRF-shaped risk). Public hosts (Maven Central, google, gradlePluginPortal,

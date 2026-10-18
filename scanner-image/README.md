@@ -79,7 +79,7 @@ host is contacted by the resolver; the rest of the scan keeps its existing netwo
 (`PRIVATE_REGISTRY`) — Gradle `repositories {}` / `maven { url }` in `build.gradle(.kts)` and
 `settings.gradle(.kts)`, and NuGet `<packageSources>` in `nuget.config`. A non-public host (anything other than
 Maven Central, `dl.google.com`/`maven.google.com`, `plugins.gradle.org`, `api.nuget.org`) is reported **host
-only** (`urlsplit().hostname` strips any `user:pass@` and the port). The resolver **never fetches** a private
+only** (everything up to the last `@` and the port are dropped; only a plain DNS hostname is emitted). The resolver **never fetches** a private
 host (it stays Maven-Central-only), and it **never reads or emits** a credential — `<packageSourceCredentials>`
 and any token/property value stay out of warnings and `/out`. An unresolvable repository URL (built from an
 unresolved property) still warns, without leaking the expression.
