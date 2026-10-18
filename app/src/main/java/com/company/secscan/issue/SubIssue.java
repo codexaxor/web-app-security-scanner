@@ -126,6 +126,10 @@ public class SubIssue {
     @Column(name = "cve_aliases", columnDefinition = "jsonb")
     private List<String> cveAliases;
 
+    /** OSV advisory one-line summary — the subtitle fallback when cwe is empty/unknown (D-048). Descriptive only. */
+    @Column(name = "advisory_summary")
+    private String advisorySummary;
+
     @Column(name = "status", nullable = false)
     private String status = STATUS_OPEN;
 
@@ -243,6 +247,10 @@ public class SubIssue {
 
     public void setCveAliases(List<String> cveAliases) {
         this.cveAliases = cveAliases;
+    }
+
+    public void setAdvisorySummary(String advisorySummary) {
+        this.advisorySummary = advisorySummary;
     }
 
     // --- scoring outputs, set by the scorer (scan-time reconcile and the api re-score job) ---
@@ -369,6 +377,10 @@ public class SubIssue {
 
     public List<String> getCveAliases() {
         return cveAliases;
+    }
+
+    public String getAdvisorySummary() {
+        return advisorySummary;
     }
 
     public String getStatus() {

@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "source": { "path": "/work/checkout/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "commons-collections:commons-collections",
+            "version": "3.2.1",
+            "ecosystem": "Maven"
+          },
+          "groups": [
+            {
+              "ids": ["GHSA-fjq5-5j5f-mvxh"],
+              "aliases": ["CVE-2015-6420", "GHSA-fjq5-5j5f-mvxh"],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "id": "GHSA-fjq5-5j5f-mvxh",
+              "summary": "Deserialization of untrusted data in Apache Commons Collections",
+              "severity": [],
+              "database_specific": {
+                "severity": "HIGH",
+                "cwe_ids": ["CWE-502"]
+              },
+              "affected": [
+                { "ranges": [ { "events": [ { "introduced": "0" }, { "fixed": "3.2.2" } ] } ] }
+              ]
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "com.example:multi",
+            "version": "1.0.0",
+            "ecosystem": "Maven"
+          },
+          "groups": [
+            {
+              "ids": ["GHSA-multi-0001"],
+              "aliases": ["CVE-2024-0001", "GHSA-multi-0001"],
+              "max_severity": "8.7"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "id": "GHSA-multi-0001",
+              "summary": "Example finding with both CVSS v3 and v4 and no CWE",
+              "severity": [
+                { "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "type": "CVSS_V3" },
+                { "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N", "type": "CVSS_V4" }
+              ],
+              "database_specific": {
+                "severity": "HIGH",
+                "cwe_ids": []
+              },
+              "affected": [
+                { "ranges": [ { "events": [ { "introduced": "0" }, { "fixed": "1.1.0" } ] } ] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

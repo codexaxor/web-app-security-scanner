@@ -189,8 +189,10 @@ public class ScanStateService {
 
     private ScanFinding toEntity(UUID workspaceId, UUID scanId, UUID repositoryId, RawFinding f) {
         if (RawFinding.TYPE_SCA.equals(f.type())) {
-            return ScanFinding.sca(workspaceId, scanId, repositoryId, f.vulnId(), f.packageName(), f.ecosystem(),
-                    f.installedVersion(), f.fixedVersion(), f.filePath(), f.toolSeverity());
+            ScanFinding sca = ScanFinding.sca(workspaceId, scanId, repositoryId, f.vulnId(), f.packageName(),
+                    f.ecosystem(), f.installedVersion(), f.fixedVersion(), f.filePath(), f.toolSeverity());
+            sca.setOsvEnrichment(f.cvss(), f.severityLabel(), f.cwe(), f.cveAliases(), f.advisorySummary());
+            return sca;
         }
         if (RawFinding.TYPE_SECRET.equals(f.type())) {
             // The container emits a plain SHA-256; we key it with HMAC-SHA256 here so the bare digest is never

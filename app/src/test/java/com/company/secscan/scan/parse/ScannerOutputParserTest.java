@@ -128,6 +128,50 @@ class ScannerOutputParserTest {
     }
 
     @Test
+    void mavenSampleCarriesCvssVectorLabelCweAndAliases(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/maven.json", outDir), "/work/checkout");
+
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.vulnId()).isEqualTo("CVE-2022-42889");
+            assertThat(f.toolSeverity()).isEqualTo("9.8"); // OSV max_severity (the base number)
+            assertThat(f.cvss()).isEqualTo("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H");
+            assertThat(f.severityLabel()).isEqualTo("CRITICAL");
+            assertThat(f.cwe()).containsExactly("CWE-94");
+            assertThat(f.cveAliases()).containsExactly("CVE-2022-42889");
+            assertThat(f.advisorySummary()).isEqualTo("Arbitrary code execution in Apache Commons Text");
+        });
+    }
+
+    @Test
+    void noCvssFindingKeepsLabelAndCweWithNullVector(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/no-cvss.json", outDir), "/work/checkout");
+
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("commons-collections:commons-collections");
+            assertThat(f.vulnId()).isEqualTo("CVE-2015-6420");
+            assertThat(f.toolSeverity()).isEmpty();      // max_severity ""
+            assertThat(f.cvss()).isNull();               // no severity vector
+            assertThat(f.severityLabel()).isEqualTo("HIGH");
+            assertThat(f.cwe()).containsExactly("CWE-502");
+            assertThat(f.cveAliases()).containsExactly("CVE-2015-6420");
+            assertThat(f.advisorySummary()).contains("Apache Commons Collections");
+        });
+    }
+
+    @Test
+    void cvssV4VectorIsPreferredAndEmptyCweIsEmptyList(@TempDir Path outDir) throws Exception {
+        var findings = parser.parseOsv(sample("/samples/osv/no-cvss.json", outDir), "/work/checkout");
+
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("com.example:multi");
+            assertThat(f.cvss()).startsWith("CVSS:4.0/");  // v4 preferred over v3 (D-044)
+            assertThat(f.cwe()).isEmpty();                 // empty cwe_ids -> subtitle falls back to summary
+            assertThat(f.advisorySummary()).isNotBlank();
+            assertThat(f.cveAliases()).containsExactly("CVE-2024-0001");
+        });
+    }
+
+    @Test
     void anAliasGroupBecomesOneFindingWithTheLowestSortedCve(@TempDir Path outDir) throws Exception {
         var findings = parser.parseOsv(sample("/samples/osv/alias-group.json", outDir), "/work/checkout");
 

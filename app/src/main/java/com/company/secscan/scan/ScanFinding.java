@@ -100,6 +100,9 @@ public class ScanFinding {
     @Column(name = "cve_aliases", columnDefinition = "jsonb")
     private List<String> cveAliases;
 
+    @Column(name = "advisory_summary")
+    private String advisorySummary;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -241,12 +244,18 @@ public class ScanFinding {
         return cveAliases;
     }
 
+    public String getAdvisorySummary() {
+        return advisorySummary;
+    }
+
     /** Sets the OSV-derived descriptive enrichment (M5) after the SCA factory builds the row. */
-    public void setOsvEnrichment(String cvss, String severityLabel, List<String> cwe, List<String> cveAliases) {
+    public void setOsvEnrichment(String cvss, String severityLabel, List<String> cwe, List<String> cveAliases,
+                                 String advisorySummary) {
         this.cvss = cvss;
         this.severityLabel = severityLabel;
         this.cwe = cwe;
         this.cveAliases = cveAliases;
+        this.advisorySummary = advisorySummary;
     }
 
     public Instant getCreatedAt() {
