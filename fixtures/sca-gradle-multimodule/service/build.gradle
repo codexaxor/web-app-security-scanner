@@ -1,0 +1,12 @@
+// 'service' module: a Spring Boot web app with NO inline versions. The Boot plugin's BOM (2.6.5) governs every
+// version; the resolver must fetch the BOM from Maven Central to pin them (D-042). spring-boot-starter-web pulls
+// org.apache.tomcat.embed:tomcat-embed-core (9.0.60) transitively -- a vulnerable package UNIQUE to this module
+// (the gateway module, a non-web starter, never pulls tomcat). Its finding must anchor to service/build.gradle.
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '2.6.5'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}

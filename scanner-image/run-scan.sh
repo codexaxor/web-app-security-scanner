@@ -1,11 +1,17 @@
 #!/bin/sh
-# SecScan scanner entrypoint (M2): clone one repo at one commit, run Gitleaks, and write SANITIZED results.
+# SecScan scanner entrypoint (M2 + M4b): clone one repo at one commit, run Betterleaks, and write SANITIZED
+# results.
 #
-# Security contract (CLAUDE.md + D-014 + D-024):
+# Security contract (CLAUDE.md + D-014 + D-024 + D-036 + D-037):
 #   - The token (if any) arrives only as a read-only file, never an env var or the clone URL, and is sent as a
 #     basic-auth header via a git config file on tmpfs — never on the command line, never logged.
-#   - Gitleaks runs UNREDACTED into tmpfs /work, but the raw secret NEVER leaves this container: we compute a
+#   - Betterleaks runs UNREDACTED into tmpfs /work, but the raw secret NEVER leaves this container: we compute a
 #     SHA-256 and a masked preview here and write only those to /out. /work is tmpfs and dies with the container.
+#   - In-repo suppressors are IGNORED (D-037): a pinned --config overrides any .betterleaks.toml/.gitleaks.toml,
+#     --ignore-gitleaks-allow ignores inline allow comments, and --gitleaks-ignore-path points at a baked empty
+#     file so the repo's .betterleaksignore/.gitleaksignore is never read.
+#   - Validation is OFF: we never pass --validation (or any --validation-* flag), so no live provider calls are
+#     made. Betterleaks' rule validate() blocks only run under --validation.
 #   - Tracing is never enabled (no `set -x`), and no secret value is ever echoed.
 #
 # Inputs (env):   SCAN_CLONE_URL (required), SCAN_BRANCH (optional), SCAN_CLONE_DEPTH (default 1)
@@ -19,14 +25,19 @@ WORK=/work
 OUT=/out
 CHECKOUT="$WORK/checkout"
 TOKEN_FILE=/run/secrets/gitlab-token
-RAW="$WORK/gitleaks-raw.json"
+RAW="$WORK/betterleaks-raw.json"
+
+# Pinned scanner configs baked into the image (D-037). Passed with --config so in-repo suppressors are ignored.
+BL_CONFIG=/etc/secscan/betterleaks.toml
+BL_IGNORE=/etc/secscan/betterleaks-empty.ignore
+OSV_CONFIG=/etc/secscan/osv-scanner.toml
 
 : "${SCAN_CLONE_URL:?SCAN_CLONE_URL is required}"
 BRANCH="${SCAN_BRANCH:-}"
 DEPTH="${SCAN_CLONE_DEPTH:-1}"
 
 GIT_VERSION="$(git --version | awk '{print $3}')"
-GITLEAKS_VERSION="$(gitleaks version 2>/dev/null || echo unknown)"
+BETTERLEAKS_VERSION="$(betterleaks version 2>/dev/null || echo unknown)"
 
 # --- Clone (token, if present, via a tmpfs git config header; never in the URL/argv/env) ---
 GIT_CONFIG_GLOBAL="$WORK/gitconfig"
@@ -61,23 +72,30 @@ fi
 
 COMMIT="$(git -C "$CHECKOUT" rev-parse HEAD)"
 
-# --- Secret scan (Gitleaks, unredacted into tmpfs) ---
-# `gitleaks dir` does NOT follow symlinks unless --follow-symlinks is passed (which we deliberately do not):
-# a symlink in the repo must never make the scanner read a file outside the checkout.
-# --exit-code 2 is returned when leaks are found, so we can tell "leaks found" (2) apart from a real gitleaks
-# error (gitleaks returns 1 on error); 0 = clean. The JSON report is written to a file only (never stdout).
+# --- Secret scan (Betterleaks, unredacted into tmpfs; D-036) ---
+# `betterleaks dir` does NOT follow symlinks unless asked to (we never do): a symlink in the repo must never
+# make the scanner read a file outside the checkout.
+# --exit-code 2 is returned when leaks are found, so we can tell "leaks found" (2) apart from a real betterleaks
+# error (betterleaks returns 1 on error, e.g. a bad config/unreadable target); 0 = clean. The JSON report is
+# written to a file only (never stdout). In-repo suppressors are ignored (D-037): --config (precedence #1)
+# overrides any in-repo config, --ignore-gitleaks-allow ignores inline allow comments, and --gitleaks-ignore-path
+# points at a baked empty file so the repo's ignore file is not read. We never pass --validation (no live calls).
 START="$(date +%s)"
 set +e
-gitleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 2 >"$WORK/gitleaks.log" 2>&1
+betterleaks dir "$CHECKOUT" --no-banner --report-format json --report-path "$RAW" --exit-code 2 \
+    --config "$BL_CONFIG" --ignore-gitleaks-allow --gitleaks-ignore-path "$BL_IGNORE" \
+    >"$WORK/betterleaks.log" 2>&1
 GL_EXIT=$?
 set -e
 END="$(date +%s)"
 DUR_MS=$(( (END - START) * 1000 ))
 
-# A run is successful only when gitleaks exited 0 (clean) or 2 (leaks found) AND wrote a valid JSON array
-# report. Any other exit code, or a missing/invalid report, is a scanner failure (status "failed", exit 20).
+# A run is successful only when betterleaks exited 0 (clean) or 2 (leaks found) AND wrote a valid JSON report.
+# Betterleaks writes an ARRAY when there are findings but the JSON literal `null` when there are none, so both
+# "array" and "null" are valid; any other exit code, or a missing/invalid report, is a scanner failure
+# (status "failed", exit 20).
 if { [ "$GL_EXIT" -eq 0 ] || [ "$GL_EXIT" -eq 2 ]; } \
-        && [ -f "$RAW" ] && jq -e 'type == "array"' "$RAW" >/dev/null 2>&1; then
+        && [ -f "$RAW" ] && jq -e 'type == "array" or type == "null"' "$RAW" >/dev/null 2>&1; then
     SECRET_STATUS="ok"
 else
     SECRET_STATUS="failed"
@@ -87,9 +105,11 @@ fi
 : > "$WORK/secrets.ndjson"
 if [ "$SECRET_STATUS" = "ok" ] && [ -s "$RAW" ]; then
     # Emit tab-separated rows with the secret base64-encoded, so arbitrary bytes survive the read loop. File
-    # paths are made repo-relative (the checkout prefix stripped) for stable fingerprints in M3.
+    # paths are made repo-relative (the checkout prefix stripped) for stable fingerprints in M3. `// []` turns a
+    # `null` (no findings) report into an empty list. Betterleaks' JSON fields (RuleID/File/StartLine/Secret)
+    # are Gitleaks-compatible.
     jq -r --arg prefix "$CHECKOUT/" \
-        '.[] | [.RuleID, (.File|ltrimstr($prefix)), (.StartLine|tostring), (.Secret|@base64)] | @tsv' \
+        '(. // []) | .[] | [.RuleID, (.File|ltrimstr($prefix)), (.StartLine|tostring), (.Secret|@base64)] | @tsv' \
         "$RAW" > "$WORK/findings.tsv"
     while IFS="$(printf '\t')" read -r rule file line secret_b64; do
         [ -n "$rule" ] || continue
@@ -131,6 +151,13 @@ find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
         add_warning MISSING_NUGET_LOCKFILE \
             "No packages.lock.json next to the project; only direct PackageReference versions are scanned, not transitive (M4b)." \
             "$rel"
+        # Full NuGet transitive resolution is deferred (D-043): OSV v2.7.0 resolves transitive NuGet deps only
+        # from a lockfile, and we do NOT build a deps.dev resolver / synthetic lockfile. Make the gap HONEST
+        # (D-030): this is ADDITIONAL to MISSING_NUGET_LOCKFILE above; both coexist (and the D-035 dedup keys on
+        # MISSING_NUGET_LOCKFILE only, so it is unaffected).
+        add_warning NUGET_NO_LOCKFILE_TRANSITIVE_GAP \
+            "Without a NuGet lockfile, transitive NuGet dependencies are not resolved; only direct PackageReferences are scanned (D-043)." \
+            "$rel"
     fi
     csproj_package_versions "$csproj" | while IFS="$(printf '\t')" read -r pkg ver; do
         # Empty version = central package management (version in Directory.Packages.props), which OSV resolves;
@@ -142,15 +169,69 @@ find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
     done
 done
 
+# --- Static Gradle resolution (D-038/D-039/D-041/D-042) ---
+# Emit a synthetic Maven pom OUTSIDE the clone for each Gradle build file that ships NO lockfile, so OSV can
+# resolve its TRANSITIVE dependencies (a locked project is resolved by OSV natively; a build-file-only project
+# otherwise finds nothing). Gradle findings therefore surface in OSV's MAVEN ecosystem. The resolver reads the
+# repo as DATA only -- `python3 -I` keeps the scanned tree and the CWD off sys.path so a planted json.py can
+# never be imported (D-004) -- and writes the poms plus a {syntheticPath -> repo-relative build file} map to
+# tmpfs /work. It is best-effort: on ANY failure we fall back to an empty map and the scan still runs (OSV over
+# the checkout, plus the MISSING_GRADLE_LOCKFILE inventory warning). The parser rewrites OSV's synthetic-pom
+# source path back to the build file before fingerprinting (D-038); an unmapped /work path is dropped (D-035).
+#
+# NETWORK (D-042): because OSV's pomxml enricher does NOT inherit versions from a <dependencyManagement> BOM
+# import, the resolver itself FETCHES the governing BOM POMs (Spring Boot/Cloud, platform(), mavenBom) so it can
+# write a concrete <version> on every dependency. It performs read-only HTTPS GETs of .pom files from ONE host
+# only -- Maven Central (repo.maven.apache.org, already allowed by D-033) or the mirror in
+# SECSCAN_MAVEN_BASE_URL -- with TLS verification always ON and cross-host redirects blocked (enforced in the
+# resolver). Fetches are bounded (per-POM timeout, total cap, recursion depth, in-run cache); a fetch failure
+# raises GRADLE_BOM_FETCH_FAILED and the scan continues. No build is executed; fetched POMs are parsed as data.
+# The rest of the scan keeps its existing network posture; only this step needs Maven-Central egress.
+SYNTH="$WORK/synthetic"
+RESOLVER_OUT="$WORK/resolver-out.json"
+SYNTH_MAP="$WORK/synthetic-map.json"
+mkdir -p "$SYNTH"
+set +e
+python3 -I /usr/local/bin/gradle_resolver.py "$CHECKOUT" "$SYNTH" > "$RESOLVER_OUT" 2>"$WORK/resolver.log"
+RESOLVER_EXIT=$?
+set -e
+# The resolver prints {poms:[...], warnings:[{code,message,filePath}]} on stdout AND writes, beside each
+# synthetic pom it emits, a `buildfile` sidecar naming the originating build file. On any stdout failure, fall
+# back to an empty object so the warnings read below is safe.
+if [ "$RESOLVER_EXIT" -ne 0 ] || ! jq -e 'type == "object"' "$RESOLVER_OUT" >/dev/null 2>&1; then
+    printf '{"poms":[],"warnings":[]}' > "$RESOLVER_OUT"
+fi
+# Surface every skipped construct/non-concrete version as a scan warning (GRADLE_UNPARSEABLE_CONSTRUCT, D-030):
+# append the resolver's warnings to the inventory warnings so they reach the manifest and the issue feed.
+jq -c '.warnings[]?' "$RESOLVER_OUT" >> "$WORK/warnings.ndjson"
+
+# Build the synthetic-pom -> build-file map (D-038) from the files ON DISK -- the `buildfile` sidecar beside
+# each synthetic pom -- NOT from the resolver's stdout. Each entry is keyed on the synthetic pom's real path,
+# which is EXACTLY what OSV scans under $SYNTH and reports as source.path, so the parser's rewrite always
+# matches (single- and multi-module alike). Deriving it from disk also means it survives a lost/truncated
+# resolver stdout (e.g. a killed resolver): any synthetic pom that exists for OSV to scan carries its mapping,
+# so a multi-module finding can never be orphaned into an UNRESOLVED_PATH drop.
+: > "$WORK/synth-map.ndjson"
+find "$SYNTH" -type f -name pom.xml 2>/dev/null | while read -r pom; do
+    bf="$(dirname "$pom")/buildfile"
+    [ -f "$bf" ] || continue
+    jq -nc --arg s "$pom" --arg b "$(cat "$bf")" '{syntheticPath:$s, buildFile:$b}' >> "$WORK/synth-map.ndjson"
+done
+jq -s '.' "$WORK/synth-map.ndjson" > "$SYNTH_MAP"
+
 # --- SCA scan (OSV-Scanner over the whole tree; deps.dev online, D-006/D-034) ---
 # Structure-agnostic: nested modules, monorepos and mixed ecosystems all work; "no manifests" is a warning
-# (NO_MANIFESTS), never a failure. TMPDIR is tmpfs /work because the root filesystem is read-only.
+# (NO_MANIFESTS), never a failure. TMPDIR is tmpfs /work because the root filesystem is read-only. We scan both
+# the checkout and the synthetic-pom dir ($SYNTH); the synthetic dir is empty (harmless) when no Gradle build
+# file needed resolving.
 export TMPDIR="$WORK"
 OSV_JSON="$OUT/osv.json"
 OSV_VERSION="$(osv-scanner --version 2>/dev/null | awk '/osv-scanner version/{print $3; exit}')"
 START="$(date +%s)"
 set +e
-osv-scanner scan source -r --format json --output-file "$OSV_JSON" "$CHECKOUT" >"$WORK/osv.log" 2>&1
+# --config overrides any in-repo osv-scanner.toml so [[IgnoredVulns]]/[[PackageOverrides]] cannot suppress or
+# downgrade a finding (D-037, verified against v2.7.0).
+osv-scanner scan source -r --config "$OSV_CONFIG" --format json --output-file "$OSV_JSON" "$CHECKOUT" "$SYNTH" >"$WORK/osv.log" 2>&1
 OSV_EXIT=$?
 set -e
 END="$(date +%s)"
@@ -172,13 +253,23 @@ esac
 # Guarantee a parseable findings file even when OSV wrote none (error/no-packages), so the parser never fails.
 [ -f "$OSV_JSON" ] || printf '{"results":[]}' > "$OSV_JSON"
 
+# On an OSV failure, surface its own stdout/stderr (captured to $WORK/osv.log) on the container's stderr so the
+# worker's log_excerpt is debuggable -- otherwise an SCA failure leaves an empty excerpt (it is redirected to a
+# tmpfs file that dies with the container). OSV's output is dependency/resolver data, never a secret value, and
+# the worker scrubs token-shaped strings from the excerpt regardless. A clean/normal run stays quiet so the
+# excerpt is not drowned out.
+if [ "$SCA_STATUS" = "failed" ] && [ -s "$WORK/osv.log" ]; then
+    echo "osv-scanner failed (exit $OSV_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/osv.log" >&2 || true
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
     --arg commit "$COMMIT" \
     --arg checkout "$CHECKOUT" \
     --arg git "$GIT_VERSION" \
-    --arg gitleaks "$GITLEAKS_VERSION" \
+    --arg betterleaks "$BETTERLEAKS_VERSION" \
     --arg osv "$OSV_VERSION" \
     --arg sstatus "$SECRET_STATUS" \
     --argjson sexit "$GL_EXIT" \
@@ -188,9 +279,11 @@ jq -nc \
     --argjson cadur "$OSV_DUR_MS" \
     --argjson nopkg "$OSV_NO_PACKAGES" \
     --slurpfile warnings "$WORK/warnings.json" \
+    --slurpfile synth "$SYNTH_MAP" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
-      toolVersions:{git:$git, gitleaks:$gitleaks, "osv-scanner":$osv},
+      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv},
       warnings: ($warnings[0] // []),
+      syntheticPoms: ($synth[0] // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

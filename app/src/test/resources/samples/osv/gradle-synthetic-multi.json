@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "source": { "path": "/work/synthetic/0/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "org.apache.tomcat.embed:tomcat-embed-core",
+            "version": "9.0.60",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/org.apache.tomcat.embed/tomcat-embed-core@9.0.60"
+          },
+          "groups": [
+            { "ids": ["CVE-2022-42252"], "aliases": ["CVE-2022-42252"], "max_severity": "7.5" }
+          ]
+        }
+      ]
+    },
+    {
+      "source": { "path": "/work/synthetic/1/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "org.yaml:snakeyaml",
+            "version": "1.29",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/org.yaml/snakeyaml@1.29"
+          },
+          "groups": [
+            { "ids": ["CVE-2022-1471"], "aliases": ["CVE-2022-1471"], "max_severity": "9.8" }
+          ]
+        }
+      ]
+    }
+  ]
+}

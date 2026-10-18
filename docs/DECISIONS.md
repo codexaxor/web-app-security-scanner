@@ -14,6 +14,155 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-043 Full NuGet transitive resolution deferred; lockfile-less .csproj surfaces an honest gap (2026-10-18, accepted)
+Context: OSV-Scanner v2.7.0 does transitive dependency resolution only for Maven `pom.xml` and Python
+`requirements.txt`. NuGet is lockfile-only: a bare `.csproj` yields DIRECT `<PackageReference>` versions only,
+under any flag (D-035). The Gradle BOM-fetch approach (D-042) does not transfer to NuGet, and no real .NET repo
+is onboarded yet to validate a NuGet resolver against.
+Decision: defer full NuGet transitive resolution. Build NO deps.dev NuGet resolver, NO synthetic
+`packages.lock.json`, NO `.csproj` transitive expansion. Instead make the lockfile-less case HONEST (D-030): a
+`.csproj` with no sibling `packages.lock.json` raises a new `NUGET_NO_LOCKFILE_TRANSITIVE_GAP` warning (free-text
+code, no migration) stating that transitive NuGet deps are not resolved without a lockfile. This is ADDITIONAL
+to the existing `MISSING_NUGET_LOCKFILE` warning (both coexist, same gating); the D-035 dedup keys on
+`MISSING_NUGET_LOCKFILE` only and is unchanged. A `.csproj` WITH a lockfile is unchanged — OSV reads it for full
+transitives and neither NuGet warning fires.
+Consequences: lockfile-less .NET repos still get their direct-dependency findings plus a visible, named coverage
+gap instead of a silent partial result; full NuGet transitive resolution is revisited when a real .NET repo is
+onboarded. Resolve-it-ourselves (as in D-042 for Gradle) remains an option then.
+
+## D-042 Gradle resolver fetches BOM POMs from Maven Central to pin every version (2026-10-18, accepted)
+Context: D-041 imported the governing BOM into the synthetic pom's `<dependencyManagement>` and emitted
+BOM-managed dependencies version-less, expecting OSV's `pomxml` transitive enricher to inherit the versions.
+Measured on ib-api-v2 (@3be435d5) this failed: OSV does NOT inherit versions from a `<dependencyManagement>`
+import and filters version-less dependencies as unscannable — only 44/151 (~29%) resolved, far below the ≥95%
+target. All inputs are static in `build.gradle`; we must not run a build (D-004) and must not guess (D-035).
+Decision: the resolver itself fetches the governing BOM POMs from Maven Central and writes a concrete
+`<version>` on EVERY dependency it reports, so OSV has nothing version-less to filter. It builds the managed-
+version map by reading each BOM's `<dependencyManagement>` and resolving `<properties>` interpolation, the
+`<parent>` chain (fetched too) and nested `<scope>import</scope><type>pom</type>` sub-BOMs (fetched + merged
+recursively — `spring-boot-dependencies` imports ~24). BOM coordinates are those D-041 already detects (Boot
+plugin version, `platform()`/`enforcedPlatform()`, `mavenBom "..."`, `${prop}` from ext/set/extra/properties).
+A dependency unresolved after full expansion → `GRADLE_UNPARSEABLE_CONSTRUCT` (never guessed/dropped); a BOM
+that cannot be fetched → `GRADLE_BOM_FETCH_FAILED`, scan continues. Network: read-only HTTPS GET of `.pom` from
+ONE host only — Maven Central (`repo.maven.apache.org`, already allowed by D-033) or the `SECSCAN_MAVEN_BASE_URL`
+mirror — TLS verification ALWAYS on (never disabled), cross-host redirects blocked, bounded (per-POM timeout
+15s, total cap 200/run, parent depth 8, import depth 6, 10 MB cap, in-run cache). `python3 -I` preserved;
+fetched POMs are parsed as data, never imported/executed; no build is run.
+Consequences: a new runtime egress need for the Gradle resolver step (Maven Central — within the D-033
+allowlist); a Boot+Cloud build fetched 60 POMs in ~2.7s and emitted concrete versions on every dependency
+(`spring-boot-starter-web`→`2.6.5`, `spring-cloud-starter-openfeign`→`3.1.4`). Supersedes the version-less
+emission (and BOM-as-`<type>pom>` trigger) of D-041; D-041's BOM detection is retained.
+
+## D-041 Gradle synthetic pom imports BOMs for Spring Boot/Cloud BOM-managed deps (2026-10-18, superseded by D-042)
+Context: M4b Gradle repos (Spring Boot/Cloud) declare most dependencies with no inline version (BOM-managed), so
+the D-038 synthetic pom listed only inline-versioned deps and OSV resolved almost nothing for them.
+Decision: detect the governing BOMs — Spring Boot Gradle plugin version → `spring-boot-dependencies`,
+`platform()`/`enforcedPlatform()`, `mavenBom "..."` (with `${prop}` from `ext{}`/`set()`/`extra[]`/
+`gradle.properties`) — import them into the synthetic pom's `<dependencyManagement>` as
+`<scope>import</scope><type>pom</type>`, emit BOM-managed deps version-less, and (because OSV's resolver only
+engages with a concrete-versioned dep) inject the first BOM as a `<type>pom>` trigger. Broaden ext interpolation
+to all declarations; surface a write failure as a warning.
+Consequences: the BOM DETECTION and ext interpolation are retained, but the version-less emission + trigger did
+not actually resolve versions in OSV (measured 44/151 on ib-api-v2) and are **superseded by D-042**, which
+fetches the BOMs and pins every version explicitly.
+
+## D-040 Secrets fixture uses a fake GitHub PAT, not an AWS key (2026-10-17, accepted)
+Context: Betterleaks v1.7.3 reworked `aws-access-token` into a composite rule (an access key ID must be paired
+with a validatable secret access key) and does not fire offline on a lone fake AWS key; the old
+`fixtures/secrets-aws` key also paired with AWS's documented EXAMPLE secret, which is allowlisted. So the M4
+secrets fixture no longer proves detection under the new engine.
+Decision: the secrets fixture plants an obviously-fake GitHub personal access token (`ghp_…`), detected under
+the stable, specific `github-pat` rule (identical id in both engines). `fixtures/secrets-aws` is renamed to
+`fixtures/secrets-token`; this also updates the M2 done-when fixture (`ScanPipelineIT`) and the sample dir
+`app/src/test/resources/samples/gitleaks` → `betterleaks`. The real open secret in `secscan-test-secrets` is an
+RSA private key (`config/deploy-key.pem`, `private-key`), which Betterleaks detects offline unchanged (same rule
+id, matched as the whole PEM block) — it is NOT affected by this fixture change and is not modified.
+Consequences: a reliably-detected synthetic secret under the new engine; no real project secret changes.
+
+## D-039 Gradle/NuGet static resolver is a Python 3 script in the scanner image (2026-10-17, accepted)
+Context: the M4b static Gradle resolver (and NuGet transitive resolution) must run where the clone exists and
+where OSV runs — inside the scanner container — so it cannot live in `core` as unit-testable Java. The existing
+in-container parsing precedent is POSIX sh + xmllint (`secscan-lib.sh`), but ≥95% accuracy on Gradle Groovy/
+Kotlin DSL plus TOML (`libs.versions.toml`) is not viable in busybox sh.
+Decision: implement the resolver as a Python 3 script shipped in the scanner image (slices 1–2). Binding
+constraints: stdlib only (TOML via `tomllib`, Python ≥ 3.11 — confirmed: Alpine 3.21 ships **python3 3.12.15**
+with `tomllib`); invoke as `python3 -I`; read scanned-repo files as DATA only, never import/exec/eval from the
+scanned tree (D-004); pin the `python3` apk version and record it when it is added; resolver unit tests run
+under `./gradlew build` (wired via a Gradle task) or, if impractical, `GradleResolverIT` is the gate. Python is
+NOT added to the image in slice 0 (no resolver yet) — only when slice 1 lands.
+Consequences: a maintainable, testable resolver; one new image dependency (python3) arriving in slice 1.
+Slice 1 (2026-10-18): the Gradle resolver landed as `scanner-image/gradle_resolver.py`, invoked `python3 -I`;
+the `python3` apk is pinned to **`python3=3.12.15-r0`** (Alpine 3.21, ships `tomllib`). Its unit tests
+(`gradle_resolver_test.py`) run on the host under `./gradlew build` via the `gradleResolverTest` task (the
+primary gate); the live-osv `ScaLiveScanIT` is the behavioural proof. NuGet transitive resolution (slice 2) is
+not yet done.
+
+## D-038 Gradle synthetic-pom path mapping anchors SCA fingerprints to the build file (2026-10-17, accepted)
+Context: the M4b Gradle resolver emits a synthetic `pom.xml` for OSV to resolve transitively, written OUTSIDE
+the clone so a scanned repo cannot plant one. OSV then reports the synthetic pom's `/work` path, which the
+parser's `UNRESOLVED_PATH` guard (D-035) would drop, and which must never enter a fingerprint anyway.
+Decision: synthetic poms live at `/work/synthetic/<n>/pom.xml` (outside the clone); the scanner manifest maps
+each to its originating `build.gradle` repo-relative path; the parser rewrites OSV's `source.path` to that
+build-file path BEFORE fingerprinting, so a Gradle SCA finding's fingerprint anchors to the real `build.gradle`.
+Anything that does not map (a stray `/work` path) still hits the `UNRESOLVED_PATH` guard and is dropped.
+Consequences: stable, meaningful Gradle SCA identities; the path-escape guard remains in force. (Implemented in
+slice 1.)
+Multi-module robustness note (2026-10-19): a multi-module project (≥2 lockfile-less build files ⇒ ≥2 synthetic
+poms) produced 0 SCA issues — OSV reported findings under `/work/synthetic/0` and `/work/synthetic/1` but the
+map did not carry them, so every finding hit `UNRESOLVED_PATH`. Root cause: the map was carried on the
+resolver's **stdout**, and when that stdout did not survive (a killed/OOM'd resolver after some poms were
+already written to disk), `run-scan.sh` fell back to an empty map while the pom files remained for OSV to scan —
+orphaning every Gradle finding. A single synthetic pom was cheaper and did not trip it. Fix: the resolver writes
+a `buildfile` sidecar beside each synthetic pom, and `run-scan.sh` builds the map by walking `$SYNTH` on disk
+(each `pom.xml` paired with its sidecar). The map is thus keyed on the pom's real path — exactly what OSV scans
+and reports — and can never be lost while the poms exist. The parser also normalizes both sides of the key
+(collapse `//`, strip a trailing `/`) as defense in depth. Guarded by a live-osv multi-module regression
+(`fixtures/sca-gradle-multimodule`, each module's finding anchored to its own `build.gradle`, `UNRESOLVED_PATH`
+count 0) and a 2-entry parser unit test. Separately, OSV's own stdout/stderr is now echoed to the (scrubbed)
+container log excerpt on an SCA failure so it is debuggable. No schema change.
+
+## D-037 Scanned-repo suppressions are ignored for every engine (2026-10-17, accepted; resolves OD-8 and the repo-config should-fix)
+Context: a scanned repository could otherwise hide its own findings via in-repo scanner config, ignore files or
+inline allow comments — unacceptable for a security product, where only SecScan's own audited triage may
+suppress.
+Decision: all in-repo suppressors are ignored for every current and future engine. A pinned config is baked
+into the scanner image and passed with `--config`; every in-repo config file, ignore file and inline allow
+comment is ignored. Only SecScan's own audited ignore rules suppress a finding (reason code + `triage_event`).
+Implemented in slice 0 for both current engines (verified against the real tools):
+- Betterleaks: `--config /etc/secscan/betterleaks.toml` (precedence #1, so an in-repo `.betterleaks.toml`/
+  `.gitleaks.toml` is ignored; `[extend] useDefault = true` keeps the full default rule set), plus
+  `--ignore-gitleaks-allow` (ignore inline `gitleaks:allow`/`betterleaks:allow`) and `--gitleaks-ignore-path`
+  pointed at a baked EMPTY file (so the repo's `.gitleaksignore`/`.betterleaksignore` is never read).
+- OSV-Scanner: `--config /etc/secscan/osv-scanner.toml` overrides any in-repo `osv-scanner.toml`
+  (`[[IgnoredVulns]]`/`[[PackageOverrides]]`) — verified against v2.7.0: an in-repo `[[IgnoredVulns]]` drops a
+  finding, and adding `--config` brings it back.
+Proven by `BetterleaksConfigInjectionIT` (secrets, default build) and `OsvConfigInjectionIT` (SCA, `live-osv`).
+Consequences: a repo cannot weaken its own scan; the pinned configs may only keep detection strong, never relax
+it.
+
+## D-036 Secrets engine Gitleaks 8.21.2 -> Betterleaks v1.7.3 (2026-10-17, accepted; resolves OD-7)
+Context: Gitleaks' name/repo control changed hands; the original author started Betterleaks
+(github.com/betterleaks/betterleaks, MIT) as its successor. Our rule is to pin every scanner by version +
+checksum (D-023/D-034). Done now (not later) because the secret group key is the rule id and the only stored
+secret is the test fixture, so the swap re-fingerprints nothing of value (D-029).
+Decision: adopt Betterleaks **v1.7.3** (no v2 exists yet). The release ships per-arch tarballs verified against
+the published `checksums.txt` before use:
+`linux_x64  (amd64) = 9d2ed6fc387bc1c3f95557d5539077b1ce422f0db5ec38db5f14a141ad2947bf`,
+`linux_arm64        = 0541cd2980964a6fb8ea768e8b9507c91a3c06229193462f33a3ecd9cb146b99`.
+The version is recorded in `scan.tool_versions` (key `betterleaks`). Validation stays OFF (no `--validation`
+flag → no live provider calls; `BetterleaksCommandTest` guards against it being added). In-repo suppressors are
+ignored (D-037). The scanner image tag stays `secscan-scanner:8.21.2` — a HISTORICAL identifier, not the engine
+version (D-034). Revisit at Betterleaks v2.
+Probed facts (v1.7.3, recorded not trusted): directory scan is `betterleaks dir <path>`; JSON report is an
+array of objects (Gitleaks-compatible fields `RuleID`/`File`/`StartLine`/`Secret`) or the literal `null` when
+clean (run-scan.sh tolerates both); exit codes with `--exit-code 2` are 0 = clean, 2 = leaks found, 1 (and any
+other) = error. AWS detection changed: `aws-access-token` is now a COMPOSITE rule (an access key ID paired with
+a validatable secret access key) and does not fire offline on a lone fake key, so the secrets fixture moved from
+a fake AWS key to a fake GitHub token (`github-pat`), whose rule id is identical across both engines (no id-map
+needed; see the M4b report).
+Consequences: a maintained, MIT secrets engine; one new pinned tool version + two new checksums. Any bump is new
+checksums + a new decision.
+
 ## D-035 .NET SCA uses OSV-Scanner's native .csproj/CPM extraction, not a custom input file (2026-10-16, accepted; supersedes the .NET fallback mechanism of D-031)
 Context: D-031 (and the SPEC) assumed OSV-Scanner could not read `.csproj` and that we would parse direct
 `<PackageReference>` versions ourselves and feed OSV a custom `osv-scanner.json` (`--lockfile osv-scanner:…`,
@@ -96,6 +245,16 @@ Decision: M4 assumes public registries (osv.dev/deps.dev online, D-006) and stor
 Detecting and handling private registries is deferred to M4b.
 Consequences: packages served only from a private registry may be unresolved in M4; no registry credentials are
 held anywhere.
+Implemented (M4b slice 3, 2026-10-18): the resolver DETECTS private feeds and WARNS (`PRIVATE_REGISTRY`,
+free-text code, no migration) — Gradle `repositories {}`/`maven { url }` in build.gradle(.kts) and
+settings.gradle(.kts), and NuGet `nuget.config <packageSources>`. A non-public host is reported HOST ONLY
+(everything up to the last `@` and the port are dropped and only a plain DNS hostname is emitted — not
+`urlsplit().hostname`, which reports part of a credential containing an unencoded `#`/`?`/`/` as the host;
+M4b review fix); `<packageSourceCredentials>` and any
+credential/token/property value are never read or emitted, and nothing credential-bearing reaches `/out`. The
+resolver NEVER fetches a private host (it stays Maven-Central-only, D-042), so a scanned repo cannot steer the
+fetcher at an arbitrary host (SSRF-shaped risk). Public hosts (Maven Central, google, gradlePluginPortal,
+api.nuget.org) never warn. This completes OD-3.
 
 ## D-031 Gradle/.NET without lockfiles in M4: warn + partial; static Gradle resolver is M4b (2026-10-16, accepted; partly resolves OD-1/OD-2)
 Context: OD-1 (Gradle without a lockfile) and OD-2 (.NET without `packages.lock.json`) had to be settled before

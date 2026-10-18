@@ -1,0 +1,8 @@
+// Multi-module Gradle project with NO lockfiles anywhere (M4b regression fixture). The root declares nothing
+// resolvable; each submodule (service, gateway) brings its own BOM-managed dependencies. Two lockfile-less
+// build files -> two synthetic poms (/work/synthetic/0 and /work/synthetic/1), which is the case that
+// regressed: multi-module findings must each anchor to their OWN build.gradle, never be dropped as
+// UNRESOLVED_PATH (D-038).
+plugins {
+    id 'java'
+}

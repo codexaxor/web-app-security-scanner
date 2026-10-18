@@ -1,0 +1,10 @@
+# SecScan pinned Betterleaks config (M4b / D-036 / D-037).
+#
+# Passed to `betterleaks dir` with --config, which is precedence #1 in Betterleaks' config resolution, so it
+# overrides any in-repo .betterleaks.toml / .gitleaks.toml (precedence #4). `useDefault = true` keeps
+# Betterleaks' full built-in rule set (442 rules in v1.7.3) — without it, --config REPLACES the defaults and the
+# scanner would detect nothing. We deliberately add NO [[rules]], no [allowlist] and no stopwords here: this
+# config may only ever keep detection as strong as the defaults, never relax it. A scanned repo cannot suppress
+# a finding; only SecScan's own audited ignore rules may (reason code + triage_event). See D-037.
+[extend]
+useDefault = true

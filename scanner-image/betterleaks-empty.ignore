@@ -1,0 +1,4 @@
+# SecScan: intentionally empty Betterleaks ignore file (M4b / D-037).
+# Passed to `betterleaks dir` with --gitleaks-ignore-path so the scanned repo's own .betterleaksignore /
+# .gitleaksignore (whose default lookup path is ".") is never read. It lists NO fingerprints, so it suppresses
+# nothing. Only SecScan's own audited ignore rules may suppress a finding (reason code + triage_event).

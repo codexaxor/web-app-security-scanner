@@ -1,0 +1,62 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "/work/synthetic/0/pom.xml",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "org.apache.commons:commons-text",
+            "version": "1.9",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/org.apache.commons/commons-text@1.9"
+          },
+          "groups": [
+            {
+              "ids": ["GHSA-599f-7c49-w659"],
+              "aliases": ["CVE-2022-42889", "GHSA-599f-7c49-w659"],
+              "max_severity": "9.8"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "id": "GHSA-599f-7c49-w659",
+              "affected": [
+                {
+                  "ranges": [
+                    { "events": [{ "introduced": "1.5" }, { "fixed": "1.10.0" }], "type": "ECOSYSTEM" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/work/synthetic/9/pom.xml",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "com.example:ghost",
+            "version": "1.0.0",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/com.example/ghost@1.0.0"
+          },
+          "groups": [
+            {
+              "ids": ["CVE-2021-0001"],
+              "aliases": ["CVE-2021-0001"],
+              "max_severity": "7.5"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

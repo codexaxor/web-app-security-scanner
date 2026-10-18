@@ -1,0 +1,12 @@
+// 'gateway' module: a non-web Spring Boot app with NO inline versions, governed by the same Boot BOM (2.6.5).
+// The plain spring-boot-starter pulls org.yaml:snakeyaml (1.29) transitively (CVE-2022-1471) but does NOT pull
+// tomcat-embed-core. Its findings must anchor to gateway/build.gradle -- distinct from the service module's
+// synthetic pom -- which is exactly the multi-module mapping the regression guards (D-038).
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '2.6.5'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+}

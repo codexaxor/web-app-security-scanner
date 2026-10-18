@@ -52,7 +52,7 @@ val buildScannerImage by tasks.registering(Exec::class) {
         "sh", "-c",
         """
         set -eu
-        hash="${'$'}(find scanner-image -type f -not -path '*/.*' -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)"
+        hash="${'$'}(find scanner-image -type f -not -path '*/.*' -not -path '*/__pycache__/*' -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)"
         label="${'$'}(docker image inspect -f '{{ index .Config.Labels "secscan.scanner.content-hash" }}' secscan-scanner:8.21.2 2>/dev/null || true)"
         if [ "${'$'}label" = "${'$'}hash" ]; then
             echo "scanner image secscan-scanner:8.21.2 is up to date (content-hash ${'$'}hash)"
@@ -66,4 +66,30 @@ val buildScannerImage by tasks.registering(Exec::class) {
 
 tasks.named<Test>("test") {
     dependsOn(buildScannerImage)
+}
+
+// D-039 gate: the static Gradle resolver (scanner-image/gradle_resolver.py) is Python, so its unit tests run
+// under the host python3 wired into the DEFAULT build. Offline, stdlib-only (unittest); a resolver regression
+// fails `./gradlew build`. The behavioural end-to-end proof (real transitive CVEs via OSV) is the live-osv
+// GradleResolverIT. NOTE: run WITHOUT `python3 -I` -- the test harness imports the resolver module from its
+// own directory; `-I` is only for the container invocation against untrusted repos.
+val gradleResolverTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the static Gradle resolver's Python unit tests (D-039)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("gradle_resolver.py")).withPropertyName("resolver")
+    inputs.file(scannerDir.resolve("gradle_resolver_test.py")).withPropertyName("resolverTest")
+    // A marker output so Gradle can treat the task as up to date when neither script changed.
+    val marker = layout.buildDirectory.file("gradle-resolver-test.ok")
+    outputs.file(marker)
+    // -B / PYTHONDONTWRITEBYTECODE: never write __pycache__ under scanner-image/ (it would churn the scanner
+    // image's content hash and dirty the tree).
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "gradle_resolver_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+tasks.named("check") {
+    dependsOn(gradleResolverTest)
 }

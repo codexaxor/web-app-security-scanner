@@ -1,0 +1,7 @@
+# SecScan pinned OSV-Scanner config (M4b / D-037).
+#
+# Passed to `osv-scanner scan source` with --config, which set/overrides the config file so OSV ignores any
+# in-repo osv-scanner.toml in the scanned tree (verified against v2.7.0: an in-repo [[IgnoredVulns]] drops a
+# finding; adding --config to this file brings it back). It intentionally declares NO [[IgnoredVulns]] and NO
+# [[PackageOverrides]]: a scanned repo cannot suppress or downgrade a vulnerability. Only SecScan's own audited
+# ignore rules may suppress a finding (reason code + triage_event). See D-037.

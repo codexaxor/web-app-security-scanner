@@ -64,7 +64,12 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
     @Autowired
     ScanRepository scans;
     @Autowired
+    ScanWarningRepository warnings;
+    @Autowired
     SubIssueRepository subIssues;
+
+    /** Scan id of the most recent {@link #scanFixture} call, so a test can assert on that scan's warnings. */
+    private UUID lastScanId;
     @Autowired
     GitlabConnectionRepository connections;
     @Autowired
@@ -93,6 +98,84 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
         });
     }
 
+    @Test
+    void gradleTransitiveCveIsFoundAndAnchoredToTheBuildFile() throws Exception {
+        // M4b "Done when": a Gradle repo WITHOUT a lockfile yields its expected TRANSITIVE CVEs. OSV cannot read
+        // build.gradle, so the static resolver (D-039) emits a synthetic Maven pom and OSV resolves it: the
+        // direct commons-text:1.12.0 is clean but pulls commons-lang3 (CVE-2025-48924). D-038: the finding
+        // anchors to build.gradle, never the synthetic /work path. Gradle findings are in the Maven ecosystem.
+        List<SubIssue> subs = scanFixture("sca-gradle");
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getType()).isEqualTo("sca");
+            assertThat(s.getPackageName()).isEqualTo("org.apache.commons:commons-lang3");
+            assertThat(s.getVulnId()).isEqualTo("CVE-2025-48924");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
+        // No SCA finding may carry a container/synthetic path (D-038).
+        assertThat(subs).filteredOn(s -> "sca".equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
+        // The test-scope dependency (commons-collections 3.2.1) is OVER-INCLUDED (slice-1 review): we resolve
+        // every non-buildSrc configuration and let OSV decide, matching how M4 scans real poms (OSV is
+        // scope-agnostic). So it DOES surface, anchored to build.gradle; principled dev/test exclusion is M7.
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getPackageName()).isEqualTo("commons-collections:commons-collections");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
+    }
+
+    @Test
+    void bomManagedGradleDependencyIsResolvedAndAnchoredToTheBuildFile() throws Exception {
+        // D-041: a Spring Boot + Cloud build with NO inline versions. The resolver imports the Boot and Cloud
+        // BOMs into the synthetic pom's <dependencyManagement>, emits the starters version-less, and injects the
+        // Boot BOM as a <type>pom> trigger (no inline-versioned dep exists). OSV then resolves the managed
+        // versions transitively, e.g. spring-boot-starter-web -> tomcat-embed-core (9.0.60, known CVEs).
+        List<SubIssue> subs = scanFixture("sca-gradle-bom");
+        assertThat(subs).anySatisfy(s -> {
+            assertThat(s.getType()).isEqualTo("sca");
+            // A BOM-managed transitive — declared with no version in build.gradle, resolved only via the BOM.
+            assertThat(s.getPackageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(s.getFilePath()).isEqualTo("build.gradle");
+        });
+        assertThat(subs).filteredOn(s -> "sca".equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
+    }
+
+    @Test
+    void multiModuleGradleFindingsEachAnchorToTheirOwnBuildFile() throws Exception {
+        // M4b regression (multi-module): a lockfile-less project with TWO build files -> TWO synthetic poms
+        // (/work/synthetic/0 and /1). Before the fix the synthetic->build-file map was lost for the second pom,
+        // so OSV's findings under both synthetic poms were dropped as UNRESOLVED_PATH and the scan produced 0 SCA
+        // issues. Now the map is derived from a per-pom on-disk sidecar, so EACH finding anchors to its OWN
+        // module's build.gradle (D-038). A single-pom fixture cannot catch this.
+        List<SubIssue> sca = scanFixture("sca-gradle-multimodule").stream()
+                .filter(s -> "sca".equals(s.getType())).toList();
+
+        // The 'service' (web) module's UNIQUE transitive (tomcat-embed-core, BOM-managed, no inline version)
+        // anchors to service/build.gradle.
+        assertThat(sca).anySatisfy(s -> {
+            assertThat(s.getPackageName()).isEqualTo("org.apache.tomcat.embed:tomcat-embed-core");
+            assertThat(s.getFilePath()).isEqualTo("service/build.gradle");
+        });
+        // The 'gateway' (non-web) module's transitive (snakeyaml, CVE-2022-1471) anchors to gateway/build.gradle.
+        assertThat(sca).anySatisfy(s -> {
+            assertThat(s.getPackageName()).isEqualTo("org.yaml:snakeyaml");
+            assertThat(s.getVulnId()).isEqualTo("CVE-2022-1471");
+            assertThat(s.getFilePath()).isEqualTo("gateway/build.gradle");
+        });
+        // Both modules' build files are represented among the Gradle findings (both synthetic poms mapped).
+        assertThat(sca).extracting(SubIssue::getFilePath)
+                .contains("service/build.gradle", "gateway/build.gradle");
+        // Correct per-module isolation, not a swapped/merged map: tomcat (web-only) never anchors to the gateway
+        // module, and no finding carries a container/synthetic path.
+        assertThat(sca).noneMatch(s -> "org.apache.tomcat.embed:tomcat-embed-core".equals(s.getPackageName())
+                && "gateway/build.gradle".equals(s.getFilePath()));
+        assertThat(sca).allSatisfy(s ->
+                assertThat(s.getFilePath()).doesNotContain("/work").doesNotContain("synthetic"));
+        // The guard that regressed: with both synthetic poms mapped, NOTHING is dropped as UNRESOLVED_PATH.
+        assertThat(warnings.findByScanId(lastScanId))
+                .noneMatch(w -> "UNRESOLVED_PATH".equals(w.getCode()));
+    }
+
     /** Builds a throwaway git repo from the named fixture, scans it through the real container, returns subs. */
     private List<SubIssue> scanFixture(String fixtureName) throws Exception {
         Path fixtureRepo = buildFixtureRepo(fixtureName);
@@ -109,6 +192,7 @@ class ScaLiveScanIT extends AbstractScanWorkerIT {
         processor.process(claimed.get(0));
 
         assertThat(scans.findById(scan.id()).orElseThrow().getStatus()).isEqualTo(Scan.STATUS_COMPLETED);
+        lastScanId = scan.id();
         return subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo.getId());
     }
 

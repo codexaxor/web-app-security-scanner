@@ -20,7 +20,11 @@ Claude Code never commits to, merges into, or pushes `main` or `develop`. Mergin
 3. Implement in slices; commit after each green `./gradlew build`
 4. `/finish-milestone M<N>` → build, self-review, write `docs/reports/M<N>.md`, commit, push the feature branch
 5. Fresh session, strongest model: `/review-pr M<N>`; paste report + review into the planning chat
-6. Fix findings on the same branch
+6. Fix findings on the same branch. **Before any manual pipeline check** (a real scan through api + worker)
+   after a parser, `core` or `app` change, rebuild and restart BOTH the api and the worker JVMs
+   (`docker compose up --build api worker`, or restart both `bootRun`s) as well as the scanner image. A matching
+   scanner-image content hash proves only the image is current, NOT the worker binary: in M4b a stale worker
+   still ran the old parser, and multi-module anchoring verified only after the worker was rebuilt.
 7. Human merges locally:
 ```bash
    ./gradlew build

@@ -31,7 +31,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * over a fixture repository with multiple commits, cloned offline via {@code file://}:
  *
  * <ol>
- *   <li>commit 1 has the fake AWS key &rarr; scan &rarr; the secret sub-issue is <b>open</b>;</li>
+ *   <li>commit 1 has the fake GitHub token &rarr; scan &rarr; the secret sub-issue is <b>open</b>;</li>
  *   <li>commit 2 removes it &rarr; scan &rarr; the sub-issue is <b>solved</b>;</li>
  *   <li>commit 3 re-adds it &rarr; scan &rarr; the <b>same</b> sub-issue is <b>reopened</b> (stable fingerprint).</li>
  * </ol>
@@ -44,13 +44,12 @@ class ReconcileLifecycleIT extends AbstractScanWorkerIT {
 
     private static final String WITH_KEY = """
             app.name=demo-service
-            aws.accessKeyId=AKIA3K7HB9QO2PX5TL4D
-            aws.secretAccessKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-            aws.region=us-east-1
+            github.token=ghp_0123456789abcdefABCDEF0123456789wXyZ
+            app.region=us-east-1
             """;
     private static final String WITHOUT_KEY = """
             app.name=demo-service
-            aws.region=us-east-1
+            app.region=us-east-1
             """;
 
     static Path workRoot;
@@ -110,7 +109,7 @@ class ReconcileLifecycleIT extends AbstractScanWorkerIT {
         SubIssue sub = afterFirst.get(0);
         UUID subId = sub.getId();
         assertThat(sub.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
-        assertThat(sub.getRuleId()).isEqualTo("aws-access-token");
+        assertThat(sub.getRuleId()).isEqualTo("github-pat");
         assertThat(groups.findAll()).singleElement()
                 .satisfies(g -> assertThat(g.getStatus()).isEqualTo("open"));
         assertThat(reasons(subId)).containsExactly(TriageEvent.REASON_SEEN);
