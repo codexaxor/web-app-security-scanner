@@ -54,18 +54,26 @@ checkout and `/work/synthetic`, resolving the synthetic poms **transitively** (d
 `python3 -I` so the scanned tree and CWD are off `sys.path` and a planted `json.py`/`tomllib.py` can never be
 imported (D-004); no build is ever executed.
 
-**BOM-managed versions (D-041, draft).** Spring Boot/Cloud Gradle builds declare most dependencies with no
-inline version (managed by a BOM). The resolver imports the relevant BOM(s) into the synthetic pom's
-`<dependencyManagement>` as `<scope>import</scope><type>pom</type>` and emits those dependencies **version-less**
-so OSV's transitive resolver fills the versions. BOMs come from the Spring Boot Gradle plugin version
-(`id 'org.springframework.boot' version 'X'`, Kotlin/`plugins`/legacy `spring-boot-gradle-plugin:X` forms) →
-`spring-boot-dependencies:X`; a `platform(...)`/`enforcedPlatform(...)` coordinate; and a `mavenBom "..."`
-import — with `${prop}` resolved from `ext{}` (incl. `set('p','v')`), `extra[...]` and `gradle.properties`.
-OSV's resolver only engages when the pom has a concrete-versioned dependency, so when every dependency is
-BOM-managed the resolver adds the first BOM as a versioned `<type>pom</type>` dependency purely to trigger
-resolution (a BOM pom contributes no packages of its own). A dependency with an EXPLICIT non-concrete version
-(range/dynamic/unresolved `$`) is still skipped+warned, and a version-less dependency with no BOM to manage it
-is skipped+warned.
+**BOM version expansion (D-042; supersedes D-041).** Spring Boot/Cloud Gradle builds declare most dependencies
+with no inline version (managed by a BOM). OSV's pomxml enricher does **not** inherit versions from a
+`<dependencyManagement>` BOM import — it filters version-less deps — so the resolver **fetches the governing
+BOM POMs from Maven Central itself** and writes a concrete `<version>` on every dependency it reports. It builds
+the managed-version map by reading each BOM's `<dependencyManagement>` and resolving `<properties>`
+interpolation, the `<parent>` chain (fetched too) and nested `<scope>import</scope><type>pom</type>` entries
+(fetched and merged recursively — `spring-boot-dependencies` imports ~24 sub-BOMs). BOM coordinates come from
+the Spring Boot plugin version (`id 'org.springframework.boot' version 'X'`, Kotlin/`plugins`/legacy
+`spring-boot-gradle-plugin:X`) → `spring-boot-dependencies:X`; `platform(...)`/`enforcedPlatform(...)`; and
+`mavenBom "..."` — with `${prop}` resolved from `ext{}` (incl. `set('p','v')`), `extra[...]` and
+`gradle.properties`. `<dependencyManagement>` is kept in the synthetic pom too (harmless). A dependency with an
+EXPLICIT non-concrete version (range/dynamic/unresolved `$`) is skipped+warned; a version-less dependency with
+no managing BOM is skipped+warned (`GRADLE_UNPARSEABLE_CONSTRUCT`); a BOM that cannot be fetched warns
+`GRADLE_BOM_FETCH_FAILED` and the scan continues.
+
+**Network (D-042).** The resolver step performs read-only HTTPS GETs of `.pom` files from ONE host only — Maven
+Central (`repo.maven.apache.org`, already allowed by D-033) or the mirror in `SECSCAN_MAVEN_BASE_URL` — with TLS
+verification always ON (never disabled) and cross-host redirects blocked. Fetches are bounded: per-POM timeout
+15s, total cap 200 POMs/run, parent depth 8, import depth 6, 10 MB response cap, and an in-run cache. No other
+host is contacted by the resolver; the rest of the scan keeps its existing network posture.
 
 It resolves **every non-`buildSrc` dependency configuration**
 (production and test) and lets OSV decide what to report — OSV is scope-agnostic (it reports a Maven

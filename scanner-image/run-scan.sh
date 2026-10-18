@@ -162,7 +162,7 @@ find "$CHECKOUT" -type f -name '*.csproj' 2>/dev/null | while read -r csproj; do
     done
 done
 
-# --- Static Gradle resolution (D-038/D-039) ---
+# --- Static Gradle resolution (D-038/D-039/D-041/D-042) ---
 # Emit a synthetic Maven pom OUTSIDE the clone for each Gradle build file that ships NO lockfile, so OSV can
 # resolve its TRANSITIVE dependencies (a locked project is resolved by OSV natively; a build-file-only project
 # otherwise finds nothing). Gradle findings therefore surface in OSV's MAVEN ecosystem. The resolver reads the
@@ -171,6 +171,15 @@ done
 # tmpfs /work. It is best-effort: on ANY failure we fall back to an empty map and the scan still runs (OSV over
 # the checkout, plus the MISSING_GRADLE_LOCKFILE inventory warning). The parser rewrites OSV's synthetic-pom
 # source path back to the build file before fingerprinting (D-038); an unmapped /work path is dropped (D-035).
+#
+# NETWORK (D-042): because OSV's pomxml enricher does NOT inherit versions from a <dependencyManagement> BOM
+# import, the resolver itself FETCHES the governing BOM POMs (Spring Boot/Cloud, platform(), mavenBom) so it can
+# write a concrete <version> on every dependency. It performs read-only HTTPS GETs of .pom files from ONE host
+# only -- Maven Central (repo.maven.apache.org, already allowed by D-033) or the mirror in
+# SECSCAN_MAVEN_BASE_URL -- with TLS verification always ON and cross-host redirects blocked (enforced in the
+# resolver). Fetches are bounded (per-POM timeout, total cap, recursion depth, in-run cache); a fetch failure
+# raises GRADLE_BOM_FETCH_FAILED and the scan continues. No build is executed; fetched POMs are parsed as data.
+# The rest of the scan keeps its existing network posture; only this step needs Maven-Central egress.
 SYNTH="$WORK/synthetic"
 RESOLVER_OUT="$WORK/resolver-out.json"
 SYNTH_MAP="$WORK/synthetic-map.json"

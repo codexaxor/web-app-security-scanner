@@ -14,6 +14,42 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-042 Gradle resolver fetches BOM POMs from Maven Central to pin every version (2026-10-18, accepted)
+Context: D-041 imported the governing BOM into the synthetic pom's `<dependencyManagement>` and emitted
+BOM-managed dependencies version-less, expecting OSV's `pomxml` transitive enricher to inherit the versions.
+Measured on ib-api-v2 (@3be435d5) this failed: OSV does NOT inherit versions from a `<dependencyManagement>`
+import and filters version-less dependencies as unscannable — only 44/151 (~29%) resolved, far below the ≥95%
+target. All inputs are static in `build.gradle`; we must not run a build (D-004) and must not guess (D-035).
+Decision: the resolver itself fetches the governing BOM POMs from Maven Central and writes a concrete
+`<version>` on EVERY dependency it reports, so OSV has nothing version-less to filter. It builds the managed-
+version map by reading each BOM's `<dependencyManagement>` and resolving `<properties>` interpolation, the
+`<parent>` chain (fetched too) and nested `<scope>import</scope><type>pom</type>` sub-BOMs (fetched + merged
+recursively — `spring-boot-dependencies` imports ~24). BOM coordinates are those D-041 already detects (Boot
+plugin version, `platform()`/`enforcedPlatform()`, `mavenBom "..."`, `${prop}` from ext/set/extra/properties).
+A dependency unresolved after full expansion → `GRADLE_UNPARSEABLE_CONSTRUCT` (never guessed/dropped); a BOM
+that cannot be fetched → `GRADLE_BOM_FETCH_FAILED`, scan continues. Network: read-only HTTPS GET of `.pom` from
+ONE host only — Maven Central (`repo.maven.apache.org`, already allowed by D-033) or the `SECSCAN_MAVEN_BASE_URL`
+mirror — TLS verification ALWAYS on (never disabled), cross-host redirects blocked, bounded (per-POM timeout
+15s, total cap 200/run, parent depth 8, import depth 6, 10 MB cap, in-run cache). `python3 -I` preserved;
+fetched POMs are parsed as data, never imported/executed; no build is run.
+Consequences: a new runtime egress need for the Gradle resolver step (Maven Central — within the D-033
+allowlist); a Boot+Cloud build fetched 60 POMs in ~2.7s and emitted concrete versions on every dependency
+(`spring-boot-starter-web`→`2.6.5`, `spring-cloud-starter-openfeign`→`3.1.4`). Supersedes the version-less
+emission (and BOM-as-`<type>pom>` trigger) of D-041; D-041's BOM detection is retained.
+
+## D-041 Gradle synthetic pom imports BOMs for Spring Boot/Cloud BOM-managed deps (2026-10-18, superseded by D-042)
+Context: M4b Gradle repos (Spring Boot/Cloud) declare most dependencies with no inline version (BOM-managed), so
+the D-038 synthetic pom listed only inline-versioned deps and OSV resolved almost nothing for them.
+Decision: detect the governing BOMs — Spring Boot Gradle plugin version → `spring-boot-dependencies`,
+`platform()`/`enforcedPlatform()`, `mavenBom "..."` (with `${prop}` from `ext{}`/`set()`/`extra[]`/
+`gradle.properties`) — import them into the synthetic pom's `<dependencyManagement>` as
+`<scope>import</scope><type>pom</type>`, emit BOM-managed deps version-less, and (because OSV's resolver only
+engages with a concrete-versioned dep) inject the first BOM as a `<type>pom>` trigger. Broaden ext interpolation
+to all declarations; surface a write failure as a warning.
+Consequences: the BOM DETECTION and ext interpolation are retained, but the version-less emission + trigger did
+not actually resolve versions in OSV (measured 44/151 on ib-api-v2) and are **superseded by D-042**, which
+fetches the BOMs and pins every version explicitly.
+
 ## D-040 Secrets fixture uses a fake GitHub PAT, not an AWS key (2026-10-17, accepted)
 Context: Betterleaks v1.7.3 reworked `aws-access-token` into a composite rule (an access key ID must be paired
 with a validatable secret access key) and does not fire offline on a lone fake AWS key; the old

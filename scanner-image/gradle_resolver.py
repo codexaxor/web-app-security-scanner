@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SecScan static Gradle dependency resolver (M4b, D-038 / D-039 / D-041).
+"""SecScan static Gradle dependency resolver (M4b, D-038 / D-039 / D-041 / D-042).
 
 Reads Gradle build files as DATA ONLY -- never import/exec/eval from the scanned tree (D-004) -- and emits a
 synthetic Maven ``pom.xml`` per build file so OSV-Scanner can resolve TRANSITIVE dependencies for Gradle
@@ -11,9 +11,8 @@ Invoked in the scanner container as::
     python3 -I gradle_resolver.py <checkout_dir> <synthetic_out_dir>
 
 ``-I`` (isolated) keeps the scanned tree and the CWD off ``sys.path`` so a planted ``json.py``/``tomllib.py``
-can never be imported; only the standard library is used (``tomllib`` for version catalogs -- Python >= 3.11).
-
-It prints a JSON OBJECT on stdout::
+can never be imported; only the standard library is used (``tomllib`` for version catalogs, ``urllib`` for the
+BOM fetch). It prints a JSON OBJECT on stdout::
 
     {"poms":     [{"syntheticPath": "/work/synthetic/0/pom.xml", "buildFile": "app/build.gradle"}, ...],
      "warnings": [{"code": "GRADLE_UNPARSEABLE_CONSTRUCT", "message": "...", "filePath": "app/build.gradle"}, ...]}
@@ -22,49 +21,60 @@ run-scan.sh records ``poms`` in the manifest (``syntheticPoms``) and passes ``<s
 parser rewrites OSV's ``source.path`` back to the build file before fingerprinting (D-038). ``warnings`` are
 appended to the scan's warnings so every skipped construct is a VISIBLE coverage gap (D-030), never silent.
 
-BOM-managed versions (D-041): Spring Boot/Cloud Gradle builds declare most dependencies with NO inline version
-(managed by a BOM). We import the relevant BOM(s) into the synthetic pom's ``<dependencyManagement>`` as
-``<scope>import</scope><type>pom</type>`` and emit such dependencies version-LESS, so OSV's transitive resolver
-fills the versions from the BOM. BOMs come from: the Spring Boot Gradle plugin version
-(``id 'org.springframework.boot' version 'X'`` / legacy ``spring-boot-gradle-plugin:X``) ->
-``org.springframework.boot:spring-boot-dependencies:X``; a ``platform(...)``/``enforcedPlatform(...)`` coordinate;
-and a ``mavenBom "..."`` import. BOM versions resolve ``${prop}`` from ``ext{}`` (incl. ``set('p','v')``),
-``extra[...]`` and ``gradle.properties``. OSV's resolver only engages when the pom has at least one
-concrete-versioned dependency, so when every dependency is BOM-managed we add the first BOM as a versioned
-``<type>pom</type>`` dependency purely to trigger resolution (a BOM pom contributes no packages of its own).
+BOM version expansion (D-042, supersedes D-041's version-less approach): OSV's pomxml enricher does NOT inherit
+versions from a ``<dependencyManagement>`` BOM import -- it filters version-less dependencies -- so the resolver
+itself FETCHES the governing BOM POMs from Maven Central and writes a concrete ``<version>`` on every
+dependency it reports. It builds the managed-version map by reading each BOM's ``<dependencyManagement>`` and
+resolving ``<properties>`` interpolation, the ``<parent>`` chain (fetched too) and nested
+``<scope>import</scope><type>pom</type>`` entries (fetched and merged recursively). BOM coordinates come from
+the Spring Boot Gradle plugin version (-> ``spring-boot-dependencies``), ``platform()``/``enforcedPlatform()``
+and ``mavenBom "..."`` (``${prop}`` resolved from ext{}/set()/extra[]/gradle.properties). A dependency still
+unresolved after full BOM expansion raises ``GRADLE_UNPARSEABLE_CONSTRUCT`` -- never guessed, never dropped.
 
-Config selection (slice-1 review): we resolve EVERY non-``buildSrc`` dependency configuration -- production AND
+Network (D-042): the resolver performs read-only HTTPS GETs of ``.pom`` files from ONE host -- Maven Central
+(``repo.maven.apache.org``) or the mirror in ``SECSCAN_MAVEN_BASE_URL`` -- with TLS verification ALWAYS ON
+(default context; never disabled) and cross-host redirects blocked. Fetches are bounded (per-POM timeout, total
+cap, parent/import recursion depth, response-size cap, in-run cache); a fetch failure raises
+``GRADLE_BOM_FETCH_FAILED`` for that BOM and the scan continues best-effort. No build is ever executed; fetched
+POMs are parsed as data, never imported/executed (D-004).
+
+Config selection (slice-1 review): resolve EVERY non-``buildSrc`` dependency configuration -- production AND
 test -- and let OSV decide what to report (OSV is scope-agnostic, matching how M4 scans real poms); keep wins.
 Principled dev/test exclusion (``include_dev_deps`` / ``DEV_DEPENDENCY``) is M7.
 
-Never guess (D-031 / D-035): a dependency with an EXPLICIT but non-concrete version (``1.2.+``, ``[1.0,2.0)``,
-an unresolved ``$ver``) is skipped and warned; a version-LESS dependency with no BOM to manage it is skipped and
-warned; buildSrc, ``apply from:``, ``resolutionStrategy`` and unresolved catalog aliases are warned.
-
-Best-effort: a parse error on one file is logged to stderr and that file is skipped; a write failure is
-surfaced as a warning (never a silent empty result); it never raises to the caller and never fails the scan.
+Best-effort: a parse error on one file is logged to stderr and skipped; a write failure is surfaced as a
+warning (never a silent empty result); it never raises to the caller and never fails the scan.
 """
 
 import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 
 try:
     import tomllib  # Python >= 3.11 (Alpine 3.21 ships python3 3.12.x)
 except ModuleNotFoundError:  # pragma: no cover - the image pins a python3 that has tomllib
     tomllib = None
 
-# The scan_warning code for a Gradle construct/version the static resolver cannot resolve (free text, no
-# migration). Each one is a coverage gap we SHOW, never hide (D-030).
+# scan_warning codes (free text, no migration). Coverage gaps we SHOW, never hide (D-030).
 WARN_CODE = "GRADLE_UNPARSEABLE_CONSTRUCT"
+WARN_FETCH = "GRADLE_BOM_FETCH_FAILED"
 
 _BOOT_DEPENDENCIES = ("org.springframework.boot", "spring-boot-dependencies")
 
-# A dependency-declaration configuration keyword. We over-include every non-buildSrc configuration (production
-# and test alike -- see the module docstring), so this matches the standard base configurations plus any
-# source-set/variant prefix of a known camelCase suffix (testImplementation, integrationTestImplementation,
-# debugRuntimeOnly, testFixturesApi, ...). It does NOT match arbitrary identifiers (classpath, id, exclude).
+# Maven Central fetch (D-042). TLS verification is ALWAYS on (default context); never disabled.
+DEFAULT_MAVEN_BASE = "https://repo.maven.apache.org/maven2"
+_PER_POM_TIMEOUT = 15        # seconds per POM GET
+_TOTAL_FETCH_CAP = 200       # max POMs fetched per scan run
+_PARENT_DEPTH = 8            # max <parent> chain depth
+_IMPORT_DEPTH = 6            # max nested <scope>import</scope> recursion
+_MAX_POM_BYTES = 10 * 1024 * 1024
+_PROP_RE = re.compile(r"\$\{([^}]+)\}")
+
 _BASE_CONFIGS = frozenset({
     "implementation", "api", "compile", "runtime", "compileOnly", "compileOnlyApi", "runtimeOnly",
     "providedCompile", "providedRuntime", "annotationProcessor", "developmentOnly", "kapt", "ksp",
@@ -72,12 +82,10 @@ _BASE_CONFIGS = frozenset({
 _CONFIG_VARIANT = re.compile(
     r"^[a-z][A-Za-z0-9]*(Implementation|CompileOnlyApi|CompileOnly|RuntimeOnly|AnnotationProcessor|Api|Compile|Runtime)$")
 
-# A concrete, pinned version OSV can match: non-empty and only version-safe characters. This single rule rejects
-# every non-concrete form at once -- a range ("[", "]", "(", ")", ","), a dynamic "+"/"*", an unresolved "$ver"
-# (the "$" is not allowed) and any whitespace -- so nothing is ever guessed (D-035). It also guarantees the
-# token is XML-safe for the synthetic pom.
+# A concrete, pinned version OSV can match: non-empty, version-safe characters only (rejects ranges, dynamic
+# "+"/"*", an unresolved "$"/"${", whitespace). Also guarantees XML-safety for the synthetic pom.
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")
-_MAX_FILE_BYTES = 5 * 1024 * 1024  # never read an absurdly large build file into memory
+_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 
 def log(message):
@@ -89,15 +97,15 @@ def _is_config(token):
     return token in _BASE_CONFIGS or bool(_CONFIG_VARIANT.match(token))
 
 
+def _concrete(version):
+    return bool(version) and "${" not in version and bool(_SAFE_TOKEN.match(version))
+
+
 # --- Comment stripping -------------------------------------------------------------------------------------
 
 def strip_comments(text):
-    """Remove ``/* ... */`` blocks and ``// ...`` line comments.
-
-    Approximate but safe: a ``//`` or ``/*`` inside a string literal is rare in a dependency declaration and the
-    worst case of a mis-strip is that we skip a line, never that we execute anything. Quoted ``g:a:v`` coordinates
-    contain no comment markers, so declarations are unaffected.
-    """
+    """Remove ``/* ... */`` blocks and ``// ...`` line comments (approximate but safe: a mis-strip only skips a
+    line, never executes anything)."""
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     out_lines = []
     for line in text.splitlines():
@@ -111,7 +119,6 @@ def strip_comments(text):
 # --- gradle.properties and in-file variables ---------------------------------------------------------------
 
 def parse_properties(path):
-    """Parse a ``gradle.properties`` file into ``{key: value}``; empty dict on any error."""
     props = {}
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as handle:
@@ -132,65 +139,58 @@ def parse_properties(path):
 
 
 def collect_variables(checkout, build_dir, build_text):
-    """Version variables visible to a build file: root + module ``gradle.properties`` plus string assignments in
-    the build file itself (D-041 broadens this to every ``ext{}`` form). Only literal string values are captured;
-    anything computed stays unresolved and its dependency is skipped (and warned)."""
+    """Version variables visible to a build file: root + module ``gradle.properties`` plus every ``ext{}`` form
+    in the build file. Only literal string values are captured; a captured extra never affects output unless a
+    ``${name}`` references it."""
     variables = {}
     variables.update(parse_properties(os.path.join(checkout, "gradle.properties")))
     if os.path.abspath(build_dir) != os.path.abspath(checkout):
         variables.update(parse_properties(os.path.join(build_dir, "gradle.properties")))
-    # Groovy ext.NAME = 'v' / def NAME = 'v'; Kotlin val NAME = "v".
     for match in re.finditer(r'(?:def|val)\s+(\w+)\s*=\s*["\']([^"\']+)["\']', build_text):
         variables[match.group(1)] = match.group(2)
     for match in re.finditer(r'ext\.(\w+)\s*=\s*["\']([^"\']+)["\']', build_text):
         variables[match.group(1)] = match.group(2)
-    # Groovy ext { set('NAME', 'v') } and Kotlin extra["NAME"] = "v" / val NAME by extra("v").
     for match in re.finditer(r'''\bset\(\s*["'](\w+)["']\s*,\s*["']([^"']+)["']''', build_text):
         variables[match.group(1)] = match.group(2)
     for match in re.finditer(r'''\bextra\[\s*["'](\w+)["']\s*\]\s*=\s*["']([^"']+)["']''', build_text):
         variables[match.group(1)] = match.group(2)
     for match in re.finditer(r'''\bval\s+(\w+)\s+by\s+extra\s*\(\s*["']([^"']+)["']''', build_text):
         variables[match.group(1)] = match.group(2)
-    # Bare assignments inside an ext{} / project scope: NAME = 'v' at the start of a line. Broad but harmless --
-    # captured variables are only consulted for ${name} interpolation, so an unused extra never affects output.
     for match in re.finditer(r'''(?m)^\s*(\w+)\s*=\s*["']([^"']+)["']''', build_text):
         variables.setdefault(match.group(1), match.group(2))
     return variables
 
 
 def resolve_interpolation(value, variables):
-    """Resolve ``$name`` / ``${name}`` against ``variables``. An unknown variable becomes a sentinel that fails
-    the concrete-version check, so the dependency is skipped rather than guessed."""
+    """Resolve ``$name`` / ``${name}`` against ``variables``; an unknown variable becomes a sentinel so the
+    dependency is skipped rather than guessed."""
     if "$" not in value:
         return value
 
     def repl(match):
         name = match.group(1) or match.group(2)
-        return variables.get(name, "\x00")  # sentinel: not version-safe -> skipped
+        return variables.get(name, "\x00")
 
     return re.sub(r"\$\{([A-Za-z0-9_.]+)\}|\$([A-Za-z0-9_]+)", repl, value)
 
 
 def _resolve_version(raw, variables):
-    """The concrete version string for a raw version token, or None when it is absent / not a concrete pin."""
+    """A concrete version for a raw version token, or None when it is absent / not a concrete pin."""
     if raw is None:
         return None
     value = resolve_interpolation(raw, variables)
     if value.startswith("latest.") or value == "latest":
-        return None  # dynamic selector: version-safe by characters, but not a concrete pin
+        return None
     return value if _SAFE_TOKEN.match(value) else None
 
 
 # --- Version catalog (gradle/libs.versions.toml) -----------------------------------------------------------
 
 def _norm(alias):
-    """Canonical catalog alias: Gradle maps ``-`` and ``_`` in aliases to ``.`` for the ``libs.`` accessor."""
     return alias.replace("-", ".").replace("_", ".")
 
 
 def _version_from_node(node, versions):
-    """A version string from a catalog version node: a plain string, a ``{ ref = }`` into [versions], or a
-    ``{ require/strictly/prefer = }`` constraint. Returns None when it cannot be reduced to a string."""
     if isinstance(node, str):
         return node
     if isinstance(node, dict):
@@ -203,9 +203,6 @@ def _version_from_node(node, versions):
 
 
 def load_version_catalog(checkout):
-    """Load ``gradle/libs.versions.toml`` into (libraries, bundles). ``libraries`` maps a normalized alias to a
-    ``(group, artifact, version_or_None)`` tuple; ``bundles`` maps a normalized alias to member aliases. Empty
-    on any error or when the catalog is absent."""
     libraries = {}
     bundles = {}
     if tomllib is None:
@@ -251,6 +248,193 @@ def load_version_catalog(checkout):
     return libraries, bundles
 
 
+# --- Maven Central BOM fetch + expansion (D-042) -----------------------------------------------------------
+
+def maven_base_url():
+    return (os.environ.get("SECSCAN_MAVEN_BASE_URL") or DEFAULT_MAVEN_BASE).rstrip("/")
+
+
+def pom_url(base, group, artifact, version):
+    return "/".join([base, group.replace(".", "/"), artifact, version, artifact + "-" + version + ".pom"])
+
+
+class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
+    """Block cross-host redirects so the resolver can reach only the configured Maven host."""
+
+    def __init__(self, allowed_host):
+        self.allowed_host = allowed_host
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).hostname != self.allowed_host:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class MavenFetcher:
+    """Read-only HTTPS GET of ``.pom`` files from ONE host. TLS verification is ALWAYS on (urllib's default
+    context verifies certificates; it is never disabled). Bounded by a per-POM timeout and a total-fetch cap,
+    with an in-run cache. Returns the POM text, or None on any failure (cap reached, timeout, HTTP/TLS error)."""
+
+    def __init__(self, base_url, timeout=_PER_POM_TIMEOUT, total_cap=_TOTAL_FETCH_CAP):
+        self.base_url = base_url
+        self.allowed_host = urlsplit(base_url).hostname
+        self.timeout = timeout
+        self.total_cap = total_cap
+        self.fetched = 0
+        self.cache = {}
+        self.opener = urllib.request.build_opener(_SameHostRedirect(self.allowed_host))
+
+    def fetch(self, group, artifact, version):
+        key = (group, artifact, version)
+        if key in self.cache:
+            return self.cache[key]
+        if self.fetched >= self.total_cap:
+            self.cache[key] = None
+            return None
+        url = pom_url(self.base_url, group, artifact, version)
+        self.fetched += 1
+        text = None
+        try:
+            req = urllib.request.Request(url, method="GET",
+                                         headers={"User-Agent": "secscan-gradle-resolver"})
+            with self.opener.open(req, timeout=self.timeout) as resp:  # default TLS context verifies certs
+                data = resp.read(_MAX_POM_BYTES + 1)
+            if len(data) <= _MAX_POM_BYTES:
+                text = data.decode("utf-8", errors="replace")
+            else:
+                log("POM too large, skipping: " + url)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log("BOM fetch failed " + url + ": " + str(exc))
+        self.cache[key] = text
+        return text
+
+
+def _ln(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _child(el, name):
+    for c in el:
+        if _ln(c.tag) == name:
+            return c
+    return None
+
+
+def _ctext(el, name):
+    c = _child(el, name)
+    return (c.text or "").strip() if c is not None and c.text else ""
+
+
+def parse_pom(text):
+    """Parse a Maven POM into ``(parent_or_None, properties, management)``; None on an unparseable/suspect POM.
+    ``management`` is a list of ``(group, artifact, version_raw, scope, type)``. DTD/entity POMs are refused
+    (defense against XML entity expansion -- Maven POMs never use them)."""
+    head = text[:4096].lower()
+    if "<!doctype" in head or "<!entity" in head:
+        return None
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    parent = None
+    pe = _child(root, "parent")
+    if pe is not None:
+        pg, pa, pv = _ctext(pe, "groupId"), _ctext(pe, "artifactId"), _ctext(pe, "version")
+        if pg and pa and pv:
+            parent = (pg, pa, pv)
+    properties = {}
+    props_el = _child(root, "properties")
+    if props_el is not None:
+        for c in props_el:
+            properties[_ln(c.tag)] = (c.text or "").strip()
+    management = []
+    dm = _child(root, "dependencyManagement")
+    if dm is not None:
+        deps = _child(dm, "dependencies")
+        if deps is not None:
+            for d in deps:
+                if _ln(d.tag) != "dependency":
+                    continue
+                mg, ma = _ctext(d, "groupId"), _ctext(d, "artifactId")
+                if mg and ma:
+                    management.append((mg, ma, _ctext(d, "version"), _ctext(d, "scope"), _ctext(d, "type")))
+    return parent, properties, management
+
+
+def _interp(value, props, limit=10):
+    """Resolve ``${name}`` against ``props`` (bounded, multi-level). An unknown name is left intact so the
+    result stays non-concrete and is reported as unresolved."""
+    if not value or "${" not in value:
+        return value
+    current = value
+    for _ in range(limit):
+        if "${" not in current:
+            break
+        nxt = _PROP_RE.sub(lambda m: props.get(m.group(1), m.group(0)), current)
+        if nxt == current:
+            break
+        current = nxt
+    return current
+
+
+def _effective_pom(group, artifact, version, fetcher, depth, seen):
+    """``(properties, management)`` for an artifact POM merged with its parent chain (child overrides parent).
+    ``management`` is ``{(group, artifact): (version_raw, scope, type)}``. Returns None only when THIS POM could
+    not be fetched (a fetch failure the caller surfaces); a parent fetch failure is skipped best-effort."""
+    text = fetcher.fetch(group, artifact, version)
+    if text is None:
+        return None
+    parsed = parse_pom(text)
+    if parsed is None:
+        return {}, {}
+    parent, properties, management = parsed
+    props = {}
+    managed = {}
+    if parent is not None and depth > 0 and parent not in seen:
+        seen.add(parent)
+        parent_eff = _effective_pom(parent[0], parent[1], parent[2], fetcher, depth - 1, seen)
+        if parent_eff is not None:
+            props.update(parent_eff[0])
+            managed.update(parent_eff[1])
+    props.update(properties)
+    props.setdefault("project.version", version)
+    props.setdefault("project.groupId", group)
+    for (mg, ma, mv, scope, mtype) in management:
+        managed[(mg, ma)] = (mv, scope, mtype)
+    return props, managed
+
+
+def build_managed_map(bom_coords, fetcher):
+    """``(merged_map, warnings)``: the concrete managed-version map for the given BOM coordinates, expanding
+    each BOM's parent chain, ``<properties>`` and nested ``<scope>import</scope>`` BOMs. ``merged_map`` is
+    ``{(group, artifact): version}`` (first declaration wins, Maven-style). ``warnings`` are ``(code, detail)``
+    for BOMs that could not be fetched (GRADLE_BOM_FETCH_FAILED)."""
+    merged = {}
+    warnings = []
+
+    def add_bom(coord, import_depth, seen_imports):
+        if coord in seen_imports or import_depth <= 0:
+            return
+        seen_imports.add(coord)
+        eff = _effective_pom(coord[0], coord[1], coord[2], fetcher, _PARENT_DEPTH, set())
+        if eff is None:
+            warnings.append((WARN_FETCH, "could not fetch BOM " + ":".join(coord)
+                             + " from Maven Central; its managed versions are unavailable"))
+            return
+        props, managed = eff
+        for (mg, ma), (mv, scope, mtype) in managed.items():
+            version = _interp(mv, props)
+            if scope == "import" and mtype == "pom":
+                if _concrete(version):
+                    add_bom((mg, ma, version), import_depth - 1, seen_imports)
+            elif _concrete(version) and (mg, ma) not in merged:
+                merged[(mg, ma)] = version
+
+    for coord in bom_coords:
+        add_bom(coord, _IMPORT_DEPTH, set())
+    return merged, warnings
+
+
 # --- Dependency / BOM extraction (syntactic; version resolution happens in resolve_build_file) -------------
 
 _COORD_RE = re.compile(r"""["']([^"']+)["']""")
@@ -260,9 +444,7 @@ _MAP_VERSION = re.compile(r"""\bversion\s*:\s*["']([^"']+)["']""")
 _LIBS_RE = re.compile(r"\blibs((?:\.[A-Za-z0-9_]+)+)")
 _PLATFORM_RE = re.compile(r"\b(?:enforcedPlatform|platform)\s*\(")
 _CONFIG_SCAN = re.compile(r"\b([a-zA-Z][A-Za-z0-9]*)\b")
-# Recognized non-dependency argument forms on a config line (internal/local): never a Maven coordinate.
 _INTERNAL_RE = re.compile(r"\b(project|files|fileTree|gradleApi|localGroovy|kotlin|gradleTestKit)\s*\(")
-# Spring Boot Gradle plugin, both the plugins-DSL `id '...' version 'X'` and the legacy classpath coordinate.
 _BOOT_PLUGIN_VERSION = re.compile(
     r"""id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s+version\s+["']([^"']+)["']""")
 _BOOT_PLUGIN_CLASSPATH = re.compile(r"""spring-boot-gradle-plugin:([^\s"')]+)""")
@@ -272,9 +454,8 @@ _MAVEN_BOM = re.compile(r"""\bmavenBom\s*\(?\s*["']([^"']+)["']""")
 
 
 def extract_from_line(line, libraries, bundles):
-    """``(deps, boms, warnings)`` RAW candidates for one line. Each element of ``deps``/``boms`` is a
-    ``(group, artifact, raw_version_or_None)`` tuple (version resolved later, knowing the BOM set). A
-    ``platform(...)``/``enforcedPlatform(...)`` argument is routed to ``boms``; everything else to ``deps``."""
+    """``(deps, boms, warnings)`` RAW candidates for one line. Elements are ``(group, artifact,
+    raw_version_or_None)``; a ``platform(...)``/``enforcedPlatform(...)`` argument routes to ``boms``."""
     deps, boms, warnings = [], [], []
     for match in _CONFIG_SCAN.finditer(line):
         if not _is_config(match.group(1)):
@@ -292,7 +473,6 @@ def _extract_argument(rest, libraries, bundles):
     def route(candidates):
         return ([], candidates) if is_bom else (candidates, [])
 
-    # 1) Version-catalog accessor: libs.foo.bar / libs.bundles.x.
     libs_match = _LIBS_RE.search(rest)
     if libs_match:
         segments = [s for s in libs_match.group(1).split(".") if s]
@@ -317,7 +497,6 @@ def _extract_argument(rest, libraries, bundles):
         d, b = route([entry])
         return d, b, []
 
-    # 2) Map notation: group: 'g', name: 'a', version: 'v' (version optional).
     if _MAP_NAME.search(rest):
         g = _MAP_GROUP.search(rest)
         n = _MAP_NAME.search(rest)
@@ -327,7 +506,6 @@ def _extract_argument(rest, libraries, bundles):
             return d, b, []
         return [], [], []
 
-    # 3) String notation: the first quoted token is the g:a[:v] coordinate (platform('g:a:v') unwraps for free).
     if _INTERNAL_RE.search(rest) and not is_bom:
         return [], [], []
     coord_match = _COORD_RE.search(rest)
@@ -352,6 +530,33 @@ def detect_boot_bom(text, variables):
     return None, False
 
 
+def _bom_coords(text, bom_candidates, variables, warnings):
+    """Concrete BOM coordinates to import, from the Boot plugin, mavenBom "..." and platform(...)."""
+    coords = []
+    boot_version, boot_present = detect_boot_bom(text, variables)
+    if boot_version:
+        coords.append((_BOOT_DEPENDENCIES[0], _BOOT_DEPENDENCIES[1], boot_version))
+    elif boot_present:
+        warnings.append((WARN_CODE, "Spring Boot plugin is applied but its version could not be resolved; "
+                         "spring-boot-dependencies BOM was not imported"))
+    for raw in _MAVEN_BOM.findall(text):
+        parts = raw.split(":")
+        version = _resolve_version(parts[2], variables) if len(parts) >= 3 else None
+        if len(parts) >= 3 and _SAFE_TOKEN.match(parts[0]) and _SAFE_TOKEN.match(parts[1]) and version:
+            coords.append((parts[0], parts[1], version))
+        else:
+            warnings.append((WARN_CODE, "mavenBom '" + raw + "' could not be resolved to a concrete version; "
+                             "not imported"))
+    for group, artifact, raw in bom_candidates:
+        version = _resolve_version(raw, variables)
+        if version:
+            coords.append((group, artifact, version))
+        else:
+            warnings.append((WARN_CODE, "platform BOM '" + group + ":" + artifact
+                             + "' could not be resolved to a concrete version; not imported"))
+    return list(dict.fromkeys(coords))
+
+
 # --- Synthetic pom -----------------------------------------------------------------------------------------
 
 def _xml_escape(value):
@@ -360,9 +565,8 @@ def _xml_escape(value):
 
 
 def build_synthetic_pom(index, deps, boms):
-    """The synthetic pom XML. ``deps`` are ``(group, artifact, version_or_None, is_pom)`` (a ``None`` version is
-    emitted version-less, managed by an imported BOM); ``boms`` are ``(group, artifact, version)`` imported into
-    ``<dependencyManagement>`` as ``<scope>import</scope><type>pom</type>``."""
+    """The synthetic pom XML: every dependency carries a concrete ``<version>`` (D-042). ``boms`` are also kept
+    as ``<dependencyManagement>`` imports (harmless, documents intent)."""
     lines = [
         '<project xmlns="http://maven.apache.org/POM/4.0.0">',
         "  <modelVersion>4.0.0</modelVersion>",
@@ -384,14 +588,11 @@ def build_synthetic_pom(index, deps, boms):
         lines.append("    </dependencies>")
         lines.append("  </dependencyManagement>")
     lines.append("  <dependencies>")
-    for group, artifact, version, is_pom in deps:
+    for group, artifact, version in deps:
         lines.append("    <dependency>")
         lines.append("      <groupId>" + _xml_escape(group) + "</groupId>")
         lines.append("      <artifactId>" + _xml_escape(artifact) + "</artifactId>")
-        if version is not None:
-            lines.append("      <version>" + _xml_escape(version) + "</version>")
-        if is_pom:
-            lines.append("      <type>pom</type>")
+        lines.append("      <version>" + _xml_escape(version) + "</version>")
         lines.append("    </dependency>")
     lines.append("  </dependencies>")
     lines.append("</project>")
@@ -400,16 +601,16 @@ def build_synthetic_pom(index, deps, boms):
 
 # --- Per-file resolution -----------------------------------------------------------------------------------
 
-def resolve_build_file(checkout, build_path, libraries, bundles):
-    """``(deps, boms, warning_details)`` for one build file. ``deps`` are ``(group, artifact, version_or_None,
-    is_pom)`` (keep wins + de-dup; ``None`` version = BOM-managed). ``boms`` are ``(group, artifact, version)``.
-    ``warning_details`` is one string per skipped dependency/construct (GRADLE_UNPARSEABLE_CONSTRUCT)."""
+def resolve_build_file(checkout, build_path, libraries, bundles, fetcher):
+    """``(deps, boms, warnings)`` for one build file. ``deps`` are ``(group, artifact, version)`` -- EVERY one
+    concrete (D-042), de-duplicated, keep wins. ``boms`` are the imported BOM coordinates. ``warnings`` are
+    ``(code, detail)``."""
     try:
         size = os.path.getsize(build_path)
     except OSError:
         return [], [], []
     if size > _MAX_FILE_BYTES:
-        return [], [], ["build file skipped: larger than " + str(_MAX_FILE_BYTES) + " bytes"]
+        return [], [], [(WARN_CODE, "build file skipped: larger than " + str(_MAX_FILE_BYTES) + " bytes")]
     try:
         with open(build_path, "r", encoding="utf-8", errors="replace") as handle:
             text = handle.read()
@@ -425,72 +626,38 @@ def resolve_build_file(checkout, build_path, libraries, bundles):
         d, b, w = extract_from_line(line, libraries, bundles)
         dep_candidates.extend(d)
         bom_candidates.extend(b)
-        warnings.extend(w)
+        warnings.extend((WARN_CODE, detail) for detail in w)
 
-    # --- BOM imports (D-041) ---
-    boms = []
-    boot_version, boot_present = detect_boot_bom(text, variables)
-    if boot_version:
-        boms.append((_BOOT_DEPENDENCIES[0], _BOOT_DEPENDENCIES[1], boot_version))
-    elif boot_present:
-        warnings.append("Spring Boot plugin is applied but its version could not be resolved; "
-                        "spring-boot-dependencies BOM was not imported")
-    for raw in _MAVEN_BOM.findall(text):
-        parts = raw.split(":")
-        version = _resolve_version(parts[2], variables) if len(parts) >= 3 else None
-        if len(parts) >= 3 and _SAFE_TOKEN.match(parts[0]) and _SAFE_TOKEN.match(parts[1]) and version:
-            boms.append((parts[0], parts[1], version))
-        else:
-            warnings.append("mavenBom '" + raw + "' could not be resolved to a concrete version; not imported")
-    for group, artifact, raw in bom_candidates:
-        version = _resolve_version(raw, variables)
-        if version:
-            boms.append((group, artifact, version))
-        else:
-            warnings.append("platform BOM '" + group + ":" + artifact
-                            + "' could not be resolved to a concrete version; not imported")
-    boms = list(dict.fromkeys(boms))
-    has_bom = bool(boms)
+    boms = _bom_coords(text, bom_candidates, variables, warnings)
+    managed, fetch_warnings = build_managed_map(boms, fetcher)
+    warnings.extend(fetch_warnings)
 
-    # --- Dependencies: concrete version wins; no-version is BOM-managed (if a BOM exists) else warned; an
-    #     explicit non-concrete version is always skipped+warned (the BOM manages only MISSING versions). ---
-    by_ga = {}  # (group, artifact) -> set of versions (None = version-less)
+    by_ga = {}
     for group, artifact, raw in dep_candidates:
         version = _resolve_version(raw, variables)
         ga = (group, artifact)
         if version is not None:
             by_ga.setdefault(ga, set()).add(version)
         elif raw is None:
-            if has_bom:
-                by_ga.setdefault(ga, set()).add(None)  # managed by an imported BOM
+            managed_version = managed.get(ga)
+            if managed_version is not None:
+                by_ga.setdefault(ga, set()).add(managed_version)
             else:
-                warnings.append("dependency '" + group + ":" + artifact
-                                + "' declared with no version and no BOM was imported to manage it")
+                warnings.append((WARN_CODE, "dependency '" + group + ":" + artifact
+                                 + "' has no version and no imported BOM manages it"))
         else:
-            warnings.append("dependency '" + group + ":" + artifact + "' has a non-concrete version '"
-                            + raw + "' (skipped, not guessed)")
+            warnings.append((WARN_CODE, "dependency '" + group + ":" + artifact + "' has a non-concrete version '"
+                             + raw + "' (skipped, not guessed)"))
 
     deps = []
     for (group, artifact), versions in by_ga.items():
-        concrete = sorted(v for v in versions if v is not None)
-        if concrete:
-            for v in concrete:
-                deps.append((group, artifact, v, False))
-        else:
-            deps.append((group, artifact, None, False))  # version-less, BOM-managed
+        for version in sorted(versions):
+            deps.append((group, artifact, version))
 
-    # OSV's transitive resolver only engages when the pom has a concrete-versioned dependency. When every
-    # dependency is BOM-managed (version-less), add the first BOM as a versioned <type>pom</type> dependency to
-    # trigger resolution -- a BOM pom contributes no packages of its own, so this adds no findings.
-    if has_bom and not any(v is not None for _, _, v, _ in deps) and any(v is None for _, _, v, _ in deps):
-        bg, ba, bv = boms[0]
-        deps.append((bg, ba, bv, True))
-
-    # Constructs a static reader cannot follow -- surfaced so the gap is visible (D-030), not silent.
     if re.search(r"\bapply\s+from\s*:", text):
-        warnings.append("`apply from:` applies an external script that was not followed")
+        warnings.append((WARN_CODE, "`apply from:` applies an external script that was not followed"))
     if "resolutionStrategy" in text:
-        warnings.append("`resolutionStrategy` version pinning/substitution was not applied")
+        warnings.append((WARN_CODE, "`resolutionStrategy` version pinning/substitution was not applied"))
 
     return deps, boms, list(dict.fromkeys(warnings))
 
@@ -503,9 +670,7 @@ def _has_lockfile(directory):
 
 
 def find_build_files(checkout):
-    """``(eligible, buildsrc)``: repo build files eligible for static resolution
-    (``build.gradle``/``build.gradle.kts`` with NO sibling lockfile -- a locked project is resolved by OSV
-    natively), and the ``buildSrc`` build files that were skipped (build logic, surfaced as a warning).
+    """``(eligible, buildsrc)``: build files with no sibling lockfile, and skipped ``buildSrc`` build files.
     Symlinks are never followed or read."""
     eligible = []
     buildsrc = []
@@ -521,7 +686,7 @@ def find_build_files(checkout):
                 buildsrc.append(candidate)
             elif not _has_lockfile(root):
                 eligible.append(candidate)
-    eligible.sort()  # stable synthetic indices regardless of walk order
+    eligible.sort()
     buildsrc.sort()
     return eligible, buildsrc
 
@@ -530,28 +695,30 @@ def _rel(checkout, path):
     return os.path.relpath(path, checkout).replace(os.sep, "/")
 
 
-def resolve(checkout, out_dir):
+def resolve(checkout, out_dir, fetcher=None):
     """Resolve the whole checkout: ``{"poms": [...], "warnings": [...]}``. Never raises."""
+    if fetcher is None:
+        fetcher = MavenFetcher(maven_base_url())
     poms = []
     warnings = []
 
-    def warn(detail, build_file):
-        warnings.append({"code": WARN_CODE, "message": build_file + ": " + detail, "filePath": build_file})
+    def warn(code, detail, build_file):
+        warnings.append({"code": code, "message": build_file + ": " + detail, "filePath": build_file})
 
     try:
         libraries, bundles = load_version_catalog(checkout)
         eligible, buildsrc = find_build_files(checkout)
         for build_path in buildsrc:
-            warn("buildSrc build logic is not resolved (dependencies declared here are not scanned)",
+            warn(WARN_CODE, "buildSrc build logic is not resolved (dependencies declared here are not scanned)",
                  _rel(checkout, build_path))
         index = 0
         for build_path in eligible:
             rel = _rel(checkout, build_path)
-            deps, boms, details = resolve_build_file(checkout, build_path, libraries, bundles)
-            for detail in details:
-                warn(detail, rel)
+            deps, boms, details = resolve_build_file(checkout, build_path, libraries, bundles, fetcher)
+            for code, detail in details:
+                warn(code, detail, rel)
             if not deps:
-                continue  # nothing to resolve -> no synthetic pom (warnings above record the gaps)
+                continue
             pom_dir = os.path.join(out_dir, str(index))
             pom_path = os.path.join(pom_dir, "pom.xml")
             try:
@@ -559,9 +726,8 @@ def resolve(checkout, out_dir):
                 with open(pom_path, "w", encoding="utf-8") as handle:
                     handle.write(build_synthetic_pom(index, deps, boms))
             except OSError as exc:
-                # A write/permission failure is a VISIBLE coverage gap (D-030), never a silent empty result.
-                warn("could not write the synthetic pom (" + str(exc) + "); its dependencies were not scanned",
-                     rel)
+                warn(WARN_CODE, "could not write the synthetic pom (" + str(exc)
+                     + "); its dependencies were not scanned", rel)
                 continue
             poms.append({"syntheticPath": os.path.abspath(pom_path), "buildFile": rel})
             index += 1

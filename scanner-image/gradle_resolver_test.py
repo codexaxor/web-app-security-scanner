@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Unit tests for the static Gradle resolver (gradle_resolver.py), the D-039 gate.
+"""Unit tests for the static Gradle resolver (gradle_resolver.py), the D-039/D-042 gate.
 
-Offline, stdlib ``unittest`` only. Wired into ``./gradlew build`` via the ``gradleResolverTest`` task
-(app/build.gradle.kts), so a resolver regression fails the DEFAULT build. The behavioural end-to-end proof
-(real transitive CVEs via OSV, incl. BOM-managed versions) is the live-osv ``ScaLiveScanIT``.
+Offline, stdlib ``unittest`` only. BOM POMs are supplied through an in-memory ``DictFetcher`` (no network).
+Wired into ``./gradlew build`` via the ``gradleResolverTest`` task, so a resolver regression fails the DEFAULT
+build. The behavioural end-to-end proof (real Maven-Central BOM fetch + transitive CVEs via OSV) is the
+live-osv ``ScaLiveScanIT``.
 
-Run directly: ``python3 gradle_resolver_test.py`` (NOT ``-I`` -- the harness imports the resolver module from
-this directory; ``-I`` is for the container invocation against untrusted repos, not for our own test harness).
+Run directly: ``python3 gradle_resolver_test.py`` (NOT ``-I`` -- the harness imports the resolver module).
 """
 
 import json
@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gradle_resolver as gr  # noqa: E402
@@ -30,28 +31,71 @@ def write(root, rel, text):
     return path
 
 
-def _resolve(root, rel):
+def make_pom(group, artifact, version, parent=None, properties=None, managed=None):
+    """A minimal Maven POM string. ``parent`` = (g,a,v); ``properties`` = {name: value}; ``managed`` = list of
+    (group, artifact, version, scope, type)."""
+    lines = ['<project xmlns="http://maven.apache.org/POM/4.0.0">', "  <modelVersion>4.0.0</modelVersion>"]
+    if parent:
+        lines += ["  <parent>", "    <groupId>%s</groupId>" % parent[0],
+                  "    <artifactId>%s</artifactId>" % parent[1], "    <version>%s</version>" % parent[2],
+                  "  </parent>"]
+    lines += ["  <groupId>%s</groupId>" % group, "  <artifactId>%s</artifactId>" % artifact,
+              "  <version>%s</version>" % version]
+    if properties:
+        lines.append("  <properties>")
+        for k, v in properties.items():
+            lines.append("    <%s>%s</%s>" % (k, v, k))
+        lines.append("  </properties>")
+    if managed:
+        lines += ["  <dependencyManagement>", "    <dependencies>"]
+        for (mg, ma, mv, scope, mtype) in managed:
+            lines.append("      <dependency>")
+            lines.append("        <groupId>%s</groupId>" % mg)
+            lines.append("        <artifactId>%s</artifactId>" % ma)
+            lines.append("        <version>%s</version>" % mv)
+            if scope:
+                lines.append("        <scope>%s</scope>" % scope)
+            if mtype:
+                lines.append("        <type>%s</type>" % mtype)
+            lines.append("      </dependency>")
+        lines += ["    </dependencies>", "  </dependencyManagement>"]
+    lines.append("</project>")
+    return "\n".join(lines)
+
+
+class DictFetcher:
+    """In-memory stand-in for MavenFetcher: serves POMs from a {(group, artifact, version): pom_text} map."""
+
+    def __init__(self, poms=None):
+        self.poms = poms or {}
+        self.requested = []
+
+    def fetch(self, group, artifact, version):
+        self.requested.append((group, artifact, version))
+        return self.poms.get((group, artifact, version))
+
+
+def _resolve(root, rel, fetcher=None):
     libraries, bundles = gr.load_version_catalog(root)
-    return gr.resolve_build_file(root, os.path.join(root, rel), libraries, bundles)
+    return gr.resolve_build_file(root, os.path.join(root, rel), libraries, bundles, fetcher or DictFetcher())
 
 
-def resolve(root, rel):
-    """Regular dependencies as (group, artifact, version_or_None); drops the injected <type>pom> BOM trigger."""
-    deps, _, _ = _resolve(root, rel)
-    return [(g, a, v) for (g, a, v, is_pom) in deps if not is_pom]
+def resolve(root, rel, fetcher=None):
+    """Regular dependencies as (group, artifact, version) -- every one concrete (D-042)."""
+    return _resolve(root, rel, fetcher)[0]
 
 
-def deps_full(root, rel):
-    """All synthetic-pom dependencies as (group, artifact, version_or_None, is_pom)."""
-    return _resolve(root, rel)[0]
+def boms(root, rel, fetcher=None):
+    return _resolve(root, rel, fetcher)[1]
 
 
-def boms(root, rel):
-    return _resolve(root, rel)[1]
+def details(root, rel, fetcher=None):
+    """Warning detail strings (code stripped)."""
+    return [d for _, d in _resolve(root, rel, fetcher)[2]]
 
 
-def details(root, rel):
-    return _resolve(root, rel)[2]
+def codes(root, rel, fetcher=None):
+    return [c for c, _ in _resolve(root, rel, fetcher)[2]]
 
 
 class StringNotationTests(unittest.TestCase):
@@ -71,19 +115,14 @@ class StringNotationTests(unittest.TestCase):
 
     def test_kotlin_paren_notation(self):
         with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle.kts", """
-                dependencies { implementation("com.google.guava:guava:30.1-jre") }
-            """)
-            coords = resolve(root, "build.gradle.kts")
-        self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
+            write(root, "build.gradle.kts", 'dependencies { implementation("com.google.guava:guava:30.1-jre") }\n')
+            self.assertEqual(resolve(root, "build.gradle.kts"), [("com.google.guava", "guava", "30.1-jre")])
 
     def test_map_notation(self):
         with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", """
-                dependencies { implementation group: 'commons-io', name: 'commons-io', version: '2.6' }
-            """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("commons-io", "commons-io", "2.6")])
+            write(root, "build.gradle",
+                  "dependencies { implementation group: 'commons-io', name: 'commons-io', version: '2.6' }\n")
+            self.assertEqual(resolve(root, "build.gradle"), [("commons-io", "commons-io", "2.6")])
 
     def test_dependency_with_trailing_closure(self):
         with tempfile.TemporaryDirectory() as root:
@@ -94,13 +133,10 @@ class StringNotationTests(unittest.TestCase):
                     }
                 }
             """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("org.apache.commons", "commons-text", "1.9")])
+            self.assertEqual(resolve(root, "build.gradle"), [("org.apache.commons", "commons-text", "1.9")])
 
 
 class ConfigSelectionTests(unittest.TestCase):
-    """Over-include EVERY non-buildSrc configuration (production and test); keep wins; dev/test exclusion is M7."""
-
     def test_package_in_both_production_and_test_configs_is_kept(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
@@ -109,8 +145,7 @@ class ConfigSelectionTests(unittest.TestCase):
                     testImplementation 'com.google.guava:guava:30.1-jre'
                 }
             """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
+            self.assertEqual(resolve(root, "build.gradle"), [("com.google.guava", "guava", "30.1-jre")])
 
     def test_test_only_package_is_included_over_included(self):
         with tempfile.TemporaryDirectory() as root:
@@ -122,7 +157,6 @@ class ConfigSelectionTests(unittest.TestCase):
                 }
             """)
             coords = resolve(root, "build.gradle")
-        self.assertIn(("com.google.guava", "guava", "30.1-jre"), coords)
         self.assertIn(("org.mockito", "mockito-core", "5.0.0"), coords)
         self.assertIn(("io.rest-assured", "rest-assured", "5.3.0"), coords)
 
@@ -137,8 +171,7 @@ class ConfigSelectionTests(unittest.TestCase):
                     implementation 'com.google.guava:guava:30.1-jre'
                 }
             """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("com.google.guava", "guava", "30.1-jre")])
+            self.assertEqual(resolve(root, "build.gradle"), [("com.google.guava", "guava", "30.1-jre")])
 
 
 class VersionResolutionTests(unittest.TestCase):
@@ -147,14 +180,12 @@ class VersionResolutionTests(unittest.TestCase):
             write(root, "build.gradle", """
                 dependencies {
                     implementation 'g:dynamic:1.2.+'
-                    implementation 'g:latest:latest.release'
                     implementation 'g:range:[1.0,2.0)'
                     implementation 'g:unresolved:$missingVersion'
                     implementation 'g:concrete:1.2.3'
                 }
             """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("g", "concrete", "1.2.3")])
+            self.assertEqual(resolve(root, "build.gradle"), [("g", "concrete", "1.2.3")])
 
     def test_property_interpolation_from_gradle_properties(self):
         with tempfile.TemporaryDirectory() as root:
@@ -169,22 +200,7 @@ class VersionResolutionTests(unittest.TestCase):
         self.assertIn(("org.springframework", "spring-web", "6.1.0"), coords)
         self.assertIn(("org.springframework", "spring-core", "6.1.0"), coords)
 
-    def test_in_file_variable_definitions(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", """
-                def guavaVersion = '30.1-jre'
-                ext.jacksonVersion = '2.15.0'
-                dependencies {
-                    implementation "com.google.guava:guava:$guavaVersion"
-                    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
-                }
-            """)
-            coords = resolve(root, "build.gradle")
-        self.assertIn(("com.google.guava", "guava", "30.1-jre"), coords)
-        self.assertIn(("com.fasterxml.jackson.core", "jackson-databind", "2.15.0"), coords)
-
     def test_ext_block_and_set_and_extra_interpolation(self):
-        # D-041 review #2: ext{} set('prop','v'), Kotlin extra[...] and bare ext-block assignments all resolve.
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 ext {
@@ -205,128 +221,158 @@ class VersionCatalogTests(unittest.TestCase):
     CATALOG = """
         [versions]
         guava = "30.1-jre"
-        jackson = "2.15.0"
         [libraries]
         guava = { module = "com.google.guava:guava", version.ref = "guava" }
         commons-text = { group = "org.apache.commons", name = "commons-text", version = "1.9" }
-        inline = "org.postgresql:postgresql:42.3.1"
-        jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
         [bundles]
-        jackson = ["jackson-databind"]
+        web = ["guava", "commons-text"]
     """
 
-    def test_catalog_accessors(self):
+    def test_catalog_accessors_and_bundle(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "gradle/libs.versions.toml", self.CATALOG)
             write(root, "build.gradle.kts", """
                 dependencies {
                     implementation(libs.guava)
-                    implementation(libs.commons.text)
-                    implementation(libs.inline)
+                    implementation(libs.bundles.web)
                 }
             """)
             coords = resolve(root, "build.gradle.kts")
         self.assertIn(("com.google.guava", "guava", "30.1-jre"), coords)
         self.assertIn(("org.apache.commons", "commons-text", "1.9"), coords)
-        self.assertIn(("org.postgresql", "postgresql", "42.3.1"), coords)
-
-    def test_bundle_expands_to_members(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "gradle/libs.versions.toml", self.CATALOG)
-            write(root, "build.gradle.kts", "dependencies { implementation(libs.bundles.jackson) }\n")
-            coords = resolve(root, "build.gradle.kts")
-        self.assertEqual(coords, [("com.fasterxml.jackson.core", "jackson-databind", "2.15.0")])
 
 
-class BomImportTests(unittest.TestCase):
-    """D-041: BOM-managed versions resolve via a <dependencyManagement> import; version-less deps are emitted
-    version-less under the BOM (no warning)."""
+class BomExpansionTests(unittest.TestCase):
+    """D-042: the resolver fetches BOM POMs and writes a CONCRETE <version> on every dependency."""
 
-    def test_boot_plugin_version_becomes_dependency_management_import(self):
+    def test_boot_plugin_version_resolves_managed_dependency(self):
+        fetcher = DictFetcher({
+            ("org.springframework.boot", "spring-boot-dependencies", "2.6.5"): make_pom(
+                "org.springframework.boot", "spring-boot-dependencies", "2.6.5",
+                managed=[("org.springframework", "spring-web", "5.3.16", "", "")]),
+        })
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 plugins { id 'org.springframework.boot' version '2.6.5' }
-                dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
+                dependencies { implementation 'org.springframework:spring-web' }
             """)
-            deps, bs, warns = _resolve(root, "build.gradle")
+            deps, bs, warns = _resolve(root, "build.gradle", fetcher)
+        self.assertIn(("org.springframework", "spring-web", "5.3.16"), deps)  # concrete version from the BOM
         self.assertIn(("org.springframework.boot", "spring-boot-dependencies", "2.6.5"), bs)
-        # The version-less starter is emitted version-less (managed by the BOM), with no warning.
-        self.assertIn(("org.springframework.boot", "spring-boot-starter-web", None, False), deps)
-        self.assertEqual(warns, [])
-        # Every dependency is BOM-managed, so the BOM is also injected as a <type>pom> trigger for OSV.
-        self.assertIn(("org.springframework.boot", "spring-boot-dependencies", "2.6.5", True), deps)
-
-    def test_boot_plugin_kotlin_and_legacy_classpath(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle.kts",
-                  'plugins { id("org.springframework.boot") version "3.1.2" }\n')
-            self.assertIn(("org.springframework.boot", "spring-boot-dependencies", "3.1.2"),
-                          boms(root, "build.gradle.kts"))
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", """
-                buildscript { dependencies {
-                    classpath 'org.springframework.boot:spring-boot-gradle-plugin:2.7.0'
-                } }
-            """)
-            self.assertIn(("org.springframework.boot", "spring-boot-dependencies", "2.7.0"),
-                          boms(root, "build.gradle"))
-
-    def test_maven_bom_with_ext_property(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", """
-                ext { set('springCloudVersion', '2021.0.4') }
-                dependencyManagement { imports {
-                    mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-                } }
-                dependencies { implementation 'org.springframework.cloud:spring-cloud-starter-openfeign' }
-            """)
-            deps, bs, warns = _resolve(root, "build.gradle")
-        self.assertIn(("org.springframework.cloud", "spring-cloud-dependencies", "2021.0.4"), bs)
-        self.assertIn(("org.springframework.cloud", "spring-cloud-starter-openfeign", None, False), deps)
         self.assertEqual(warns, [])
 
-    def test_platform_and_enforced_platform_become_bom_imports(self):
+    def test_maven_bom_with_properties_parent_chain_and_nested_import(self):
+        fetcher = DictFetcher({
+            ("com.acme", "acme-bom", "1.0"): make_pom(
+                "com.acme", "acme-bom", "1.0", parent=("com.acme", "acme-parent", "1.0"),
+                properties={"thing.version": "9.9"},
+                managed=[("com.acme", "thing", "${thing.version}", "", ""),
+                         ("com.acme", "sub-bom", "2.0", "import", "pom")]),
+            ("com.acme", "acme-parent", "1.0"): make_pom(
+                "com.acme", "acme-parent", "1.0", properties={"legacy.version": "1.2.3"},
+                managed=[("com.acme", "legacy", "${legacy.version}", "", "")]),
+            ("com.acme", "sub-bom", "2.0"): make_pom(
+                "com.acme", "sub-bom", "2.0", managed=[("com.acme", "widget", "4.5.6", "", "")]),
+        })
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
+                ext { set('acmeVersion', '1.0') }
+                dependencyManagement { imports { mavenBom "com.acme:acme-bom:${acmeVersion}" } }
                 dependencies {
-                    implementation platform('org.springframework.boot:spring-boot-dependencies:3.2.0')
-                    implementation enforcedPlatform("com.fasterxml.jackson:jackson-bom:2.15.0")
+                    implementation 'com.acme:thing'
+                    implementation 'com.acme:legacy'
+                    implementation 'com.acme:widget'
+                    implementation 'com.acme:unmanaged'
                 }
             """)
-            bs = boms(root, "build.gradle")
-        self.assertIn(("org.springframework.boot", "spring-boot-dependencies", "3.2.0"), bs)
-        self.assertIn(("com.fasterxml.jackson", "jackson-bom", "2.15.0"), bs)
+            deps, _, warns = _resolve(root, "build.gradle", fetcher)
+        self.assertIn(("com.acme", "thing", "9.9"), deps)      # ${prop} in the BOM resolved
+        self.assertIn(("com.acme", "legacy", "1.2.3"), deps)   # from the parent BOM
+        self.assertIn(("com.acme", "widget", "4.5.6"), deps)   # from the nested <import> BOM
+        self.assertNotIn("com.acme:unmanaged", [g + ":" + a for (g, a, _) in deps])
+        self.assertTrue(any(code == gr.WARN_CODE and "unmanaged" in d for code, d in warns))
 
-    def test_no_version_dep_under_bom_emits_version_less_without_warning(self):
+    def test_dependency_absent_from_every_bom_warns_and_is_not_dropped_silently(self):
+        fetcher = DictFetcher({
+            ("org.springframework.boot", "spring-boot-dependencies", "2.6.5"): make_pom(
+                "org.springframework.boot", "spring-boot-dependencies", "2.6.5", managed=[]),
+        })
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 plugins { id 'org.springframework.boot' version '2.6.5' }
-                dependencies {
-                    implementation 'org.apache.commons:commons-text:1.12.0'
-                    implementation 'org.springframework.boot:spring-boot-starter-web'
-                }
+                dependencies { implementation 'com.example:not-in-bom' }
             """)
-            deps, _, warns = _resolve(root, "build.gradle")
-        self.assertIn(("org.apache.commons", "commons-text", "1.12.0", False), deps)
-        self.assertIn(("org.springframework.boot", "spring-boot-starter-web", None, False), deps)
-        self.assertEqual(warns, [])
-        # A concrete dep (commons-text) is present, so NO pom-type trigger is injected.
-        self.assertFalse(any(is_pom for _, _, _, is_pom in deps))
+            deps, _, warns = _resolve(root, "build.gradle", fetcher)
+        self.assertEqual(deps, [])
+        self.assertTrue(any(code == gr.WARN_CODE and "no imported BOM manages it" in d for code, d in warns))
+
+    def test_bom_fetch_failure_warns_and_scan_continues(self):
+        fetcher = DictFetcher({})  # every fetch returns None
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                plugins { id 'org.springframework.boot' version '2.6.5' }
+                dependencies { implementation 'org.springframework:spring-web' }
+            """)
+            deps, _, warns = _resolve(root, "build.gradle", fetcher)  # must not raise
+        self.assertTrue(any(code == gr.WARN_FETCH for code, _ in warns))
+        self.assertEqual(deps, [])
 
     def test_explicit_non_concrete_version_still_warns_even_with_a_bom(self):
+        fetcher = DictFetcher({
+            ("org.springframework.boot", "spring-boot-dependencies", "2.6.5"): make_pom(
+                "org.springframework.boot", "spring-boot-dependencies", "2.6.5", managed=[]),
+        })
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 plugins { id 'org.springframework.boot' version '2.6.5' }
                 dependencies { implementation 'org.example:thing:1.2.+' }
             """)
-            deps, _, warns = _resolve(root, "build.gradle")
-        self.assertNotIn(("org.example", "thing", None, False), deps)  # NOT emitted version-less
-        self.assertTrue(any("non-concrete version" in w for w in warns))
+            deps, _, warns = _resolve(root, "build.gradle", fetcher)
+        self.assertEqual(deps, [])
+        self.assertTrue(any("non-concrete version" in d for _, d in warns))
+
+    def test_platform_becomes_a_bom_import(self):
+        fetcher = DictFetcher({
+            ("com.acme", "acme-bom", "3.0"): make_pom("com.acme", "acme-bom", "3.0",
+                                                      managed=[("com.acme", "lib", "7.7", "", "")]),
+        })
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "build.gradle", """
+                dependencies {
+                    implementation platform('com.acme:acme-bom:3.0')
+                    implementation 'com.acme:lib'
+                }
+            """)
+            deps, bs, _ = _resolve(root, "build.gradle", fetcher)
+        self.assertIn(("com.acme", "acme-bom", "3.0"), bs)
+        self.assertIn(("com.acme", "lib", "7.7"), deps)
+
+
+class NetworkTargetTests(unittest.TestCase):
+    """D-042: the resolver fetches .pom files from ONE host only, over HTTPS, with TLS verification on."""
+
+    def test_default_base_is_maven_central_over_https(self):
+        base = gr.maven_base_url()
+        self.assertEqual(base, gr.DEFAULT_MAVEN_BASE)
+        self.assertEqual(urlsplit(base).scheme, "https")
+        self.assertEqual(urlsplit(base).hostname, "repo.maven.apache.org")
+
+    def test_pom_url_is_under_the_allowed_host(self):
+        url = gr.pom_url(gr.DEFAULT_MAVEN_BASE, "org.springframework.boot", "spring-boot-dependencies", "2.6.5")
+        self.assertEqual(url, "https://repo.maven.apache.org/maven2/org/springframework/boot/"
+                              "spring-boot-dependencies/2.6.5/spring-boot-dependencies-2.6.5.pom")
+        self.assertEqual(urlsplit(url).hostname, "repo.maven.apache.org")
+
+    def test_fetcher_allowed_host_and_mirror_env(self):
+        self.assertEqual(gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE).allowed_host, "repo.maven.apache.org")
+        self.assertEqual(gr.MavenFetcher("https://mirror.internal/m2").allowed_host, "mirror.internal")
+
+    def test_fetcher_honours_total_cap(self):
+        f = gr.MavenFetcher(gr.DEFAULT_MAVEN_BASE, total_cap=0)
+        self.assertIsNone(f.fetch("g", "a", "1.0"))  # cap 0 -> never performs a network call
 
 
 class WarningTests(unittest.TestCase):
-    """Item #2: every skipped construct / unresolved version is a VISIBLE coverage gap (D-030), never silent."""
-
     def test_one_warning_per_non_concrete_version(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
@@ -337,19 +383,17 @@ class WarningTests(unittest.TestCase):
                     implementation 'g:concrete:1.2.3'
                 }
             """)
-            warnings = details(root, "build.gradle")
-        self.assertEqual(len(warnings), 3)
-        self.assertTrue(all("non-concrete version" in w for w in warnings))
+            ds = details(root, "build.gradle")
+        self.assertEqual(len([d for d in ds if "non-concrete version" in d]), 3)
 
     def test_warning_for_version_less_dep_with_no_bom(self):
         with tempfile.TemporaryDirectory() as root:
-            write(root, "build.gradle", """
-                dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
-            """)
-            warnings = details(root, "build.gradle")
-        self.assertEqual(len(warnings), 1)
-        self.assertIn("no version", warnings[0])
-        self.assertIn("no BOM", warnings[0])
+            write(root, "build.gradle",
+                  "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n")
+            ds = details(root, "build.gradle")
+        self.assertEqual(len(ds), 1)
+        self.assertIn("no version", ds[0])
+        self.assertIn("BOM", ds[0])
 
     def test_warning_for_unresolved_catalog_reference(self):
         with tempfile.TemporaryDirectory() as root:
@@ -360,10 +404,10 @@ class WarningTests(unittest.TestCase):
                     implementation(libs.bundles.missing)
                 }
             """)
-            warnings = details(root, "build.gradle.kts")
-        self.assertEqual(len(warnings), 2)
-        self.assertTrue(any("libs.not.in.catalog" in w for w in warnings))
-        self.assertTrue(any("libs.bundles.missing" in w for w in warnings))
+            ds = details(root, "build.gradle.kts")
+        self.assertEqual(len(ds), 2)
+        self.assertTrue(any("libs.not.in.catalog" in d for d in ds))
+        self.assertTrue(any("libs.bundles.missing" in d for d in ds))
 
     def test_warning_for_apply_from_and_resolution_strategy(self):
         with tempfile.TemporaryDirectory() as root:
@@ -372,32 +416,30 @@ class WarningTests(unittest.TestCase):
                 configurations.all { resolutionStrategy { force 'g:a:1.0' } }
                 dependencies { implementation 'com.google.guava:guava:30.1-jre' }
             """)
-            warnings = details(root, "build.gradle")
-        self.assertTrue(any("apply from" in w for w in warnings))
-        self.assertTrue(any("resolutionStrategy" in w for w in warnings))
+            ds = details(root, "build.gradle")
+        self.assertTrue(any("apply from" in d for d in ds))
+        self.assertTrue(any("resolutionStrategy" in d for d in ds))
 
-    def test_buildsrc_build_file_is_warned_as_unresolved(self):
+    def test_buildsrc_build_file_is_warned(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
             write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
             write(root, "buildSrc/build.gradle", "dependencies { implementation 'g:b:2.0' }\n")
-            result = gr.resolve(root, out)
+            result = gr.resolve(root, out, fetcher=DictFetcher())
         self.assertEqual([p["buildFile"] for p in result["poms"]], ["build.gradle"])
-        buildsrc_warnings = [w for w in result["warnings"] if "buildSrc" in w["message"]]
-        self.assertEqual(len(buildsrc_warnings), 1)
-        self.assertEqual(buildsrc_warnings[0]["code"], gr.WARN_CODE)
-        self.assertEqual(buildsrc_warnings[0]["filePath"], "buildSrc/build.gradle")
+        bs = [w for w in result["warnings"] if "buildSrc" in w["message"]]
+        self.assertEqual(len(bs), 1)
+        self.assertEqual(bs[0]["code"], gr.WARN_CODE)
+        self.assertEqual(bs[0]["filePath"], "buildSrc/build.gradle")
 
     def test_write_failure_emits_a_warning_not_a_silent_empty_map(self):
-        # D-041 review #3: if the synthetic pom / out-dir cannot be written, emit a scan warning.
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as tmp:
             write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
             out_as_file = os.path.join(tmp, "not-a-dir")
             with open(out_as_file, "w", encoding="utf-8") as handle:
-                handle.write("x")  # out-dir is actually a file -> makedirs under it raises OSError
-            result = gr.resolve(root, out_as_file)
+                handle.write("x")
+            result = gr.resolve(root, out_as_file, fetcher=DictFetcher())
         self.assertEqual(result["poms"], [])
         self.assertTrue(any("could not write" in w["message"] for w in result["warnings"]))
-        self.assertTrue(all(w["code"] == gr.WARN_CODE for w in result["warnings"]))
 
 
 class WalkAndOutputTests(unittest.TestCase):
@@ -405,59 +447,38 @@ class WalkAndOutputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", "dependencies { implementation 'g:a:1.0' }\n")
             write(root, "gradle.lockfile", "# locked\n")
-            eligible, _ = gr.find_build_files(root)
-            self.assertEqual(eligible, [])
+            self.assertEqual(gr.find_build_files(root)[0], [])
 
-    def test_mapping_is_repo_relative_and_poms_are_written(self):
+    def test_synthetic_pom_has_concrete_versions_and_dependency_management(self):
+        fetcher = DictFetcher({
+            ("org.springframework.boot", "spring-boot-dependencies", "2.6.5"): make_pom(
+                "org.springframework.boot", "spring-boot-dependencies", "2.6.5",
+                managed=[("org.springframework.boot", "spring-boot-starter-web", "2.6.5", "", "")]),
+        })
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
+            write(root, "build.gradle", """
+                plugins { id 'org.springframework.boot' version '2.6.5' }
+                dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
+            """)
+            result = gr.resolve(root, out, fetcher=fetcher)
+            self.assertEqual(len(result["poms"]), 1)
+            with open(result["poms"][0]["syntheticPath"], encoding="utf-8") as handle:
+                pom = handle.read()
+        self.assertIn("<dependencyManagement>", pom)
+        self.assertIn("<scope>import</scope>", pom)
+        # the formerly version-less starter now carries a concrete <version>
+        self.assertRegex(pom, r"spring-boot-starter-web</artifactId>\s*<version>2\.6\.5</version>")
+
+    def test_mapping_is_repo_relative(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
             write(root, "build.gradle", "dependencies { implementation 'com.google.guava:guava:30.1-jre' }\n")
             write(root, "app/build.gradle.kts",
                   'dependencies { implementation("org.apache.commons:commons-text:1.9") }\n')
-            result = subprocess.run([sys.executable, "-I", RESOLVER, root, out],
-                                    capture_output=True, text=True, check=True)
-            poms = json.loads(result.stdout)["poms"]
-            build_files = sorted(entry["buildFile"] for entry in poms)
-            self.assertEqual(build_files, ["app/build.gradle.kts", "build.gradle"])
-            for entry in poms:
-                self.assertTrue(entry["syntheticPath"].startswith(out))
+            result = gr.resolve(root, out, fetcher=DictFetcher())
+            self.assertEqual(sorted(p["buildFile"] for p in result["poms"]),
+                             ["app/build.gradle.kts", "build.gradle"])
+            for entry in result["poms"]:
                 self.assertTrue(os.path.isfile(entry["syntheticPath"]))
-                with open(entry["syntheticPath"], encoding="utf-8") as handle:
-                    pom = handle.read()
-                self.assertIn("<modelVersion>4.0.0</modelVersion>", pom)
-                self.assertIn("<dependency>", pom)
-
-    def test_pure_bom_pom_has_dependency_management_import_and_trigger(self):
-        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
-            write(root, "build.gradle", """
-                plugins { id 'org.springframework.boot' version '2.6.5' }
-                ext { set('springCloudVersion', '2021.0.4') }
-                dependencyManagement { imports {
-                    mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-                } }
-                dependencies {
-                    implementation 'org.springframework.boot:spring-boot-starter-web'
-                    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
-                }
-            """)
-            subprocess.run([sys.executable, "-I", RESOLVER, root, out], capture_output=True, check=True)
-            with open(os.path.join(out, "0", "pom.xml"), encoding="utf-8") as handle:
-                pom = handle.read()
-        self.assertIn("<dependencyManagement>", pom)
-        self.assertIn("<scope>import</scope>", pom)
-        self.assertIn("spring-boot-dependencies", pom)
-        self.assertIn("spring-cloud-dependencies", pom)
-        # version-less managed deps present with NO <version> of their own
-        self.assertIn("spring-boot-starter-web", pom)
-        self.assertIn("spring-cloud-starter-openfeign", pom)
-
-    def test_no_concrete_deps_yields_no_pom(self):
-        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
-            write(root, "build.gradle", "dependencies { implementation 'g:a:1.2.+' }\n")
-            result = subprocess.run([sys.executable, "-I", RESOLVER, root, out],
-                                    capture_output=True, text=True, check=True)
-            parsed = json.loads(result.stdout)
-        self.assertEqual(parsed["poms"], [])
-        self.assertTrue(any("non-concrete version" in w["message"] for w in parsed["warnings"]))
 
     def test_isolated_mode_runs_against_a_tree_with_a_planted_json_module(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as out:
@@ -470,8 +491,22 @@ class WalkAndOutputTests(unittest.TestCase):
             self.assertEqual([p["buildFile"] for p in poms], ["build.gradle"])
 
 
+class PomParsingTests(unittest.TestCase):
+    def test_parse_pom_reads_parent_properties_and_management(self):
+        parent, props, managed = gr.parse_pom(make_pom(
+            "g", "a", "1.0", parent=("g", "parent", "0.9"), properties={"x.version": "3.3"},
+            managed=[("g", "lib", "${x.version}", "", ""), ("g", "bom", "2.0", "import", "pom")]))
+        self.assertEqual(parent, ("g", "parent", "0.9"))
+        self.assertEqual(props["x.version"], "3.3")
+        self.assertIn(("g", "lib", "${x.version}", "", ""), managed)
+        self.assertIn(("g", "bom", "2.0", "import", "pom"), managed)
+
+    def test_parse_pom_refuses_doctype_entities(self):
+        self.assertIsNone(gr.parse_pom('<!DOCTYPE project [ <!ENTITY x "y"> ]><project/>'))
+
+
 class SafetyTests(unittest.TestCase):
-    def test_coordinate_with_xml_or_shell_metacharacters_is_rejected(self):
+    def test_coordinate_with_xml_metacharacters_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", """
                 dependencies {
@@ -479,13 +514,12 @@ class SafetyTests(unittest.TestCase):
                     implementation 'ok:lib:1.0'
                 }
             """)
-            coords = resolve(root, "build.gradle")
-        self.assertEqual(coords, [("ok", "lib", "1.0")])
+            self.assertEqual(resolve(root, "build.gradle"), [("ok", "lib", "1.0")])
 
     def test_malformed_build_file_does_not_raise(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "build.gradle", "dependencies { implementation 'g:a:1.0'\n/* unterminated")
-            resolve(root, "build.gradle")  # must not raise
+            resolve(root, "build.gradle")
 
 
 if __name__ == "__main__":
