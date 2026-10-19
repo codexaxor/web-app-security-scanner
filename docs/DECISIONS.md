@@ -644,7 +644,7 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
-- OD-7 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+- OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
