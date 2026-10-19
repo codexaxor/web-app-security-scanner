@@ -119,8 +119,12 @@ RUN set -eu; \
     for lang in java csharp javascript typescript; do \
         cp -r "/tmp/ogr/$lang" "/etc/secscan/opengrep-rules/$lang"; \
     done; \
-    rm -rf /tmp/aikido /tmp/ogr; \
-    find /etc/secscan/opengrep-rules -type d -exec chmod 0555 {} \; ; \
+    rm -rf /tmp/aikido /tmp/ogr
+
+# Our custom Spring/.NET rules (MIT, D-053 (c)). They land at opengrep-rules/custom, so their check_ids are the
+# stable `opengrep-rules.custom.<id>`. Each has a positive+negative fixture under fixtures/ (CustomSastRulesIT).
+COPY opengrep-rules-custom/ /etc/secscan/opengrep-rules/custom/
+RUN find /etc/secscan/opengrep-rules -type d -exec chmod 0555 {} \; ; \
     find /etc/secscan/opengrep-rules -type f -exec chmod 0444 {} \;
 
 # Pinned scanner configs baked into the image and passed with --config so in-repo suppressors are ignored

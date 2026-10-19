@@ -94,6 +94,8 @@ public class ScannerOutputParser {
             } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
                 findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile,
                         warnings, syntheticPoms));
+            } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
+                findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
             }
         }
 
@@ -229,6 +231,99 @@ public class ScannerOutputParser {
             }
         }
         return out;
+    }
+
+    /**
+     * Parses Opengrep JSON ({@code opengrep.json}) into one {@link RawFinding} per result (M6 SAST, D-053).
+     * {@code check_id} is the rule id, the matched snippet ({@code extra.lines}) is normalized and hashed for
+     * the fingerprint (never the line number), and the absolute container path is made repo-relative. A result
+     * whose path escapes the checkout is dropped with an {@code UNRESOLVED_PATH} warning (defense in depth — it
+     * must never enter a fingerprint). Opengrep's {@code errors[]} (rule-load issues) are ignored here; the scan
+     * status already gated success on a valid report.
+     */
+    List<RawFinding> parseOpengrep(Path json, String checkoutPath, List<ScanWarning> warningsOut) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        if (report == null || report.results == null) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        for (OpengrepResult r : report.results) {
+            if (r.checkId == null) {
+                continue;
+            }
+            String filePath = relativize(r.path, checkoutPath);
+            if (isPathOutsideCheckout(filePath)) {
+                log.warn("Dropping Opengrep result with a path outside the checkout (UNRESOLVED_PATH): {}",
+                        r.path);
+                warningsOut.add(new ScanWarning(WARN_UNRESOLVED_PATH,
+                        "Opengrep reported a finding at a path outside the repository checkout; it was dropped "
+                                + "(source path: " + r.path + ").", null));
+                continue;
+            }
+            Integer line = r.start == null ? null : r.start.line;
+            String snippet = r.extra == null ? null : r.extra.lines;
+            String snippetHash = com.company.secscan.finding.SnippetNormalizer.normalizedHash(snippet);
+            String rawLevel = r.extra == null ? null : r.extra.severity;
+            String label = sastSeverityLabel(r.extra);
+            List<String> cwe = r.extra == null ? List.of() : cweOf(r.extra.metadata);
+            out.add(RawFinding.sast(r.checkId, filePath, line, snippetHash, label, rawLevel, cwe));
+        }
+        return out;
+    }
+
+    /**
+     * The SAST severity label (CRITICAL/HIGH/MEDIUM/LOW) that drives the base score (D-053): prefer the rule's
+     * {@code metadata.severity} when it is one of those, else map Opengrep's level — ERROR→HIGH, WARNING→MEDIUM,
+     * INFO→LOW — defaulting to MEDIUM.
+     */
+    static String sastSeverityLabel(OpengrepExtra extra) {
+        if (extra != null && extra.metadata != null) {
+            Object s = extra.metadata.get("severity");
+            if (s instanceof String str) {
+                switch (str.trim().toUpperCase(java.util.Locale.ROOT)) {
+                    case "CRITICAL" -> { return "CRITICAL"; }
+                    case "HIGH" -> { return "HIGH"; }
+                    case "MEDIUM" -> { return "MEDIUM"; }
+                    case "LOW" -> { return "LOW"; }
+                    default -> { }
+                }
+            }
+        }
+        String level = extra == null ? null : extra.severity;
+        if (level == null) {
+            return "MEDIUM";
+        }
+        return switch (level.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "ERROR" -> "HIGH";
+            case "WARNING" -> "MEDIUM";
+            case "INFO" -> "LOW";
+            default -> "MEDIUM";
+        };
+    }
+
+    /** CWE ids from an Opengrep rule's {@code metadata.cwe}, which may be a single string or an array. */
+    @SuppressWarnings("unchecked")
+    static List<String> cweOf(Map<String, Object> metadata) {
+        if (metadata == null) {
+            return List.of();
+        }
+        Object cwe = metadata.get("cwe");
+        if (cwe instanceof String s && !s.isBlank()) {
+            return List.of(s);
+        }
+        if (cwe instanceof List<?> list) {
+            List<String> out = new ArrayList<>();
+            for (Object o : list) {
+                if (o != null) {
+                    out.add(o.toString());
+                }
+            }
+            return List.copyOf(out);
+        }
+        return List.of();
     }
 
     /**
@@ -617,5 +712,35 @@ public class ScannerOutputParser {
     private static final class OsvEvent {
         public String introduced;
         public String fixed;
+    }
+
+    // --- Opengrep JSON bindings (Semgrep-compatible; https://semgrep.dev/docs output schema) ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepReport {
+        public List<OpengrepResult> results;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepResult {
+        @com.fasterxml.jackson.annotation.JsonProperty("check_id")
+        public String checkId;
+        public String path;
+        public OpengrepPos start;
+        public OpengrepExtra extra;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepPos {
+        public Integer line;
+    }
+
+    /** {@code extra}: the rule level ({@code severity} = ERROR/WARNING/INFO), the matched {@code lines} (the
+     * snippet), and free-form {@code metadata} (severity/cwe/owasp/…), bound loosely since rules vary. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static final class OpengrepExtra {
+        public String severity;
+        public String lines;
+        public Map<String, Object> metadata;
     }
 }

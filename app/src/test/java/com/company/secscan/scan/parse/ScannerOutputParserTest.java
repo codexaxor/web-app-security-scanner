@@ -474,6 +474,37 @@ class ScannerOutputParserTest {
         assertThat(ScannerOutputParser.isConcreteVersion(null)).isFalse();
     }
 
+    @org.junit.jupiter.api.Test
+    void parsesOpengrepFindingsNormalizesSnippetAndDropsOutsidePaths(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/opengrep/custom-findings.json", outDir);
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+
+        java.util.List<RawFinding> findings = parser.parseOpengrep(json, "/work/checkout", warnings);
+
+        // The /etc/passwd result (absolute, outside the checkout) is dropped with an UNRESOLVED_PATH warning.
+        assertThat(findings).hasSize(2);
+        assertThat(warnings).anySatisfy(w -> assertThat(w.code()).isEqualTo("UNRESOLVED_PATH"));
+
+        RawFinding csrf = findings.stream()
+                .filter(f -> f.ruleId().equals("opengrep-rules.custom.spring-csrf-disabled")).findFirst()
+                .orElseThrow();
+        assertThat(csrf.type()).isEqualTo(RawFinding.TYPE_SAST);
+        assertThat(csrf.filePath()).isEqualTo("src/main/java/app/SecurityConfig.java"); // checkout prefix stripped
+        assertThat(csrf.line()).isEqualTo(5);
+        assertThat(csrf.severityLabel()).isEqualTo("HIGH"); // ERROR level, no metadata.severity
+        assertThat(csrf.toolSeverity()).isEqualTo("ERROR");
+        assertThat(csrf.cwe()).containsExactly("CWE-352: Cross-Site Request Forgery (CSRF)");
+        // The snippet hash is the normalized-snippet hash and is independent of indentation (line-free identity).
+        assertThat(csrf.snippetHash())
+                .isEqualTo(com.company.secscan.finding.SnippetNormalizer.normalizedHash("http.csrf().disable();"));
+
+        RawFinding cors = findings.stream()
+                .filter(f -> f.ruleId().equals("opengrep-rules.custom.spring-cross-origin-wildcard")).findFirst()
+                .orElseThrow();
+        assertThat(cors.severityLabel()).isEqualTo("MEDIUM"); // from metadata.severity
+        assertThat(cors.cwe()).containsExactly("CWE-942: Permissive Cross-domain Policy"); // string coerced to list
+    }
+
     private Path sample(String resource, Path outDir) throws Exception {
         Path target = outDir.resolve(resource.substring(resource.lastIndexOf('/') + 1));
         copyResource(resource, target);

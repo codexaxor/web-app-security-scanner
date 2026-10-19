@@ -71,4 +71,18 @@ public record RawFinding(
                 fixedVersion, manifestPath, null, null, null, null, toolSeverity, cvss, severityLabel, cwe,
                 cveAliases, advisorySummary);
     }
+
+    /**
+     * A SAST finding (Opengrep, M6). {@code ruleId} is the Opengrep {@code check_id} and {@code filePath} the
+     * repo-relative path; {@code snippetHash} is the normalized-snippet hash ({@link SnippetNormalizer}) — these
+     * three are the SAST fingerprint ({@code rule_id | file_path | normalized_snippet_hash}), never the line
+     * number. {@code line} is carried for display only. {@code severityLabel} is the rule severity
+     * (CRITICAL/HIGH/MEDIUM/LOW, mapped from Opengrep's metadata/level) that drives the SAST base (D-053);
+     * {@code toolSeverity} is Opengrep's raw level; {@code cwe} the rule's CWE ids (subtitle input).
+     */
+    public static RawFinding sast(String ruleId, String filePath, Integer line, String snippetHash,
+                                  String severityLabel, String toolSeverity, List<String> cwe) {
+        return new RawFinding(TYPE_SAST, SCANNER_SAST, ruleId, null, null, null, null, null, filePath, line,
+                snippetHash, null, null, toolSeverity, null, severityLabel, cwe, null, null);
+    }
 }

@@ -156,6 +156,25 @@ public class ScanFinding {
         return f;
     }
 
+    /**
+     * A SAST finding from Opengrep (M6). {@code ruleId} = Opengrep check_id, {@code snippetHash} = normalized
+     * snippet hash — with {@code filePath} these are the SAST fingerprint (never {@code line}). {@code line} is
+     * display-only; {@code severityLabel} (the rule severity) and {@code cwe} are descriptive scoring inputs.
+     */
+    public static ScanFinding sast(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
+                                   String filePath, Integer line, String snippetHash, String severityLabel,
+                                   String toolSeverity, List<String> cwe) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_SAST, ScanTask.SCANNER_SAST);
+        f.ruleId = ruleId;
+        f.filePath = filePath;
+        f.line = line;
+        f.snippetHash = snippetHash;
+        f.severityLabel = severityLabel;
+        f.toolSeverity = toolSeverity;
+        f.cwe = cwe;
+        return f;
+    }
+
     public UUID getId() {
         return id;
     }
