@@ -15,9 +15,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Proves the M5 scoring migrations (V12 schema, V13 seed) apply to an empty database: the scoring columns exist
- * on {@code sub_issue}/{@code scan_finding}, the three global intel/config tables exist (D-050), and the
- * fix-time config is seeded (D-050/V13).
+ * Proves the M5 scoring migrations (V12 schema, V13 seed, V14 advisory_summary, V15 index) apply to an empty
+ * database: the scoring columns exist on {@code sub_issue}/{@code scan_finding}, the three global intel/config
+ * tables exist (D-050), the fix-time config is seeded (D-050/V13), and the workspace+status index exists (SF5).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -70,6 +70,13 @@ class ScoringMigrationIT {
     }
 
     @Test
+    void v15AddsTheSubIssueWorkspaceStatusIndex() {
+        // SF5: additive composite index for the workspace+status lookups (re-score load, rollup re-read, the
+        // column-scoped score UPDATE). Applies on an empty DB like every other migration.
+        assertThat(indexExists("sub_issue", "idx_sub_issue_workspace_status")).isTrue();
+    }
+
+    @Test
     void v13SeedsFixTimeConfig() {
         assertThat(minutesFor("SCA_PATCH_MINOR")).isEqualTo(15);
         assertThat(minutesFor("SCA_MAJOR")).isEqualTo(60);
@@ -80,6 +87,14 @@ class ScoringMigrationIT {
     private int minutesFor(String category) {
         return jdbc.queryForObject("select minutes from fix_time_config where category = ?", Integer.class,
                 category);
+    }
+
+    private boolean indexExists(String table, String index) {
+        Boolean exists = jdbc.queryForObject(
+                "select exists (select 1 from pg_indexes "
+                        + "where schemaname = 'public' and tablename = ? and indexname = ?)",
+                Boolean.class, table, index);
+        return Boolean.TRUE.equals(exists);
     }
 
     private boolean tableExists(String name) {

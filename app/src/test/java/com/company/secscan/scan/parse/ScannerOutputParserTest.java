@@ -144,26 +144,52 @@ class ScannerOutputParserTest {
 
     @Test
     void noCvssFindingKeepsLabelAndCweWithNullVector(@TempDir Path outDir) throws Exception {
+        // REAL capture (SF6): lodash 4.17.4 / GHSA-4xc9-xhrj-v574 — a genuine no-CVSS advisory (empty severity).
         var findings = parser.parseOsv(sample("/samples/osv/no-cvss.json", outDir), "/work/checkout");
 
         assertThat(findings).anySatisfy(f -> {
-            assertThat(f.packageName()).isEqualTo("commons-collections:commons-collections");
-            assertThat(f.vulnId()).isEqualTo("CVE-2015-6420");
+            assertThat(f.packageName()).isEqualTo("lodash");
+            assertThat(f.vulnId()).isEqualTo("CVE-2018-16487");
             assertThat(f.toolSeverity()).isEmpty();      // max_severity ""
             assertThat(f.cvss()).isNull();               // no severity vector
             assertThat(f.severityLabel()).isEqualTo("HIGH");
-            assertThat(f.cwe()).containsExactly("CWE-502");
-            assertThat(f.cveAliases()).containsExactly("CVE-2015-6420");
-            assertThat(f.advisorySummary()).contains("Apache Commons Collections");
+            assertThat(f.cwe()).containsExactly("CWE-400");
+            assertThat(f.cveAliases()).containsExactly("CVE-2018-16487");
+            assertThat(f.advisorySummary()).contains("lodash");
         });
     }
 
     @Test
-    void cvssV4VectorIsPreferredAndEmptyCweIsEmptyList(@TempDir Path outDir) throws Exception {
-        var findings = parser.parseOsv(sample("/samples/osv/no-cvss.json", outDir), "/work/checkout");
+    void realV4OnlyAdvisoryChoosesTheV4Vector(@TempDir Path outDir) throws Exception {
+        // REAL capture (SF6): logback-core 1.2.11 / GHSA-25qh-j22f-pwp8 from the sca-gradle-multimodule fixture —
+        // a real v4-only advisory (CVSS:4.0 vector only), so the chosen cvss vector is the v4 one (D-044). OSV
+        // reports it under the module's synthetic pom (/work/synthetic/0/pom.xml), mapped to service/build.gradle
+        // exactly as the real multimodule scan does (D-038).
+        Map<String, String> syntheticPoms = Map.of("/work/synthetic/0/pom.xml", "service/build.gradle");
+        var findings = parser.parseOsv(sample("/samples/osv/no-cvss.json", outDir), "/work/checkout",
+                java.util.Set.of(), new java.util.ArrayList<>(), syntheticPoms);
 
         assertThat(findings).anySatisfy(f -> {
-            assertThat(f.packageName()).isEqualTo("com.example:multi");
+            assertThat(f.packageName()).isEqualTo("ch.qos.logback:logback-core");
+            assertThat(f.vulnId()).isEqualTo("CVE-2025-11226");
+            assertThat(f.toolSeverity()).isEqualTo("5.9");   // OSV max_severity carried from the real capture
+            assertThat(f.cvss()).startsWith("CVSS:4.0/");
+            assertThat(f.severityLabel()).isEqualTo("MODERATE");
+            assertThat(f.cwe()).containsExactly("CWE-20");
+            assertThat(f.cveAliases()).containsExactly("CVE-2025-11226");
+            assertThat(f.filePath()).isEqualTo("service/build.gradle"); // mapped off the /work synthetic path
+        });
+    }
+
+    @Test
+    void v4VectorIsPreferredOverV3AndEmptyCweIsEmptyList(@TempDir Path outDir) throws Exception {
+        // SYNTHETIC edge sample (SF6): no real fixture advisory carries BOTH v3 and v4 vectors AND empty cwe_ids,
+        // so these two parser edges (v4 preferred over v3; empty cwe_ids -> empty list -> summary subtitle) are
+        // proved against a clearly-labelled synthetic file.
+        var findings = parser.parseOsv(sample("/samples/osv/synthetic-vector-edge.json", outDir), "/work/checkout");
+
+        assertThat(findings).anySatisfy(f -> {
+            assertThat(f.packageName()).isEqualTo("com.example:synthetic-both-vectors");
             assertThat(f.cvss()).startsWith("CVSS:4.0/");  // v4 preferred over v3 (D-044)
             assertThat(f.cwe()).isEmpty();                 // empty cwe_ids -> subtitle falls back to summary
             assertThat(f.advisorySummary()).isNotBlank();
