@@ -1,6 +1,7 @@
 #!/bin/sh
-# SecScan scanner entrypoint (M2 + M4b): clone one repo at one commit, run Betterleaks, and write SANITIZED
-# results.
+# SecScan scanner entrypoint (M2 + M4b + M6): clone one repo at one commit, run Betterleaks (secrets),
+# OSV-Scanner (SCA), Opengrep (SAST) and Checkov (IaC), and write SANITIZED results. All scanners run fully
+# offline on the clone (no new egress host in M6; D-053/D-054).
 #
 # Security contract (CLAUDE.md + D-014 + D-024 + D-036 + D-037):
 #   - The token (if any) arrives only as a read-only file, never an env var or the clone URL, and is sent as a
@@ -263,6 +264,84 @@ if [ "$SCA_STATUS" = "failed" ] && [ -s "$WORK/osv.log" ]; then
     tail -c 4000 "$WORK/osv.log" >&2 || true
 fi
 
+# --- SAST scan (Opengrep over the clone; fully offline, D-053) ---
+# Rules come ONLY via --config (no in-repo rule auto-load). In-repo suppressors are ignored (D-037):
+# --disable-nosem ignores inline nosemgrep/nosem/noopengrep, and --x-ignore-semgrepignore-files ignores every
+# in-repo .semgrepignore. --disable-version-check keeps it offline (Opengrep sends no telemetry; the removed
+# Semgrep --metrics flag does not exist). We run from /etc/secscan with a RELATIVE `--config opengrep-rules`, so
+# every check_id is the stable `opengrep-rules.<pack>.<id>` (never an absolute path); the parser relativizes the
+# absolute $CHECKOUT file paths. Findings are read from the JSON, not the exit code: success = a valid JSON
+# report AND exit 0/1 (1 is possible per Opengrep build); any other code = scanner failure.
+SAST_JSON="$OUT/opengrep.json"
+# Opengrep unpacks its (trusted, pinned) core binary to HOME/TMPDIR and execs it. /work is tmpfs noexec (so no
+# CLONED repo code can ever run), so point Opengrep's own runtime at the separate exec-able tmpfs
+# /opt/sast-exec (ScannerContainerConfig.TOOL_EXEC_MOUNT). The scanned repo stays on /work and is never placed
+# on an exec mount, so "never execute scanned code" (D-004) is preserved — only our pinned tool runs here.
+# NOTE: even `opengrep --version` execs the core, so it also needs the exec-able HOME/TMPDIR.
+SAST_TMP=/opt/sast-exec
+OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" opengrep --version 2>/dev/null | head -1)"
+START="$(date +%s)"
+set +e
+( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
+    opengrep scan --config opengrep-rules --json-output="$SAST_JSON" \
+    --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
+    >"$WORK/opengrep.log" 2>&1
+SAST_EXIT=$?
+set -e
+END="$(date +%s)"
+SAST_DUR_MS=$(( (END - START) * 1000 ))
+if { [ "$SAST_EXIT" -eq 0 ] || [ "$SAST_EXIT" -eq 1 ]; } \
+        && [ -f "$SAST_JSON" ] && jq -e 'has("results")' "$SAST_JSON" >/dev/null 2>&1; then
+    SAST_STATUS=ok
+else
+    SAST_STATUS=failed
+fi
+[ -f "$SAST_JSON" ] || printf '{"results":[],"errors":[]}' > "$SAST_JSON"
+if [ "$SAST_STATUS" = "failed" ] && [ -s "$WORK/opengrep.log" ]; then
+    echo "opengrep failed (exit $SAST_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/opengrep.log" >&2 || true
+fi
+
+# --- IaC scan (Checkov over the clone; fully offline, D-054) ---
+# Only STATIC-parse frameworks are enabled (checkov.yaml: dockerfile, kubernetes, terraform, cloudformation,
+# docker_compose). Helm/Kustomize are NOT run — rendering them shells out to helm/kustomize (D-004, BLOCKER 1);
+# a Chart.yaml present raises an honest IAC_HELM_NOT_RENDERED warning below (D-030). In-repo config is ignored
+# (D-037): --config-file points at our baked checkov.yaml so the repo's .checkov.yaml is not loaded. Inline
+# `#checkov:skip=` CANNOT be disabled by a flag, but a skipped check is still reported in skipped_checks[] — the
+# parser RECOVERS those and promotes them back to findings. Offline (SHOULD-FIX 3): --skip-download (in the
+# config) plus CKV_SKIP_PACKAGE_UPDATE_CHECK suppress every network call. Multi-framework JSON is an ARRAY of
+# per-framework report objects. Exit: 0 = all passed/skipped, 1 = a check failed; both are success (findings are
+# read from the JSON). Any other code = scanner failure.
+IAC_JSON="$OUT/checkov.json"
+CHECKOV_VERSION="$(checkov --version 2>/dev/null | head -1)"
+export CKV_SKIP_PACKAGE_UPDATE_CHECK=True
+START="$(date +%s)"
+set +e
+# `checkov -o json` writes the JSON report to stdout (the banner/chatter goes to stderr); capture each separately.
+checkov -d "$CHECKOUT" -o json --config-file /etc/secscan/checkov.yaml >"$IAC_JSON" 2>"$WORK/checkov.log"
+IAC_EXIT=$?
+set -e
+END="$(date +%s)"
+IAC_DUR_MS=$(( (END - START) * 1000 ))
+if { [ "$IAC_EXIT" -eq 0 ] || [ "$IAC_EXIT" -eq 1 ]; } \
+        && [ -f "$IAC_JSON" ] && jq -e 'type == "array" or type == "object"' "$IAC_JSON" >/dev/null 2>&1; then
+    IAC_STATUS=ok
+else
+    IAC_STATUS=failed
+fi
+[ -f "$IAC_JSON" ] || printf '[]' > "$IAC_JSON"
+if [ "$IAC_STATUS" = "failed" ] && [ -s "$WORK/checkov.log" ]; then
+    echo "checkov failed (exit $IAC_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/checkov.log" >&2 || true
+fi
+# D-030 honest gap: Helm charts are not rendered (no helm binary, D-004). Flag any Chart.yaml so the coverage
+# gap is shown, not hidden.
+if find "$CHECKOUT" -type f -name Chart.yaml 2>/dev/null | head -1 | grep -q .; then
+    add_warning IAC_HELM_NOT_RENDERED \
+        "Helm charts are not rendered or scanned (chart rendering requires executing helm, which is disallowed; D-004/D-054)." \
+        ""
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -271,6 +350,8 @@ jq -nc \
     --arg git "$GIT_VERSION" \
     --arg betterleaks "$BETTERLEAKS_VERSION" \
     --arg osv "$OSV_VERSION" \
+    --arg opengrep "$OPENGREP_VERSION" \
+    --arg checkov "$CHECKOV_VERSION" \
     --arg sstatus "$SECRET_STATUS" \
     --argjson sexit "$GL_EXIT" \
     --argjson sdur "$DUR_MS" \
@@ -278,22 +359,31 @@ jq -nc \
     --argjson caexit "$OSV_EXIT" \
     --argjson cadur "$OSV_DUR_MS" \
     --argjson nopkg "$OSV_NO_PACKAGES" \
+    --arg saststatus "$SAST_STATUS" \
+    --argjson sastexit "$SAST_EXIT" \
+    --argjson sastdur "$SAST_DUR_MS" \
+    --arg iacstatus "$IAC_STATUS" \
+    --argjson iacexit "$IAC_EXIT" \
+    --argjson iacdur "$IAC_DUR_MS" \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
-      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv},
+      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv, opengrep:$opengrep, checkov:$checkov},
       warnings: ($warnings[0] // []),
       syntheticPoms: ($synth[0] // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",
-         noPackages:$nopkg}
+         noPackages:$nopkg},
+        {name:"sast", status:$saststatus, exitCode:$sastexit, durationMs:$sastdur, findingsFile:"opengrep.json"},
+        {name:"iac", status:$iacstatus, exitCode:$iacexit, durationMs:$iacdur, findingsFile:"checkov.json"}
       ]}' \
     > "$OUT/result.json"
 
 # A scanner failure is reported per-scanner in the manifest (the worker records a partial scan). Exit non-zero
 # only to signal an unexpected scanner failure; clone failures exit 10 above.
-if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ]; then
+if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ] \
+        || [ "$SAST_STATUS" = "failed" ] || [ "$IAC_STATUS" = "failed" ]; then
     exit 20
 fi
 exit 0

@@ -41,6 +41,9 @@ public record RawFinding(
 
     public static final String SCANNER_SECRET = "secret";
     public static final String SCANNER_SCA = "sca";
+    public static final String SCANNER_SAST = "sast";
+    public static final String SCANNER_IAC = "iac";
+    public static final String SCANNER_EOL = "eol";
 
     /**
      * A secret finding. The raw value is never passed in; {@code secretHash} is its SHA-256 and

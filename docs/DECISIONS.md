@@ -14,6 +14,82 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-053 Opengrep (SAST) pinned 1.31.0 (musllinux), with baked rule packs and ignored in-repo suppressors (2026-10-20, accepted)
+Context: M6 adds SAST. SPEC/D-005 chose Opengrep (LGPL-2.1 Semgrep fork); we pin every scanner by version +
+checksum (D-034/D-036).
+Decision: pin Opengrep **1.31.0** (stable, released 2026-10-15; NOT the 2.0.0 alpha line). The base image is
+Alpine (musl), so we bake the **musllinux** per-arch binaries — the `manylinux` (glibc) builds do NOT run on
+Alpine (they fail with exit 127, confirmed). Checksums verified before use:
+`opengrep_musllinux_x86 = 02c9fba481611aa0664bc79ccf7ce59e9e334b76af8921c80b2f738d17fabf9b`,
+`opengrep_musllinux_aarch64 = b7cbedab0b6c9953ea27ce3baa006ad8b6fa1c50ee7433638b63f7fc731519d9`. Version recorded
+in `scan.tool_versions.opengrep`.
+- **Offline:** `--disable-version-check`. Opengrep has **no `--metrics` flag** (Semgrep's telemetry was removed),
+  so there is nothing else to disable; the container also runs with the network disabled for fixture ITs.
+- **In-repo suppressors ignored (D-037):** rules come ONLY via `--config` (no in-repo rule auto-load);
+  `--disable-nosem` ignores inline `nosemgrep`/`nosem`/`noopengrep`; `--x-ignore-semgrepignore-files` ignores
+  every in-repo `.semgrepignore`. Proven by `OpengrepConfigInjectionIT`.
+- **Rule packs (frozen by commit SHA so every `check_id`, a fingerprint input, is stable):** (a)
+  AikidoSec/opengrep-rules @`7ac79affecf709eb7263a243b518a417cd7e0ab2` (MIT); (b) select language packs
+  (java, csharp, javascript, typescript) from opengrep/opengrep-rules @`f1d2b562b414783763fd02a6ed2736eaed622efa`
+  — **Commons Clause** (restricts resale/SaaS): INTERNAL USE OK, **FLAGGED** for the open "SAST rule licensing
+  before any SaaS" SPEC item and the D-005 note (does NOT block internal M6); (c) our custom Spring/.NET rules
+  (MIT, `scanner-image/opengrep-rules-custom/`). NEVER `semgrep/semgrep-rules` (restrictive Semgrep Rules
+  License). Opengrep runs from `/etc/secscan` with a relative `--config opengrep-rules`, so `check_id`s are the
+  stable `opengrep-rules.<pack>.<id>` (never an absolute path); the parser relativizes the absolute checkout
+  file paths.
+- **Base score:** SAST base from the rule severity label — `extra.metadata.severity` (CRITICAL/HIGH/MEDIUM/LOW)
+  if present, else `extra.severity` ERROR→HIGH(75) / WARNING→MEDIUM(50) / INFO→LOW(25); CRITICAL(90) only via
+  metadata. Recorded as `base_sast` in `score_breakdown`.
+- **Exec-tmpfs carve-out:** Opengrep unpacks its (trusted, pinned) core and execs it from HOME/TMPDIR; `/work`
+  is tmpfs `noexec` (so no cloned repo code can ever execute, D-004). run-scan.sh points ONLY Opengrep's
+  HOME/TMPDIR/XDG_CACHE_HOME at a separate small exec-able tmpfs `/opt/sast-exec`
+  (`ScannerContainerConfig.TOOL_EXEC_MOUNT`, `nosuid,nodev,size=256m`). The scanned repo is never placed on an
+  exec mount, so the "never execute scanned code" guarantee is unchanged — only our own pinned tool runs there.
+- **Fingerprint / overload:** SAST fingerprint is `rule_id | file_path | normalized_snippet_hash` (`core.Fingerprints.sast`;
+  snippet normalized in the parser, NO line number). No new business column is added: `rule_id`, `file_path`,
+  `snippet_hash` already exist. (IaC reuses the `package` column for the resource name and EOL reuses
+  `package`/`installed_version` for product/cycle — the overload is documented in `ReconcileService.fingerprintOf`
+  and D-054/D-055.)
+Consequences: a maintained, reproducible SAST engine; rule-pack licensing stays flagged for SaaS; a small,
+isolated exec-able tmpfs is the only hardening carve-out and does not weaken the repo-code guarantee.
+
+## D-054 IaC = Checkov 3.3.29 (static frameworks only), with skip recovery and ignored in-repo config (2026-10-20, accepted)
+Context: M6 adds IaC. We chose Checkov (not KICS) for graph-based cross-resource analysis (Apache-2.0,
+Palo Alto/Bridgecrew). We pin every scanner.
+Decision: pin **Checkov 3.3.29** (the current line; the 3.2.x line ended at 3.2.533 on 2026-06-04, so "latest
+3.2.x" is superseded — the rationale, licence and engine are unchanged). Checkov is Python, so "pin" = install
+with pip into an isolated venv constrained by `scanner-image/checkov-constraints.txt` — the full transitive
+closure pinned at exact versions (captured from a clean Alpine 3.21 venv) — so the install is reproducible.
+Checkov installs cleanly on Alpine musl (musllinux wheels; no build deps). Version in
+`scan.tool_versions.checkov`. Rejected KICS (no cross-resource graph, smaller TF ruleset, a remediated Mar-2026
+GitHub-Action supply-chain incident).
+- **BLOCKER 1 (D-004 — never execute scanned code):** only STATIC-parse frameworks are enabled —
+  `dockerfile, kubernetes, terraform, cloudformation`. **Helm and Kustomize are NOT run** (Checkov renders them
+  by shelling out to the `helm`/`kustomize` binaries, which we do not install). The Helm-chart-rendering gap is
+  shown, not hidden (D-030): run-scan.sh raises an `IAC_HELM_NOT_RENDERED` warning when a `Chart.yaml` is
+  present. **Checkov 3.3.29 has NO `docker_compose` framework** (the planned framework list named it, but the
+  tool does not offer it — valid values are dockerfile/kubernetes/terraform/cloudformation/helm/kustomize/…),
+  so docker-compose misconfig coverage is a recorded gap too (deferred register).
+- **Offline (SHOULD-FIX 3):** `--skip-download` (baked in `checkov.yaml`) + env `CKV_SKIP_PACKAGE_UPDATE_CHECK=True`
+  suppress every network call; the config-injection ITs run the container with the network disabled to prove it.
+- **In-repo config ignored (D-037):** our baked `--config-file /etc/secscan/checkov.yaml` is passed so the repo's
+  `.checkov.yaml` is not loaded. Inline `#checkov:skip=` CANNOT be disabled by a flag, but a skipped check is
+  still reported in `results.skipped_checks[]` — the parser **recovers** those and promotes them back to
+  findings. Proven by `CheckovConfigInjectionIT`.
+- **JSON shape:** multi-framework output is a JSON **array** of per-`check_type` report objects; a single
+  matching framework is one object; an empty scan is a summary-only object (no `results`). The parser handles
+  all three. Fields used: `check_id` (→ rule_id), `file_path` (leading `/` stripped → repo-relative), `resource`
+  (→ the IaC resource name, stored in the `package` column), `file_line_range` (display only, never a
+  fingerprint input).
+- **Base score (NIT 7):** OSS Checkov checks carry no `severity` (null), so **all IaC findings score base 50
+  (MEDIUM)** in M6 (`base_iac`). A maintained per-`check_id` severity-override table is deferred (deferred
+  register).
+- **Fingerprint / overload:** IaC fingerprint is `rule_id | file_path | resource_name` (`core.Fingerprints.iac`,
+  NO line number). `resource_name` reuses the existing `package` column (documented in
+  `ReconcileService.fingerprintOf`), so no new business column is added.
+Consequences: a reproducible, offline, static IaC engine; Helm and docker-compose coverage are explicit gaps;
+no schema change for IaC.
+
 ## D-052 SCA group fix-time is one upgrade (max category), not the sum of its sub-issues (2026-10-19, accepted)
 Context: an SCA issue group is one vulnerable package; several CVEs on it are remediated by a SINGLE dependency
 upgrade. Summing each CVE's fix-time (as M5 first did) multiplied one upgrade by the number of CVEs, badly

@@ -39,6 +39,11 @@ class ScannerContainerConfigTest {
         assertThat(hc.getMemorySwap()).isEqualTo(4L * 1024 * 1024 * 1024);
         assertThat(hc.getNanoCPUs()).isEqualTo(2_000_000_000L);
         assertThat(hc.getTmpFs().get("/work")).contains("noexec").contains("nosuid").contains("size=2g");
+        // The SAST engine's exec-able tmpfs is isolated from /work (the repo is never on it) and is still
+        // nosuid/nodev and size-capped (D-053 / D-004).
+        assertThat(hc.getTmpFs().get("/opt/sast-exec"))
+                .contains("rw,exec,").doesNotContain("noexec")
+                .contains("nosuid").contains("nodev").contains("size=256m");
     }
 
     @Test

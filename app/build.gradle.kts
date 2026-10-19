@@ -28,9 +28,15 @@ dependencies {
 }
 
 // Spring Boot manages the JUnit platform launcher versions; keep AssertJ from the BOM. Tests that need live
-// network are tagged and excluded by default so `./gradlew build` stays offline:
-//   - "live-osv"   (osv.dev/deps.dev):   run with `./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"`
-//   - "live-intel" (cisa.gov / epss):    run with `./gradlew :app:test -PliveIntel --tests "*LiveIntel*"`
+// network OR the heavier M6 scanner tools (real Opengrep/Checkov runs) are tagged and excluded by default so
+// `./gradlew build` stays fast and offline:
+//   - "live-osv"      (osv.dev/deps.dev):      `./gradlew :app:test -PliveOsv      --tests "*ScaLiveScanIT"`
+//   - "live-intel"    (cisa.gov / epss):       `./gradlew :app:test -PliveIntel    --tests "*LiveIntel*"`
+//   - "live-opengrep" (real Opengrep SAST):    `./gradlew :app:test -PliveOpengrep --tests "*Opengrep*"`
+//   - "live-checkov"  (real Checkov IaC):      `./gradlew :app:test -PliveCheckov  --tests "*Checkov*"`
+//   - "live-eol"      (endoflife.date / EOL container): `./gradlew :app:test -PliveEol --tests "*Eol*"`
+// A test needing several tools carries several tags (e.g. M6ScannerImageIT is live-opengrep AND live-checkov),
+// so it runs only when ALL its flags are passed.
 tasks.withType<Test> {
     useJUnitPlatform {
         if (!project.hasProperty("liveOsv")) {
@@ -38,6 +44,15 @@ tasks.withType<Test> {
         }
         if (!project.hasProperty("liveIntel")) {
             excludeTags("live-intel")
+        }
+        if (!project.hasProperty("liveOpengrep")) {
+            excludeTags("live-opengrep")
+        }
+        if (!project.hasProperty("liveCheckov")) {
+            excludeTags("live-checkov")
+        }
+        if (!project.hasProperty("liveEol")) {
+            excludeTags("live-eol")
         }
     }
 }
