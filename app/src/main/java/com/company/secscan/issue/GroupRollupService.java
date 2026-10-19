@@ -96,15 +96,20 @@ public class GroupRollupService {
             return null;
         }
         if (ScanFinding.TYPE_SCA.equals(groupType)) {
-            return open.stream()
-                    .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
-                            fixConfig))
-                    .max().orElse(0);
+            // SCA: one upgrade clears the group → the single worst category, never the sum (D-052).
+            return open.stream().mapToInt(s -> perSubMinutes(s, fixConfig)).max().orElse(0);
         }
-        return open.stream()
-                .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
-                        fixConfig))
-                .sum();
+        // Every other type: one fix per finding → the sum of the open sub-issues (SHOULD-FIX 4).
+        return open.stream().mapToInt(s -> perSubMinutes(s, fixConfig)).sum();
+    }
+
+    /** Fix-time minutes for one sub-issue: SAST is categorized by its CWE (injection vs default), every other
+     * type by {@link FixTime#minutesFor} (SPEC "Fix time"; M6). */
+    private static int perSubMinutes(SubIssue s, Map<String, Integer> fixConfig) {
+        if (ScanFinding.TYPE_SAST.equals(s.getType())) {
+            return FixTime.minutes(FixTime.sastCategory(s.getCwe()), fixConfig);
+        }
+        return FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(), fixConfig);
     }
 
     /** The worst (highest-scored) open sub-issue, or null when none is open; nulls sort lowest, ties keep first. */

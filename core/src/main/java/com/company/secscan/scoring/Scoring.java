@@ -11,11 +11,11 @@ import java.util.Set;
  * Pure: no Spring, no I/O, no clock. KEV/EPSS/sensitivity are resolved by the caller and handed in via
  * {@link ScoreInput}.
  *
- * <p>Base (D-044 SCA / D-045 secret) + active adjustments (on-KEV +5; repo sensitivity high +5 / low −10),
- * clamped to 1–100. EPSS tiers, PoC +1 and SAST test-path −15 are NOT applied in M5. Every contribution is an
- * itemized {@link ScoreLine} whose {@code delta}s sum to the final score (a {@code clamp} line absorbs the
- * difference when the raw total falls outside 1–100), so the UI can explain the number without ever reading the
- * base back out of the breakdown.
+ * <p>Base per type — SCA (D-044) / secret (D-045) / SAST (D-053) / IaC (D-054) / EOL (D-055) — plus active
+ * adjustments: on-KEV +5, repo sensitivity high +5 / low −10, and the SAST test-path −15 (M6). EPSS tiers and
+ * PoC +1 are still NOT applied. Every contribution is an itemized {@link ScoreLine} whose {@code delta}s sum to
+ * the final score (a {@code clamp} line absorbs the difference when the raw total falls outside 1–100), so the
+ * UI can explain the number without ever reading the base back out of the breakdown.
  */
 public final class Scoring {
 
@@ -36,6 +36,19 @@ public final class Scoring {
     static final int BASE_HIGH = 80;
     static final int BASE_MODERATE = 55;
     static final int BASE_LOW = 25;
+
+    /** SAST/IaC base by rule severity (SPEC; D-053/D-054): critical 90 / high 75 / medium 50 / low 25. */
+    static final int SAST_IAC_CRITICAL = 90;
+    static final int SAST_IAC_HIGH = 75;
+    static final int SAST_IAC_MEDIUM = 50; // also the default (Opengrep level fallback; Checkov OSS no-severity)
+    static final int SAST_IAC_LOW = 25;
+
+    /** EOL base (SPEC; D-055): past end of life 75 / ends within 90 days 45. */
+    static final int EOL_PAST = 75;
+    static final int EOL_ENDING_SOON = 45;
+
+    /** SAST finding in a test path: −15 (SPEC adjustment, Default On; M6). */
+    static final int TEST_PATH_DELTA = -15;
 
     /** Secret base by Betterleaks rule id (D-045): private-key & cloud-credential 90, other tokens 75, passwords 60. */
     private static final int SECRET_BASE_KEY_OR_CLOUD = 90;
@@ -82,6 +95,13 @@ public final class Scoring {
             raw += SENSITIVITY_LOW_DELTA;
         }
 
+        // SAST test-path adjustment (SPEC, Default On; M6): a finding in a test path is lower priority. It is an
+        // itemized adjustment (not an exclusion — that is M7's EXCLUDED_PATH), and applies to SAST only.
+        if (RawFinding.TYPE_SAST.equals(in.type()) && in.testPath()) {
+            breakdown.add(new ScoreLine("test_path", "SAST finding in a test path", TEST_PATH_DELTA));
+            raw += TEST_PATH_DELTA;
+        }
+
         int clamped = Math.max(MIN_SCORE, Math.min(MAX_SCORE, raw));
         if (clamped != raw) {
             breakdown.add(new ScoreLine("clamp", "Clamped to the 1–100 range (was " + raw + ")", clamped - raw));
@@ -117,7 +137,16 @@ public final class Scoring {
         if (RawFinding.TYPE_SECRET.equals(in.type())) {
             return secretBase(in.secretRuleId());
         }
-        // SCA (and, until M6 wires their own bases, any CVSS/label-bearing type): prefer the CVSS base number.
+        if (RawFinding.TYPE_SAST.equals(in.type())) {
+            return sastIacBase(in.severityLabel(), "base_sast", "SAST rule severity ");
+        }
+        if (RawFinding.TYPE_IAC.equals(in.type())) {
+            return sastIacBase(in.severityLabel(), "base_iac", "IaC rule severity ");
+        }
+        if (RawFinding.TYPE_EOL.equals(in.type())) {
+            return eolBase(in.eolStatus());
+        }
+        // SCA: prefer the CVSS base number, else the advisory severity label.
         Double num = parseSeverity(in.maxSeverity());
         if (num != null) {
             int value = (int) Math.round(num * 10);
@@ -141,6 +170,33 @@ public final class Scoring {
         }
         return new BaseResult("base_secret", "Secret rule " + (ruleId == null ? "unknown" : ruleId), value,
                 "secret");
+    }
+
+    /**
+     * SAST/IaC base from the rule severity label (D-053/D-054): CRITICAL 90 / HIGH 75 / MEDIUM 50 / LOW 25.
+     * An absent/unknown label defaults to MEDIUM (50) — the Opengrep level fallback already yields one of these,
+     * and OSS Checkov checks carry no severity, so IaC defaults to MEDIUM (NIT 7).
+     */
+    private static BaseResult sastIacBase(String label, String code, String detailPrefix) {
+        String norm = label == null ? "" : label.trim().toUpperCase(java.util.Locale.ROOT);
+        int value = switch (norm) {
+            case "CRITICAL" -> SAST_IAC_CRITICAL;
+            case "HIGH" -> SAST_IAC_HIGH;
+            case "LOW" -> SAST_IAC_LOW;
+            default -> SAST_IAC_MEDIUM; // MEDIUM and unknown/absent
+        };
+        String shown = norm.isEmpty() ? "unspecified (default MEDIUM)" : norm;
+        return new BaseResult(code, detailPrefix + shown, value, "label");
+    }
+
+    /** EOL base (D-055): past-EOL 75 / ending-soon 45; an indeterminate status defaults to the ending-soon
+     * floor (45) — conservative; a persisted EOL finding always had a determinate status when created. */
+    private static BaseResult eolBase(String eolStatus) {
+        if (com.company.secscan.eol.EolStatus.PAST_EOL.equals(eolStatus)) {
+            return new BaseResult("base_eol", "Runtime/framework is past end of life", EOL_PAST, "eol");
+        }
+        return new BaseResult("base_eol", "Runtime/framework reaches end of life within 90 days",
+                EOL_ENDING_SOON, "eol");
     }
 
     /** CRITICAL 95 / HIGH 80 / MODERATE 55 / LOW 25; unknown/absent → MODERATE (defensive; OSV always labels SCA). */

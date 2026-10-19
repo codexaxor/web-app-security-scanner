@@ -11,6 +11,8 @@ package com.company.secscan.scoring;
  * @param secretRuleId    the Betterleaks rule id — the secret base (D-045)
  * @param onKev           true when the vuln id or any CVE alias is in the CISA KEV catalog (+5, D-046)
  * @param repoSensitivity the repository sensitivity ({@code high} +5 / {@code low} −10 / else 0)
+ * @param eolStatus       for EOL findings, {@link com.company.secscan.eol.EolStatus} — the EOL base (D-055, M6)
+ * @param testPath        true when a SAST finding is in a test path (the −15 adjustment, M6)
  */
 public record ScoreInput(
         String type,
@@ -18,5 +20,13 @@ public record ScoreInput(
         String severityLabel,
         String secretRuleId,
         boolean onKev,
-        String repoSensitivity) {
+        String repoSensitivity,
+        String eolStatus,
+        boolean testPath) {
+
+    /** Backward-compatible convenience: no EOL status and not a test path (SCA/secret/KEV callers). */
+    public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
+                      boolean onKev, String repoSensitivity) {
+        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, null, false);
+    }
 }

@@ -144,4 +144,52 @@ class ScoringTest {
     private static ScoreInput secret(String ruleId) {
         return new ScoreInput("secret", null, null, ruleId, false, "normal");
     }
+
+    // --- M6 bases + test-path (D-053/D-054/D-055) ---
+
+    private static ScoreInput sast(String label, boolean testPath) {
+        return new ScoreInput("sast", null, label, null, false, "normal", null, testPath);
+    }
+
+    @Test
+    void sastBaseMapsRuleSeverity() {
+        assertThat(Scoring.score(sast("CRITICAL", false)).score()).isEqualTo(90);
+        assertThat(Scoring.score(sast("HIGH", false)).score()).isEqualTo(75);
+        assertThat(Scoring.score(sast("MEDIUM", false)).score()).isEqualTo(50);
+        assertThat(Scoring.score(sast("LOW", false)).score()).isEqualTo(25);
+        assertThat(has(Scoring.score(sast("HIGH", false)), "base_sast")).isTrue();
+    }
+
+    @Test
+    void iacBaseDefaultsToMediumWhenNoSeverity() {
+        ScoreResult r = Scoring.score(new ScoreInput("iac", null, null, null, false, "normal", null, false));
+        assertThat(r.score()).isEqualTo(50); // OSS Checkov checks carry no severity (NIT 7)
+        assertThat(has(r, "base_iac")).isTrue();
+    }
+
+    @Test
+    void eolBasePastEolIs75AndEndingSoonIs45() {
+        ScoreResult past = Scoring.score(new ScoreInput("eol", null, null, null, false, "normal",
+                com.company.secscan.eol.EolStatus.PAST_EOL, false));
+        assertThat(past.score()).isEqualTo(75);
+        assertThat(has(past, "base_eol")).isTrue();
+        ScoreResult ending = Scoring.score(new ScoreInput("eol", null, null, null, false, "normal",
+                com.company.secscan.eol.EolStatus.ENDING_SOON, false));
+        assertThat(ending.score()).isEqualTo(45);
+    }
+
+    @Test
+    void sastTestPathSubtractsFifteenItemized() {
+        ScoreResult r = Scoring.score(sast("HIGH", true));
+        assertThat(delta(r, "test_path")).isEqualTo(-15);
+        assertThat(r.score()).isEqualTo(60); // base 75 − 15
+    }
+
+    @Test
+    void testPathAdjustmentIsSastOnly() {
+        // An IaC finding flagged testPath is unaffected — the −15 adjustment applies only to SAST.
+        ScoreResult r = Scoring.score(new ScoreInput("iac", null, "HIGH", null, false, "normal", null, true));
+        assertThat(has(r, "test_path")).isFalse();
+        assertThat(r.score()).isEqualTo(75);
+    }
 }

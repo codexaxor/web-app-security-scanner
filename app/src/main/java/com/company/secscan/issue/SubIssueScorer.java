@@ -1,5 +1,8 @@
 package com.company.secscan.issue;
 
+import com.company.secscan.eol.EolStatus;
+import com.company.secscan.finding.RawFinding;
+import com.company.secscan.intel.EolCycleRepository;
 import com.company.secscan.intel.EpssScore;
 import com.company.secscan.intel.EpssScoreRepository;
 import com.company.secscan.intel.KevEntryRepository;
@@ -7,7 +10,9 @@ import com.company.secscan.scoring.ScoreInput;
 import com.company.secscan.scoring.ScoreLine;
 import com.company.secscan.scoring.ScoreResult;
 import com.company.secscan.scoring.Scoring;
+import com.company.secscan.scoring.TestPaths;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -30,10 +35,13 @@ public class SubIssueScorer {
 
     private final KevEntryRepository kevEntries;
     private final EpssScoreRepository epssScores;
+    private final EolCycleRepository eolCycles;
 
-    public SubIssueScorer(KevEntryRepository kevEntries, EpssScoreRepository epssScores) {
+    public SubIssueScorer(KevEntryRepository kevEntries, EpssScoreRepository epssScores,
+                          EolCycleRepository eolCycles) {
         this.kevEntries = kevEntries;
         this.epssScores = epssScores;
+        this.eolCycles = eolCycles;
     }
 
     /**
@@ -56,8 +64,20 @@ public class SubIssueScorer {
         boolean onKev = !cves.isEmpty() && !kevEntries.findPresentCves(cves).isEmpty();
         BigDecimal epss = maxEpss(cves);
 
+        // EOL base (D-055): resolve the cycle's current status from the eol_cycle cache. A persisted EOL sub
+        // normally has coverage (the enricher required it to create the finding); recompute here so the re-score
+        // path also reflects a cycle that has since crossed its EOL date. Null when type != eol / no coverage.
+        String eolStatus = null;
+        if (RawFinding.TYPE_EOL.equals(sub.getType())) {
+            eolStatus = eolCycles.findByProductAndCycle(sub.getPackageName(), sub.getInstalledVersion())
+                    .map(c -> EolStatus.of(c.isEol(), c.getEolFrom(), LocalDate.now()))
+                    .orElse(null);
+        }
+        // SAST test-path −15 (Scoring applies it only for SAST); derived from the finding's path, never stored.
+        boolean testPath = TestPaths.isTestPath(sub.getFilePath());
+
         ScoreInput in = new ScoreInput(sub.getType(), sub.getToolSeverity(), sub.getSeverityLabel(),
-                sub.getRuleId(), onKev, repoSensitivity);
+                sub.getRuleId(), onKev, repoSensitivity, eolStatus, testPath);
         ScoreResult result = Scoring.score(in);
 
         String unmapped = null;
