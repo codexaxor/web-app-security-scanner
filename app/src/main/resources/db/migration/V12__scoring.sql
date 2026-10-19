@@ -30,7 +30,7 @@ alter table scan_finding add column cve_aliases    jsonb;
 -- Revisit when multi-tenant intel isolation or per-workspace fix-time is needed.
 
 -- CISA KEV catalog (D-046): a CVE present here adds +5 and an on_kev line to any sub-issue whose vuln id or any
--- cve_alias matches. Loaded daily by KevSyncJob (api profile). US-gov public domain.
+-- cve_alias matches. Loaded daily by KevSyncService (via IntelSyncScheduler, api profile). US-gov public domain.
 create table kev_entry (
     cve        text        primary key,
     vuln_name  text,
@@ -38,7 +38,7 @@ create table kev_entry (
     synced_at  timestamptz not null default now()
 );
 
--- FIRST EPSS (D-047): exploitation probability + percentile per CVE. Loaded daily by EpssSyncJob (api profile).
+-- FIRST EPSS (D-047): exploitation probability + percentile per CVE. Loaded daily by EpssSyncService (api profile).
 -- Stored and exposed, but EPSS score adjustments stay OFF in M5 (an M7 toggle). Data (c) FIRST.org.
 create table epss_score (
     cve        text        primary key,

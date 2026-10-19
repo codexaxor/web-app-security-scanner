@@ -4,6 +4,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.intel.IntelRows.EpssRow;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -51,6 +52,10 @@ class IntelSyncIT {
         registry.add("secscan.intel.kev-url", () -> WIREMOCK.baseUrl() + "/kev.json");
         registry.add("secscan.intel.epss-url", () -> WIREMOCK.baseUrl() + "/epss.csv.gz");
         registry.add("secscan.intel.scheduled-sync-enabled", () -> "false");
+        // Low floors so these tiny-row tests load; the empty/short-feed guard (SF2) still trips on a 0-row feed.
+        registry.add("secscan.intel.min-kev-rows", () -> "1");
+        registry.add("secscan.intel.min-epss-rows", () -> "1");
+        registry.add("secscan.intel.min-retained-fraction", () -> "0");
     }
 
     @Autowired
@@ -126,6 +131,58 @@ class IntelSyncIT {
         assertThat(epssScores.findById("CVE-2022-42889").orElseThrow().getEpss())
                 .isEqualByComparingTo("0.94412");
         assertThat(epssScores.findById("CVE-2000-0001")).isEmpty();
+    }
+
+    @Test
+    void emptyKevFeedDoesNotWipeTheExistingCatalog() {
+        // Seed a healthy catalog, then an empty-200 ({}) refresh: the guard (SF2) must keep the existing rows so
+        // KEV +5 scoring still works, never delete-then-load-nothing.
+        kevEntries.save(new KevEntry("CVE-2021-44228", "Log4Shell", LocalDate.of(2021, 12, 10)));
+        WIREMOCK.stubFor(get(urlEqualTo("/kev.json")).willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json").withBody("{}")));
+
+        int loaded = kevSync.refresh();
+
+        assertThat(loaded).isEqualTo(1);                          // the one existing row, kept
+        assertThat(kevEntries.count()).isEqualTo(1);
+        assertThat(kevEntries.findById("CVE-2021-44228")).isPresent(); // +5 for this CVE still resolves
+    }
+
+    @Test
+    void kevHttpErrorDoesNotWipeTheExistingCatalog() {
+        kevEntries.save(new KevEntry("CVE-2021-44228", "Log4Shell", LocalDate.of(2021, 12, 10)));
+        WIREMOCK.stubFor(get(urlEqualTo("/kev.json")).willReturn(aResponse().withStatus(500)));
+
+        assertThatThrownBy(() -> kevSync.refresh()).isInstanceOf(RuntimeException.class);
+
+        assertThat(kevEntries.count()).isEqualTo(1);              // fetch failed before any delete; rows survive
+        assertThat(kevEntries.findById("CVE-2021-44228")).isPresent();
+    }
+
+    @Test
+    void emptyEpssFeedDoesNotWipeTheExistingScores() {
+        // Header-only CSV parses to 0 rows; the guard keeps the existing scores.
+        epssScores.save(new EpssScore("CVE-2021-44228", new BigDecimal("0.97500"), new BigDecimal("0.99950")));
+        WIREMOCK.stubFor(get(urlEqualTo("/epss.csv.gz")).willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/gzip")
+                .withBody(gzip("#model_version:v2026.03.14\ncve,epss,percentile\n"))));
+
+        int loaded = epssSync.refresh();
+
+        assertThat(loaded).isEqualTo(1);
+        assertThat(epssScores.count()).isEqualTo(1);
+        assertThat(epssScores.findById("CVE-2021-44228")).isPresent();
+    }
+
+    @Test
+    void epssHttpErrorDoesNotWipeTheExistingScores() {
+        epssScores.save(new EpssScore("CVE-2021-44228", new BigDecimal("0.97500"), new BigDecimal("0.99950")));
+        WIREMOCK.stubFor(get(urlEqualTo("/epss.csv.gz")).willReturn(aResponse().withStatus(500)));
+
+        assertThatThrownBy(() -> epssSync.refresh()).isInstanceOf(RuntimeException.class);
+
+        assertThat(epssScores.count()).isEqualTo(1);
+        assertThat(epssScores.findById("CVE-2021-44228")).isPresent();
     }
 
     private static byte[] gzip(String s) {

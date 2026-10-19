@@ -16,8 +16,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Loads the FIRST EPSS bulk scores into {@code epss_score} (D-047). The feed is a full daily snapshot of
  * ~350k rows, so this does a bulk staged swap (change #3), never row-by-row upserts: batch-insert into a
- * session-temp table, then one upsert into {@code epss_score} and one delete of CVEs no longer present. A
- * global cache (D-050); no workspace scope. EPSS is stored and displayed but NOT applied to scores in M5.
+ * session-temp table, then one upsert into {@code epss_score} and one delete of CVEs no longer present — unless
+ * the empty/short-feed guard (SF2) rejects the parsed set, in which case the existing scores are kept untouched.
+ * A global cache (D-050); no workspace scope. EPSS is stored and displayed but NOT applied to scores in M5.
+ * Loaded daily by {@code EpssSyncService} via {@code IntelSyncScheduler} (api profile).
  */
 @Profile("api")
 @Service
@@ -28,11 +30,14 @@ public class EpssSyncService {
 
     private final IntelFetcher fetcher;
     private final JdbcTemplate jdbc;
+    private final IntelProperties props;
     private final TransactionTemplate tx;
 
-    public EpssSyncService(IntelFetcher fetcher, JdbcTemplate jdbc, PlatformTransactionManager txManager) {
+    public EpssSyncService(IntelFetcher fetcher, JdbcTemplate jdbc, IntelProperties props,
+                           PlatformTransactionManager txManager) {
         this.fetcher = fetcher;
         this.jdbc = jdbc;
+        this.props = props;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -40,17 +45,26 @@ public class EpssSyncService {
     public int refresh() {
         List<EpssRow> rows = fetcher.fetchEpss();
         int n = load(rows);
-        log.info("EPSS sync loaded {} rows", n);
+        log.info("EPSS sync: {} rows now loaded", n);
         return n;
     }
 
     /**
      * Staged bulk load of already-fetched rows. Wrapped in an explicit transaction (not {@code @Transactional},
      * which {@link #refresh()}'s self-invocation would bypass) so the session-temp staging table (created
-     * {@code on commit drop}) and the swap share one connection and commit atomically.
+     * {@code on commit drop}) and the swap share one connection and commit atomically. Aborts the swap (keeps the
+     * existing scores) when the parsed set fails the empty/short-feed guard (SF2). Returns the row count now in
+     * the table.
      */
     public int load(List<EpssRow> rows) {
-        return tx.execute(status -> jdbc.execute((Connection con) -> {
+        return tx.execute(status -> {
+            Long currentBox = jdbc.queryForObject("select count(*) from epss_score", Long.class);
+            long current = currentBox == null ? 0 : currentBox;
+            if (!IntelLoadGuard.shouldReplace(log, "EPSS", rows.size(), current, props.getMinEpssRows(),
+                    props.getMinRetainedFraction())) {
+                return (int) current; // keep the existing scores; never delete-then-load-nothing
+            }
+            return jdbc.execute((Connection con) -> {
             try (Statement s = con.createStatement()) {
                 s.execute("create temporary table epss_stage (cve text primary key, epss numeric, "
                         + "percentile numeric) on commit drop");
@@ -80,6 +94,7 @@ public class EpssSyncService {
                         + "(select 1 from epss_stage s where s.cve = e.cve)");
             }
             return rows.size();
-        }));
+            });
+        });
     }
 }

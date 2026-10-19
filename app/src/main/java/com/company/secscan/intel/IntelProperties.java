@@ -20,6 +20,16 @@ public class IntelProperties {
     /** Whether the daily @Scheduled sync runs (api profile). Off in tests that drive sync explicitly. */
     private boolean scheduledSyncEnabled = true;
 
+    /**
+     * Empty/short-feed guard (SF2). A full-refresh replace is ABORTED (existing rows kept, error logged) when the
+     * parsed row count is 0, below the per-feed absolute floor, or below {@link #minRetainedFraction} of the
+     * current table size — so a transient truncated/garbled download never wipes the catalog. Live sizes are
+     * ~1.3k KEV and ~350k EPSS; the floors are deliberately far below those but far above a corrupt handful.
+     */
+    private int minKevRows = 100;
+    private int minEpssRows = 1000;
+    private double minRetainedFraction = 0.5;
+
     private Duration connectTimeout = Duration.ofSeconds(10);
     private Duration readTimeout = Duration.ofMinutes(5);
 
@@ -45,6 +55,30 @@ public class IntelProperties {
 
     public void setScheduledSyncEnabled(boolean scheduledSyncEnabled) {
         this.scheduledSyncEnabled = scheduledSyncEnabled;
+    }
+
+    public int getMinKevRows() {
+        return minKevRows;
+    }
+
+    public void setMinKevRows(int minKevRows) {
+        this.minKevRows = minKevRows;
+    }
+
+    public int getMinEpssRows() {
+        return minEpssRows;
+    }
+
+    public void setMinEpssRows(int minEpssRows) {
+        this.minEpssRows = minEpssRows;
+    }
+
+    public double getMinRetainedFraction() {
+        return minRetainedFraction;
+    }
+
+    public void setMinRetainedFraction(double minRetainedFraction) {
+        this.minRetainedFraction = minRetainedFraction;
     }
 
     public Duration getConnectTimeout() {

@@ -9,7 +9,8 @@ import java.time.Instant;
 
 /**
  * One FIRST EPSS row (D-047): exploitation probability and percentile for a CVE. A global intel cache with no
- * {@code workspace_id} (D-050). Loaded daily by {@code EpssSyncJob} (api profile). The value is stored and
+ * {@code workspace_id} (D-050). Loaded daily by {@code EpssSyncService} (via {@code IntelSyncScheduler}, api
+ * profile). The value is stored and
  * exposed on the sub-issue (with the {@code (c) FIRST.org} attribution), but EPSS score adjustments stay OFF in
  * M5 (an M7 toggle) — the scorer never reads EPSS.
  */

@@ -10,7 +10,8 @@ import java.time.LocalDate;
 /**
  * One CISA KEV catalog row (D-046), keyed on the CVE. A global intel cache with no {@code workspace_id} (D-050):
  * KEV is public, CVE-keyed reference data joined to workspace-scoped sub-issues by CVE. Loaded daily by
- * {@code KevSyncJob} (api profile). A sub-issue whose vuln id or any {@code cve_alias} appears here gets +5.
+ * {@code KevSyncService} (via {@code IntelSyncScheduler}, api profile). A sub-issue whose vuln id or any
+ * {@code cve_alias} appears here gets +5.
  */
 @Entity
 @Table(name = "kev_entry")
