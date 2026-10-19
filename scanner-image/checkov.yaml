@@ -21,6 +21,7 @@ framework:
 # container's network isolation and CKV_SKIP_PACKAGE_UPDATE_CHECK=True (set in run-scan.sh) this means zero
 # egress; the Opengrep/Checkov config-injection ITs run the container with the network disabled to prove it.
 skip-download: true
-# Compact + quiet keep the (unused) CLI chatter down; we consume the JSON report, not stdout.
+# `compact` drops the code blocks (we consume the JSON, not stdout). We DELIBERATELY do NOT set `quiet`: it
+# strips passed_checks AND skipped_checks from the JSON, and D-037 requires us to RECOVER inline `#checkov:skip`
+# suppressions from skipped_checks[] and promote them back to findings.
 compact: true
-quiet: true

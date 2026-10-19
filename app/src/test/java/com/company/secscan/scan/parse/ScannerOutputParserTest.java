@@ -505,6 +505,39 @@ class ScannerOutputParserTest {
         assertThat(cors.cwe()).containsExactly("CWE-942: Permissive Cross-domain Policy"); // string coerced to list
     }
 
+    @org.junit.jupiter.api.Test
+    void parsesCheckovArrayFailedAndRecoversSkippedAndStripsLeadingSlash(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/checkov/multi-framework.json", outDir);
+
+        java.util.List<RawFinding> findings = parser.parseCheckov(json);
+
+        // 1 failed (terraform) + 1 skipped-recovered (terraform) + 1 failed (dockerfile); the empty "secrets"
+        // report with no results contributes nothing.
+        assertThat(findings).hasSize(3);
+        assertThat(findings).allSatisfy(f -> assertThat(f.type()).isEqualTo(RawFinding.TYPE_IAC));
+
+        RawFinding failed = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_23")).findFirst()
+                .orElseThrow();
+        assertThat(failed.filePath()).isEqualTo("main.tf");            // leading slash stripped
+        assertThat(failed.packageName()).isEqualTo("aws_security_group.open"); // resource in the package column
+
+        // D-037: the inline-skipped check is RECOVERED and promoted to a finding.
+        RawFinding recovered = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_21")).findFirst()
+                .orElseThrow();
+        assertThat(recovered.packageName()).isEqualTo("aws_s3_bucket.logs");
+        assertThat(recovered.filePath()).isEqualTo("main.tf");
+
+        RawFinding docker = findings.stream().filter(f -> f.ruleId().equals("CKV_DOCKER_2")).findFirst()
+                .orElseThrow();
+        assertThat(docker.filePath()).isEqualTo("Dockerfile");
+    }
+
+    @org.junit.jupiter.api.Test
+    void parsesCheckovSummaryOnlyObjectAsNoFindings(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/checkov/empty.json", outDir);
+        assertThat(parser.parseCheckov(json)).isEmpty();
+    }
+
     private Path sample(String resource, Path outDir) throws Exception {
         Path target = outDir.resolve(resource.substring(resource.lastIndexOf('/') + 1));
         copyResource(resource, target);

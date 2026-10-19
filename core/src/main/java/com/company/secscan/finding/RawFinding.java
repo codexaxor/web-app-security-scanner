@@ -85,4 +85,18 @@ public record RawFinding(
         return new RawFinding(TYPE_SAST, SCANNER_SAST, ruleId, null, null, null, null, null, filePath, line,
                 snippetHash, null, null, toolSeverity, null, severityLabel, cwe, null, null);
     }
+
+    /**
+     * An IaC finding (Checkov, M6). {@code ruleId} is the Checkov {@code check_id}, {@code resourceName} the
+     * Checkov {@code resource} (e.g. {@code aws_s3_bucket.foo}) — with {@code filePath} these are the IaC
+     * fingerprint ({@code rule_id | file_path | resource_name}), never the line number. The resource name is
+     * carried in {@code packageName} (the column reused for it; see {@code ReconcileService.fingerprintOf}).
+     * {@code line} is display only; {@code severityLabel} is usually null (OSS Checkov checks carry no
+     * severity), which the scorer maps to the IaC base MEDIUM (D-054).
+     */
+    public static RawFinding iac(String ruleId, String filePath, String resourceName, Integer line,
+                                 String severityLabel) {
+        return new RawFinding(TYPE_IAC, SCANNER_IAC, ruleId, null, resourceName, null, null, null, filePath,
+                line, null, null, null, null, null, severityLabel, null, null, null);
+    }
 }

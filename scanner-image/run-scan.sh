@@ -315,6 +315,14 @@ fi
 IAC_JSON="$OUT/checkov.json"
 CHECKOV_VERSION="$(checkov --version 2>/dev/null | head -1)"
 export CKV_SKIP_PACKAGE_UPDATE_CHECK=True
+# D-037: Checkov reads an in-repo .checkov.yaml/.checkov.yml from the scanned tree and HONORS its `skip-check`
+# EVEN when we pass our own --config-file (verified), so a repo could silently hide its own findings. Our
+# --config-file cannot override that, so we REMOVE every in-repo Checkov config from the EPHEMERAL in-container
+# clone (never the real repo — the clone dies with the container; D-030 is about the real repository) before
+# scanning. Inline `#checkov:skip=` comments cannot be disabled this way, but Checkov still lists them in
+# skipped_checks[], which the parser recovers and promotes back to findings. Together these ensure a scanned
+# repo cannot weaken its own IaC scan.
+find "$CHECKOUT" -type f \( -name '.checkov.yaml' -o -name '.checkov.yml' \) -delete 2>/dev/null || true
 START="$(date +%s)"
 set +e
 # `checkov -o json` writes the JSON report to stdout (the banner/chatter goes to stderr); capture each separately.

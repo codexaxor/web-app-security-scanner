@@ -72,10 +72,13 @@ GitHub-Action supply-chain incident).
   so docker-compose misconfig coverage is a recorded gap too (deferred register).
 - **Offline (SHOULD-FIX 3):** `--skip-download` (baked in `checkov.yaml`) + env `CKV_SKIP_PACKAGE_UPDATE_CHECK=True`
   suppress every network call; the config-injection ITs run the container with the network disabled to prove it.
-- **In-repo config ignored (D-037):** our baked `--config-file /etc/secscan/checkov.yaml` is passed so the repo's
-  `.checkov.yaml` is not loaded. Inline `#checkov:skip=` CANNOT be disabled by a flag, but a skipped check is
-  still reported in `results.skipped_checks[]` — the parser **recovers** those and promotes them back to
-  findings. Proven by `CheckovConfigInjectionIT`.
+- **In-repo config ignored (D-037):** passing our `--config-file` does NOT stop Checkov reading and honoring an
+  in-repo `.checkov.yaml`/`.checkov.yml` (verified: its `skip-check` silently suppresses findings even with our
+  `--config-file`). So run-scan.sh **deletes** every in-repo Checkov config from the EPHEMERAL in-container clone
+  before scanning (the clone dies with the container; the real repo is untouched, D-030). Inline `#checkov:skip=`
+  CANNOT be disabled by a flag, but a skipped check is still reported in `results.skipped_checks[]` — the parser
+  **recovers** those and promotes them back to findings. (`quiet` is NOT set in `checkov.yaml`: it would strip
+  `skipped_checks` and defeat the recovery.) Both paths proven by `CheckovConfigInjectionIT`.
 - **JSON shape:** multi-framework output is a JSON **array** of per-`check_type` report objects; a single
   matching framework is one object; an empty scan is a summary-only object (no `results`). The parser handles
   all three. Fields used: `check_id` (→ rule_id), `file_path` (leading `/` stripped → repo-relative), `resource`

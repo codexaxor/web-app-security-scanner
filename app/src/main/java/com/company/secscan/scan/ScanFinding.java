@@ -175,6 +175,22 @@ public class ScanFinding {
         return f;
     }
 
+    /**
+     * An IaC finding from Checkov (M6). {@code ruleId} = check_id, {@code resourceName} = Checkov resource
+     * (stored in the {@code package} column) — with {@code filePath} these are the IaC fingerprint (never
+     * {@code line}). {@code line} is display-only; {@code severityLabel} is usually null (→ base MEDIUM, D-054).
+     */
+    public static ScanFinding iac(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
+                                  String filePath, String resourceName, Integer line, String severityLabel) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_IAC, ScanTask.SCANNER_IAC);
+        f.ruleId = ruleId;
+        f.filePath = filePath;
+        f.packageName = resourceName; // the resource name is carried in the package column (fingerprint input)
+        f.line = line;
+        f.severityLabel = severityLabel;
+        return f;
+    }
+
     public UUID getId() {
         return id;
     }

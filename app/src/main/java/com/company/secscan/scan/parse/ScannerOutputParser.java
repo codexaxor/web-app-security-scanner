@@ -96,6 +96,8 @@ public class ScannerOutputParser {
                         warnings, syntheticPoms));
             } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
+            } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
+                findings.addAll(parseCheckov(outDir.resolve(s.findingsFile)));
             }
         }
 
@@ -272,6 +274,84 @@ public class ScannerOutputParser {
             out.add(RawFinding.sast(r.checkId, filePath, line, snippetHash, label, rawLevel, cwe));
         }
         return out;
+    }
+
+    /**
+     * Parses Checkov JSON ({@code checkov.json}) into one {@link RawFinding} per IaC misconfiguration (M6,
+     * D-054). The output is a JSON ARRAY of per-{@code check_type} reports when several frameworks match, a
+     * single report object for one framework, or a summary-only object (no {@code results}) when nothing matched
+     * — all handled. Both {@code failed_checks} and {@code skipped_checks} become findings: an inline
+     * {@code #checkov:skip} cannot be disabled by a flag, so we RECOVER the skipped checks and promote them back
+     * (D-037) — a scanned repo cannot hide its own IaC findings. The IaC fingerprint is
+     * {@code rule_id | file_path | resource_name} (the resource goes in the {@code package} column), never the
+     * line number; Checkov's {@code file_path} has a leading {@code /} (relative to the scan root) which is
+     * stripped to a repo-relative path.
+     */
+    List<RawFinding> parseCheckov(Path json) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+            root = mapper.readTree(json.toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not parse scanner output " + json.getFileName(), e);
+        }
+        if (root == null || root.isNull()) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        List<com.fasterxml.jackson.databind.JsonNode> reports = new ArrayList<>();
+        if (root.isArray()) {
+            root.forEach(reports::add);
+        } else {
+            reports.add(root);
+        }
+        for (com.fasterxml.jackson.databind.JsonNode report : reports) {
+            com.fasterxml.jackson.databind.JsonNode results = report.get("results");
+            if (results == null || results.isNull()) {
+                continue; // summary-only object (nothing matched this framework)
+            }
+            addCheckovFindings(results.get("failed_checks"), out);
+            addCheckovFindings(results.get("skipped_checks"), out); // D-037 recovery (promote suppressed)
+        }
+        return out;
+    }
+
+    /** Emits a SAST-style IaC {@link RawFinding} for each check in a Checkov {@code failed_checks}/{@code
+     * skipped_checks} array ({@code null}/non-array is ignored). */
+    private static void addCheckovFindings(com.fasterxml.jackson.databind.JsonNode checks, List<RawFinding> out) {
+        if (checks == null || !checks.isArray()) {
+            return;
+        }
+        for (com.fasterxml.jackson.databind.JsonNode c : checks) {
+            String checkId = text(c, "check_id");
+            if (checkId == null) {
+                continue;
+            }
+            String resource = text(c, "resource");
+            String filePath = stripLeadingSlash(text(c, "file_path"));
+            Integer line = null;
+            com.fasterxml.jackson.databind.JsonNode range = c.get("file_line_range");
+            if (range != null && range.isArray() && !range.isEmpty() && range.get(0).isInt()) {
+                line = range.get(0).asInt();
+            }
+            String severityLabel = text(c, "severity"); // usually null for OSS checks → base MEDIUM (D-054)
+            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel));
+        }
+    }
+
+    private static String text(com.fasterxml.jackson.databind.JsonNode node, String field) {
+        com.fasterxml.jackson.databind.JsonNode v = node == null ? null : node.get(field);
+        return v == null || v.isNull() ? null : v.asText();
+    }
+
+    /** Checkov reports {@code file_path} relative to the scan root with a leading {@code /}; strip it. */
+    static String stripLeadingSlash(String path) {
+        if (path == null) {
+            return null;
+        }
+        return path.startsWith("/") ? path.substring(1) : path;
     }
 
     /**

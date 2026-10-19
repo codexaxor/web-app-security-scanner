@@ -205,7 +205,11 @@ public class ScanStateService {
             return ScanFinding.sast(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.line(),
                     f.snippetHash(), f.severityLabel(), f.toolSeverity(), f.cwe());
         }
-        // IaC/EOL are added with their scanners (Slices 2-3).
+        if (RawFinding.TYPE_IAC.equals(f.type())) {
+            return ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.packageName(),
+                    f.line(), f.severityLabel());
+        }
+        // EOL is added with its scanner (Slice 3).
         throw new IllegalStateException("Unsupported finding type for persistence: " + f.type());
     }
 }
