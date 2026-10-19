@@ -748,6 +748,24 @@ Decision: `workspace_id` on every business table from day one.
 
 ## Open decisions
 
+- M6 deferred register (recorded 2026-10-20, for M7+):
+  - **SAST rule-pack SaaS licensing** (D-053): opengrep/opengrep-rules carries a Commons Clause (no resale/SaaS).
+    Internal use is fine; recheck before any multi-tenant/SaaS deployment (the open SPEC item + D-005).
+  - **Opengrep bump re-fingerprint risk** (NIT 9): the SAST fingerprint hashes the normalized `extra.lines`
+    snippet; a future Opengrep version that changes how `extra.lines` is emitted could re-fingerprint stored
+    SAST sub-issues (mass solve+reopen). Verify the snippet output is unchanged (or time a deliberate
+    re-fingerprint) before bumping Opengrep.
+  - **IaC severity override table** (D-054, NIT 7): all IaC findings score base 50 in M6 (OSS Checkov has no
+    severity). A maintained per-`check_id` severity override is deferred.
+  - **Checkov Helm + docker-compose coverage** (D-054): Helm charts are not rendered (needs the helm binary,
+    D-004 — an `IAC_HELM_NOT_RENDERED` warning is raised); Checkov 3.3.29 has no `docker_compose` framework.
+    Revisit if/when a safe static path exists.
+  - **By design (NIT 11):** two identical SAST snippets in the same file share one fingerprint
+    (`rule_id | file_path | normalized_snippet_hash`) and collapse to a single sub-issue (first-wins dedup);
+    EOL findings require the `eol_cycle` cache to be populated at scan time (an unsynced product makes the EOL
+    scanner non-solvable that scan, D-055 / BLOCKER 2).
+  - **SAST test-path is an adjustment, not an exclusion:** the −15 is itemized in `score_breakdown`; dev/test
+    scope EXCLUSION (`DEV_DEPENDENCY`/`TEST_SCOPE` auto-triage) remains M7.
 - OD-1 Gradle repos without lockfiles — PARTLY RESOLVED by D-031 (warn-only in M4); finished in M4b
 - OD-2 .NET repos without `packages.lock.json` — PARTLY RESOLVED by D-031 (`.csproj` direct fallback in M4);
   finished in M4b
