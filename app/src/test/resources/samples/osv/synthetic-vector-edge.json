@@ -1,0 +1,41 @@
+{
+  "_synthetic": "SYNTHETIC, hand-written (SF6). NOT a real osv-scanner capture. It isolates two parser edge cases that no real fixture advisory exercises: (a) a vulnerability carrying BOTH a CVSS v3 and a CVSS v4 vector, to prove v4 is chosen (D-044); (b) an explicitly EMPTY cwe_ids array, to prove the parser yields an empty CWE list so the group subtitle falls back to the advisory summary (D-048). Real v4-only and no-CVSS cases live in no-cvss.json. Package/id are obviously fake.",
+  "results": [
+    {
+      "source": { "path": "/work/checkout/pom.xml", "type": "lockfile" },
+      "packages": [
+        {
+          "package": {
+            "name": "com.example:synthetic-both-vectors",
+            "version": "1.0.0",
+            "ecosystem": "Maven"
+          },
+          "groups": [
+            {
+              "ids": ["GHSA-synthetic-0001"],
+              "aliases": ["CVE-2024-0001", "GHSA-synthetic-0001"],
+              "max_severity": "8.7"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "id": "GHSA-synthetic-0001",
+              "summary": "Synthetic finding with both CVSS v3 and v4 vectors and no CWE",
+              "severity": [
+                { "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "type": "CVSS_V3" },
+                { "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N", "type": "CVSS_V4" }
+              ],
+              "database_specific": {
+                "severity": "HIGH",
+                "cwe_ids": []
+              },
+              "affected": [
+                { "ranges": [ { "events": [ { "introduced": "0" }, { "fixed": "1.1.0" } ] } ] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

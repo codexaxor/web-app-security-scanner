@@ -201,13 +201,30 @@ public class ScannerOutputParser {
                     continue;
                 }
                 String fixed = fixedVersion(p);
+                // Match each alias group to its vulnerability object to pull the CVSS vector, advisory label,
+                // CWE ids and summary (M5 enrichment, D-044/D-048). None of this feeds the fingerprint.
+                Map<String, OsvVuln> vulnsById = new java.util.HashMap<>();
+                if (p.vulnerabilities != null) {
+                    for (OsvVuln v : p.vulnerabilities) {
+                        if (v.id != null) {
+                            vulnsById.put(v.id, v);
+                        }
+                    }
+                }
                 for (OsvGroup g : p.groups) {
                     String vulnId = pickVulnId(g.ids, g.aliases);
                     if (vulnId == null) {
                         continue;
                     }
+                    OsvVuln v = matchVuln(g, vulnsById);
+                    String cvss = chooseVector(v);
+                    String label = v != null && v.databaseSpecific != null ? v.databaseSpecific.severity : null;
+                    List<String> cwe = v != null && v.databaseSpecific != null
+                            && v.databaseSpecific.cweIds != null
+                            ? List.copyOf(v.databaseSpecific.cweIds) : List.of();
+                    String summary = v != null ? v.summary : null;
                     out.add(RawFinding.sca(vulnId, pkg.name, pkg.ecosystem, pkg.version, fixed, manifestPath,
-                            g.maxSeverity));
+                            g.maxSeverity, cvss, label, cwe, cveAliasesOf(g), summary));
                 }
             }
         }
@@ -301,6 +318,71 @@ public class ScannerOutputParser {
             }
         }
         return all.first();
+    }
+
+    /** The vulnerability object for an alias group: the first of the group's ids, then aliases, present by id. */
+    private static OsvVuln matchVuln(OsvGroup g, Map<String, OsvVuln> vulnsById) {
+        if (g.ids != null) {
+            for (String id : g.ids) {
+                OsvVuln v = vulnsById.get(id);
+                if (v != null) {
+                    return v;
+                }
+            }
+        }
+        if (g.aliases != null) {
+            for (String a : g.aliases) {
+                OsvVuln v = vulnsById.get(a);
+                if (v != null) {
+                    return v;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The CVSS vector string to persist as {@code cvss} (D-044): the CVSS v4 vector if present (OSV folds v4 into
+     * max_severity and we prefer it for display, SPEC "v4, else v3.1"), else a CVSS v3 vector, else null. The
+     * numeric base used for scoring comes from {@code max_severity}, not from this vector.
+     */
+    static String chooseVector(OsvVuln v) {
+        if (v == null || v.severity == null) {
+            return null;
+        }
+        String v3 = null;
+        for (OsvSeverity s : v.severity) {
+            if (s == null || s.score == null || s.score.isBlank()) {
+                continue;
+            }
+            if ("CVSS_V4".equalsIgnoreCase(s.type)) {
+                return s.score.trim();
+            }
+            if (v3 == null && s.type != null && s.type.toUpperCase(java.util.Locale.ROOT).startsWith("CVSS_V3")) {
+                v3 = s.score.trim();
+            }
+        }
+        return v3;
+    }
+
+    /** The group's CVE aliases (ids + aliases filtered to {@code CVE-…}), deduped and ordered, for KEV matching. */
+    static List<String> cveAliasesOf(OsvGroup g) {
+        TreeSet<String> cves = new TreeSet<>();
+        if (g.ids != null) {
+            for (String id : g.ids) {
+                if (id != null && id.startsWith("CVE-")) {
+                    cves.add(id);
+                }
+            }
+        }
+        if (g.aliases != null) {
+            for (String a : g.aliases) {
+                if (a != null && a.startsWith("CVE-")) {
+                    cves.add(a);
+                }
+            }
+        }
+        return List.copyOf(cves);
     }
 
     /**
@@ -500,6 +582,25 @@ public class ScannerOutputParser {
     private static final class OsvVuln {
         public String id;
         public List<OsvAffected> affected;
+        public List<OsvSeverity> severity;
+        @com.fasterxml.jackson.annotation.JsonProperty("database_specific")
+        public OsvDbSpecific databaseSpecific;
+        public String summary;
+    }
+
+    /** One CVSS vector entry under a vulnerability: {@code type} ∈ CVSS_V3/CVSS_V4, {@code score} = the vector. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvSeverity {
+        public String type;
+        public String score;
+    }
+
+    /** OSV {@code vulnerabilities[].database_specific}: the advisory severity label and CWE ids (D-044/D-048). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OsvDbSpecific {
+        public String severity;
+        @com.fasterxml.jackson.annotation.JsonProperty("cwe_ids")
+        public List<String> cweIds;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

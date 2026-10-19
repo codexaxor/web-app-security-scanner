@@ -1,0 +1,10 @@
+# Test-profile override (N7). The daily KEV/EPSS @Scheduled sync is OFF by default for EVERY api-profile
+# integration test, so no test can ever reach the real CISA/FIRST feeds on the cron — not even if one runs at
+# the cron hour. Tests that exercise sync drive it explicitly (KevSyncService/EpssSyncService/the admin
+# endpoint) and point the feed URLs at a local WireMock via @DynamicPropertySource, which outranks this file.
+#
+# This shadows the main application-api.yml on the test classpath; its only setting (server.port) is irrelevant
+# under the MOCK/NONE web environments the ITs use.
+secscan:
+  intel:
+    scheduled-sync-enabled: false

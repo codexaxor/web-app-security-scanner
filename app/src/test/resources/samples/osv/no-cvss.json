@@ -1,0 +1,199 @@
+{
+  "_provenance": "REAL OSV data (SF6). Vulnerability records are verbatim osv.dev advisories wrapped in the OSV-Scanner v2.7.0 output envelope (source/package/groups/max_severity) matching gradle-synthetic-multimodule-real.json. Case 1 = ch.qos.logback:logback-core 1.2.11 / GHSA-25qh-j22f-pwp8, a real v4-only advisory from the sca-gradle-multimodule fixture (max_severity 5.9 carried from that real capture; database_specific + summary restored verbatim from osv.dev, which the M4 capture had trimmed). Case 2 = lodash 4.17.4 / GHSA-4xc9-xhrj-v574, a real no-CVSS advisory (empty severity -> max_severity \"\", label HIGH, CWE-400) from the sca-npm fixture. The pinned osv-scanner binary could not be executed in this session (github release egress blocked); api.osv.dev was reachable, so the advisory content is genuine. Synthetic vector/CWE edge cases live in synthetic-vector-edge.json. Parser ignores this key (JsonIgnoreProperties).",
+  "results": [
+    {
+      "source": {
+        "path": "/work/synthetic/0/pom.xml",
+        "type": "unknown"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "ch.qos.logback:logback-core",
+            "version": "1.2.11",
+            "ecosystem": "Maven",
+            "purl": "pkg:maven/ch.qos.logback/logback-core@1.2.11"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GHSA-25qh-j22f-pwp8"
+              ],
+              "aliases": [
+                "CVE-2025-11226",
+                "GHSA-25qh-j22f-pwp8"
+              ],
+              "max_severity": "5.9"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "Maven",
+                    "name": "ch.qos.logback:logback-core",
+                    "purl": "pkg:maven/ch.qos.logback/logback-core"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.4.0"
+                        },
+                        {
+                          "fixed": "1.5.19"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                },
+                {
+                  "package": {
+                    "ecosystem": "Maven",
+                    "name": "ch.qos.logback:logback-core",
+                    "purl": "pkg:maven/ch.qos.logback/logback-core"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.3.16"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2025-11226"
+              ],
+              "id": "GHSA-25qh-j22f-pwp8",
+              "modified": "2026-09-10T03:50:29.081250287Z",
+              "published": "2025-10-01T09:30:24Z",
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:P/VC:H/VI:L/VA:L/SC:H/SI:L/SA:L",
+                  "type": "CVSS_V4"
+                }
+              ],
+              "database_specific": {
+                "github_reviewed_at": "2025-10-21T21:10:11Z",
+                "nvd_published_at": "2025-10-01T08:15:31Z",
+                "cwe_ids": [
+                  "CWE-20"
+                ],
+                "severity": "MODERATE",
+                "github_reviewed": true
+              },
+              "summary": "QOS.CH logback-core is vulnerable to Arbitrary Code Execution through file processing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/work/checkout/package-lock.json",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "lodash",
+            "version": "4.17.4",
+            "ecosystem": "npm",
+            "purl": "pkg:npm/lodash@4.17.4"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GHSA-4xc9-xhrj-v574"
+              ],
+              "aliases": [
+                "CVE-2018-16487",
+                "GHSA-4xc9-xhrj-v574"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "id": "GHSA-4xc9-xhrj-v574",
+              "summary": "Prototype Pollution in lodash",
+              "details": "Versions of `lodash` before 4.17.11 are vulnerable to prototype pollution. \n\nThe vulnerable functions are 'defaultsDeep', 'merge', and 'mergeWith' which allow a malicious user to modify the prototype of `Object` via `{constructor: {prototype: {...}}}` causing the addition or modification of an existing property that will exist on all objects.\n\n\n\n\n## Recommendation\n\nUpdate to version 4.17.11 or later.",
+              "aliases": [
+                "CVE-2018-16487"
+              ],
+              "modified": "2025-08-12T21:55:35.778975Z",
+              "published": "2019-02-07T18:16:48Z",
+              "database_specific": {
+                "severity": "HIGH",
+                "github_reviewed": true,
+                "github_reviewed_at": "2020-06-16T20:59:41Z",
+                "nvd_published_at": null,
+                "cwe_ids": [
+                  "CWE-400"
+                ]
+              },
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2018-16487"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/lodash/lodash/commit/90e6199a161b6445b01454517b40ef65ebecd2ad"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://hackerone.com/reports/380873"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/rubysec/ruby-advisory-db/blob/master/gems/lodash-rails/CVE-2018-16487.yml"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://security.netapp.com/advisory/ntap-20190919-0004"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "name": "lodash",
+                    "ecosystem": "npm",
+                    "purl": "pkg:npm/lodash"
+                  },
+                  "ranges": [
+                    {
+                      "type": "SEMVER",
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "4.17.11"
+                        }
+                      ]
+                    }
+                  ],
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2019/02/GHSA-4xc9-xhrj-v574/GHSA-4xc9-xhrj-v574.json"
+                  }
+                }
+              ],
+              "schema_version": "1.9.0"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
