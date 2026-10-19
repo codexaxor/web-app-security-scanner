@@ -26,7 +26,7 @@ class ScoringTest {
     void cvssBaseIsMaxSeverityTimesTen() {
         ScoreResult r = Scoring.score(sca("9.8", "CRITICAL", false, "normal"));
         assertThat(r.score()).isEqualTo(98);
-        assertThat(r.baseSource()).isEqualTo("vector");
+        assertThat(r.baseSource()).isEqualTo("cvss_base");
         assertThat(r.band()).isEqualTo(Scoring.BAND_CRITICAL);
         assertThat(delta(r, "base_cvss")).isEqualTo(98);
     }
@@ -36,7 +36,7 @@ class ScoringTest {
         ScoreResult r = Scoring.score(sca("8.7", "HIGH", false, "normal"));
         assertThat(r.score()).isEqualTo(87);
         assertThat(r.band()).isEqualTo(Scoring.BAND_HIGH);
-        assertThat(r.baseSource()).isEqualTo("vector");
+        assertThat(r.baseSource()).isEqualTo("cvss_base");
     }
 
     @Test
@@ -111,16 +111,21 @@ class ScoringTest {
 
     @Test
     void secretBaseByRuleId() {
+        // SF7: only Betterleaks 1.7.3-verified rule ids are mapped — private-key & aws-access-token (cloud) 90,
+        // github-pat & generic-api-key (tokens) 75. No verified password rule id yet, so the 60 bucket is unused.
         assertThat(Scoring.score(secret("private-key")).score()).isEqualTo(90);
-        assertThat(Scoring.score(secret("github-pat")).score()).isEqualTo(75);
-        assertThat(Scoring.score(secret("generic-password")).score()).isEqualTo(60);
         assertThat(Scoring.score(secret("aws-access-token")).score()).isEqualTo(90);
+        assertThat(Scoring.score(secret("github-pat")).score()).isEqualTo(75);
+        assertThat(Scoring.score(secret("generic-api-key")).score()).isEqualTo(75);
     }
 
     @Test
     void unmappedSecretRuleDefaultsToSeventyFive() {
         assertThat(Scoring.isMappedSecretRule("totally-unknown-rule")).isFalse();
         assertThat(Scoring.score(secret("totally-unknown-rule")).score()).isEqualTo(75);
+        // A rule id dropped as unverified (SF7) now takes the default base and is treated as unmapped.
+        assertThat(Scoring.isMappedSecretRule("generic-password")).isFalse();
+        assertThat(Scoring.score(secret("generic-password")).score()).isEqualTo(75);
         assertThat(Scoring.isMappedSecretRule("private-key")).isTrue();
     }
 

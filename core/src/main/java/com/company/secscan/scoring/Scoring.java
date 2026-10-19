@@ -42,14 +42,20 @@ public final class Scoring {
     private static final int SECRET_BASE_TOKEN = 75; // also the unmapped default
     private static final int SECRET_BASE_PASSWORD = 60;
 
+    // SF7: only rule ids VERIFIED to exist in the pinned Betterleaks 1.7.3 default ruleset are mapped; every other
+    // rule falls through to the 75 default and is logged once per run (D-045) so it can be mapped deliberately.
+    // Verified against: D-045 (private-key, github-pat known-good), the captured real Betterleaks output sample
+    // (github-pat), and the secret fixtures' documented 1.7.3 behaviour (fixtures/secrets-token/README.md:
+    // github-pat is stable; aws-access-token is a composite rule in 1.7.3; a lone AWS key falls to generic-api-key;
+    // fixtures/secrets-suppressed likewise). Unverifiable guesses (aws-access-key, private-key-pem, gcp-*, azure-*,
+    // generic-password, password-in-url, github-oauth/app-token, gitlab-pat, slack-*, stripe-*, jwt) were removed —
+    // the full 442-rule ruleset could not be re-fetched here (github egress blocked). No verified password rule id
+    // yet, so SECRET_RULES_PASSWORD is intentionally empty (passwords currently take the 75 default).
     private static final Set<String> SECRET_RULES_KEY_OR_CLOUD = Set.of(
-            "private-key", "aws-access-token", "aws-access-key", "gcp-api-key", "gcp-service-account",
-            "azure-storage-account-access-key", "azure-ad-client-secret", "private-key-pem");
-    private static final Set<String> SECRET_RULES_PASSWORD = Set.of(
-            "generic-password", "password-in-url");
+            "private-key", "aws-access-token");
+    private static final Set<String> SECRET_RULES_PASSWORD = Set.of();
     private static final Set<String> SECRET_RULES_TOKEN = Set.of(
-            "github-pat", "github-oauth", "github-app-token", "gitlab-pat", "slack-access-token",
-            "stripe-access-token", "jwt", "generic-api-key");
+            "github-pat", "generic-api-key");
 
     private Scoring() {
     }
@@ -116,8 +122,8 @@ public final class Scoring {
         if (num != null) {
             int value = (int) Math.round(num * 10);
             value = Math.max(MIN_SCORE, Math.min(MAX_SCORE, value));
-            String vector = in.maxSeverity().trim();
-            return new BaseResult("base_cvss", "CVSS base " + vector + " × 10", value, "vector");
+            String cvssBase = in.maxSeverity().trim();
+            return new BaseResult("base_cvss", "CVSS base " + cvssBase + " × 10", value, "cvss_base");
         }
         int value = labelBase(in.severityLabel());
         String label = in.severityLabel() == null ? "unspecified" : in.severityLabel();
