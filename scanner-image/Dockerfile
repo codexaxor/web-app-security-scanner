@@ -146,6 +146,12 @@ RUN chmod 0444 /etc/secscan/betterleaks.toml /etc/secscan/osv-scanner.toml \
 COPY gradle_resolver.py /usr/local/bin/gradle_resolver.py
 RUN chmod 0444 /usr/local/bin/gradle_resolver.py
 
+# The static EOL detector (M6, D-055): same posture -- run `python3 -I eol_detect.py` so the scanned tree is
+# never on sys.path (D-004); reads files as data only, reaches no network. Its unit tests (eol_detect_test.py)
+# are NOT shipped -- they run on the host under ./gradlew build (eolDetectTest).
+COPY eol_detect.py /usr/local/bin/eol_detect.py
+RUN chmod 0444 /usr/local/bin/eol_detect.py
+
 COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh
 RUN chmod 0555 /usr/local/bin/secscan-lib.sh /usr/local/bin/run-scan.sh

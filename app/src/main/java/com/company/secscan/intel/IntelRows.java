@@ -21,4 +21,9 @@ public final class IntelRows {
     /** The whole KEV fetch: the catalog version (from the envelope) and its rows. */
     public record KevFeed(String catalogVersion, List<KevRow> rows) {
     }
+
+    /** One endoflife.date v1 release cycle for a product (D-055). Dates are nullable. */
+    public record EolRow(String product, String cycle, boolean eol, LocalDate eolFrom, String latest,
+                         LocalDate latestDate, LocalDate releaseDate, boolean lts, boolean maintained) {
+    }
 }

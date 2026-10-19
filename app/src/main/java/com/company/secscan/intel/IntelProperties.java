@@ -17,6 +17,13 @@ public class IntelProperties {
     /** FIRST EPSS current bulk scores, gzip CSV (data (c) FIRST.org). */
     private String epssUrl = "https://epss.cyentia.com/epss_scores-current.csv.gz";
 
+    /** endoflife.date API v1 base (MIT; D-055). Per-product release cycles are fetched under /products/<slug>/. */
+    private String eolBaseUrl = "https://endoflife.date/api/v1";
+
+    /** endoflife.date product slugs to sync — only runtimes/frameworks the EOL detector can emit (D-055). */
+    private java.util.List<String> eolProducts = java.util.List.of(
+            "spring-boot", "dotnet", "nodejs", "eclipse-temurin", "alpine-linux", "keycloak");
+
     /** Whether the daily @Scheduled sync runs (api profile). Off in tests that drive sync explicitly. */
     private boolean scheduledSyncEnabled = true;
 
@@ -47,6 +54,22 @@ public class IntelProperties {
 
     public void setEpssUrl(String epssUrl) {
         this.epssUrl = epssUrl;
+    }
+
+    public String getEolBaseUrl() {
+        return eolBaseUrl;
+    }
+
+    public void setEolBaseUrl(String eolBaseUrl) {
+        this.eolBaseUrl = eolBaseUrl;
+    }
+
+    public java.util.List<String> getEolProducts() {
+        return eolProducts;
+    }
+
+    public void setEolProducts(java.util.List<String> eolProducts) {
+        this.eolProducts = eolProducts;
     }
 
     public boolean isScheduledSyncEnabled() {

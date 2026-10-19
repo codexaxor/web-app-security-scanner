@@ -350,6 +350,34 @@ if find "$CHECKOUT" -type f -name Chart.yaml 2>/dev/null | head -1 | grep -q .; 
         ""
 fi
 
+# --- EOL detection (static; M6, D-055) ---
+# Our own detector identifies runtimes/frameworks (Spring Boot, Java, .NET, Node, Dockerfile base images, …)
+# by PARSING files only (no build execution, D-004) and emits {detections:[{product,version,cycle,filePath}]}.
+# It reaches no network; the worker joins these against the eol_cycle intel cache to decide which are actually
+# EOL/ending-soon issues. `python3 -I` keeps the scanned tree off sys.path.
+EOL_JSON="$OUT/eol.json"
+START="$(date +%s)"
+set +e
+python3 -I /usr/local/bin/eol_detect.py "$CHECKOUT" > "$EOL_JSON" 2>"$WORK/eol.log"
+EOL_EXIT=$?
+set -e
+END="$(date +%s)"
+EOL_DUR_MS=$(( (END - START) * 1000 ))
+# Success = exit 0 AND a valid JSON document with a detections array; otherwise the EOL scanner failed (and so
+# closes nothing — domain rule 3).
+if [ "$EOL_EXIT" -eq 0 ] && [ -f "$EOL_JSON" ] && jq -e 'has("detections")' "$EOL_JSON" >/dev/null 2>&1; then
+    EOL_STATUS=ok
+else
+    EOL_STATUS=failed
+fi
+[ -f "$EOL_JSON" ] || printf '{"detections":[],"warnings":[],"status":"error"}' > "$EOL_JSON"
+# Surface the detector's own warnings into the scan warnings.
+jq -c '.warnings[]?' "$EOL_JSON" >> "$WORK/warnings.ndjson" 2>/dev/null || true
+if [ "$EOL_STATUS" = "failed" ] && [ -s "$WORK/eol.log" ]; then
+    echo "eol detector failed (exit $EOL_EXIT); last output follows:" >&2
+    tail -c 2000 "$WORK/eol.log" >&2 || true
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -373,6 +401,9 @@ jq -nc \
     --arg iacstatus "$IAC_STATUS" \
     --argjson iacexit "$IAC_EXIT" \
     --argjson iacdur "$IAC_DUR_MS" \
+    --arg eolstatus "$EOL_STATUS" \
+    --argjson eolexit "$EOL_EXIT" \
+    --argjson eoldur "$EOL_DUR_MS" \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
@@ -384,14 +415,15 @@ jq -nc \
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",
          noPackages:$nopkg},
         {name:"sast", status:$saststatus, exitCode:$sastexit, durationMs:$sastdur, findingsFile:"opengrep.json"},
-        {name:"iac", status:$iacstatus, exitCode:$iacexit, durationMs:$iacdur, findingsFile:"checkov.json"}
+        {name:"iac", status:$iacstatus, exitCode:$iacexit, durationMs:$iacdur, findingsFile:"checkov.json"},
+        {name:"eol", status:$eolstatus, exitCode:$eolexit, durationMs:$eoldur, findingsFile:"eol.json"}
       ]}' \
     > "$OUT/result.json"
 
 # A scanner failure is reported per-scanner in the manifest (the worker records a partial scan). Exit non-zero
 # only to signal an unexpected scanner failure; clone failures exit 10 above.
 if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ] \
-        || [ "$SAST_STATUS" = "failed" ] || [ "$IAC_STATUS" = "failed" ]; then
+        || [ "$SAST_STATUS" = "failed" ] || [ "$IAC_STATUS" = "failed" ] || [ "$EOL_STATUS" = "failed" ]; then
     exit 20
 fi
 exit 0

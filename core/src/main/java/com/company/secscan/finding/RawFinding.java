@@ -99,4 +99,17 @@ public record RawFinding(
         return new RawFinding(TYPE_IAC, SCANNER_IAC, ruleId, null, resourceName, null, null, null, filePath,
                 line, null, null, null, null, null, severityLabel, null, null, null);
     }
+
+    /**
+     * An EOL finding candidate (static detector, M6, D-055). {@code product} is the endoflife.date slug and
+     * {@code cycle} the detected release cycle — with {@code filePath} these are the EOL fingerprint
+     * ({@code product | cycle | file_path}), never a line number. The product is carried in {@code packageName}
+     * and the cycle in {@code installedVersion} (the columns reused for them; see
+     * {@code ReconcileService.fingerprintOf}). The detector makes NO EOL judgement; whether this is an actual
+     * issue (past-EOL / ending-soon) and its base score are decided by the worker against the eol_cycle cache.
+     */
+    public static RawFinding eol(String product, String cycle, String filePath) {
+        return new RawFinding(TYPE_EOL, SCANNER_EOL, null, null, product, null, cycle, null, filePath, null,
+                null, null, null, null, null, null, null, null, null);
+    }
 }

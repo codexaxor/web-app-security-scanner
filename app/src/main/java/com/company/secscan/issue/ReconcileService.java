@@ -250,7 +250,13 @@ public class ReconcileService {
         if (ScanFinding.TYPE_SECRET.equals(f.getType())) {
             return "Exposed " + f.getRuleId();
         }
-        // SCA/SAST/IaC/EOL get plain-language titles with their scanners (M4/M6); a safe default for now.
+        if (ScanFinding.TYPE_EOL.equals(f.getType())) {
+            // SPEC EOL title: "{product} {cycle} no longer receives security updates" (product=package,
+            // cycle=installed_version in the overloaded columns).
+            return f.getPackageName() + " " + f.getInstalledVersion() + " no longer receives security updates";
+        }
+        // SCA/SAST/IaC get plain-language titles with their scanners (M4/M6); the rule/package id is a safe
+        // default.
         return f.getRuleId() != null ? f.getRuleId() : f.getPackageName();
     }
 

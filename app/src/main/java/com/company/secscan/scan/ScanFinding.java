@@ -191,6 +191,21 @@ public class ScanFinding {
         return f;
     }
 
+    /**
+     * An EOL finding (static detector, M6). {@code product} is carried in the {@code package} column and
+     * {@code cycle} in {@code installed_version} — with {@code filePath} these are the EOL fingerprint
+     * ({@code product | cycle | file_path}), never {@code line}. The EOL date/base come from the eol_cycle cache
+     * at score time, not here.
+     */
+    public static ScanFinding eol(UUID workspaceId, UUID scanId, UUID repositoryId, String product, String cycle,
+                                  String filePath) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_EOL, ScanTask.SCANNER_EOL);
+        f.packageName = product;
+        f.installedVersion = cycle;
+        f.filePath = filePath;
+        return f;
+    }
+
     public UUID getId() {
         return id;
     }

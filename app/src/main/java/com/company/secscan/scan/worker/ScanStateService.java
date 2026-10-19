@@ -2,6 +2,7 @@ package com.company.secscan.scan.worker;
 
 import com.company.secscan.config.SecretFingerprinterHolder;
 import com.company.secscan.finding.RawFinding;
+import com.company.secscan.issue.EolEnricher;
 import com.company.secscan.issue.ReconcileService;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
@@ -44,11 +45,12 @@ public class ScanStateService {
     private final RepositoryRepository repositories;
     private final SecretFingerprinterHolder fingerprinter;
     private final ReconcileService reconcile;
+    private final EolEnricher eolEnricher;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
                             ScanFindingRepository findings, ScanWarningRepository warnings,
                             RepositoryRepository repositories, SecretFingerprinterHolder fingerprinter,
-                            ReconcileService reconcile) {
+                            ReconcileService reconcile, EolEnricher eolEnricher) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
@@ -57,6 +59,7 @@ public class ScanStateService {
         this.repositories = repositories;
         this.fingerprinter = fingerprinter;
         this.reconcile = reconcile;
+        this.eolEnricher = eolEnricher;
     }
 
     @Transactional
@@ -79,23 +82,46 @@ public class ScanStateService {
         scan.finish(terminalStatus);
         scans.save(scan);
 
+        // EOL enrichment (BLOCKER 2): classify EOL candidates against the eol_cycle cache BEFORE persisting —
+        // only genuine issues (past-EOL / ending-soon) are stored, and an undeterminable detection makes the
+        // EOL scanner non-solvable this scan so it can never false-solve an open EOL finding.
+        List<RawFinding> eolCandidates = parsed.findings().stream()
+                .filter(f -> RawFinding.TYPE_EOL.equals(f.type())).toList();
+        EolEnricher.Result eol = eolEnricher.enrich(eolCandidates);
+        List<RawFinding> toPersist = new java.util.ArrayList<>();
+        for (RawFinding f : parsed.findings()) {
+            if (!RawFinding.TYPE_EOL.equals(f.type())) {
+                toPersist.add(f);
+            }
+        }
+        toPersist.addAll(eol.issues());
+
         for (ScannerTaskResult t : parsed.tasks()) {
             String status = t.succeeded() ? ScanTask.STATUS_OK : ScanTask.STATUS_FAILED;
             ScanTask task = new ScanTask(scan.getWorkspaceId(), scanId, t.name(), status, t.exitCode(),
                     t.durationMs(), logExcerpt);
-            // A no-packages SCA scan is ok but not authoritative to close findings this scan (D-034).
-            task.setClosesFindings(t.closesFindings());
+            // A no-packages SCA scan is ok but not authoritative to close findings this scan (D-034); likewise
+            // an EOL scan with an undeterminable detection is ok but must not close EOL findings (BLOCKER 2).
+            boolean closes = t.closesFindings();
+            if (ScanTask.SCANNER_EOL.equals(t.name())) {
+                closes = closes && eol.solvable();
+            }
+            task.setClosesFindings(closes);
             tasks.save(task);
         }
-        for (RawFinding f : parsed.findings()) {
+        for (RawFinding f : toPersist) {
             findings.save(toEntity(scan.getWorkspaceId(), scanId, repositoryId, f));
         }
         for (com.company.secscan.scan.parse.ScanWarning w : parsed.warnings()) {
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, w.code(), w.message(),
                     w.filePath()));
         }
-        if (!parsed.findings().isEmpty()) {
-            log.debug("Scan {} stored {} finding(s)", scanId, parsed.findings().size());
+        for (com.company.secscan.scan.parse.ScanWarning w : eol.warnings()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, w.code(), w.message(),
+                    w.filePath()));
+        }
+        if (!toPersist.isEmpty()) {
+            log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
         }
 
         repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(repo -> {
@@ -209,7 +235,10 @@ public class ScanStateService {
             return ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.packageName(),
                     f.line(), f.severityLabel());
         }
-        // EOL is added with its scanner (Slice 3).
+        if (RawFinding.TYPE_EOL.equals(f.type())) {
+            return ScanFinding.eol(workspaceId, scanId, repositoryId, f.packageName(), f.installedVersion(),
+                    f.filePath());
+        }
         throw new IllegalStateException("Unsupported finding type for persistence: " + f.type());
     }
 }

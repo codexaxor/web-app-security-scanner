@@ -14,6 +14,38 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-055 EOL via a static detector + endoflife.date API v1, with a never-false-solve guard (2026-10-20, accepted)
+Context: M6 adds end-of-life detection for runtimes/frameworks. The SPEC uses our own detector + endoflife.date
+data; we must never run a build (D-004) and never false-solve a finding.
+Decision: a **static** detector (`scanner-image/eol_detect.py`, `python3 -I`, stdlib, reads files as data —
+Spring Boot, Java, .NET TargetFramework, Node `.nvmrc`/`engines`, Dockerfile base images, Keycloak) emits
+`{product, cycle, filePath}` candidates and reaches no network; its unit tests run on the host
+(`eolDetectTest`, D-039 pattern). The worker joins candidates against the **`eol_cycle`** intel cache to decide
+which are issues.
+- **endoflife.date v1** (`https://endoflife.date/api/v1`, MIT): the weekly `EolSyncService` (api profile) does a
+  **per-product UPSERT** of `/products/<slug>/` release cycles into `eol_cycle` — it **NEVER wipes** (a failed
+  or empty product fetch keeps that product's existing rows and fails loud; other products still sync). One new
+  api-side egress host `endoflife.date` (beside KEV/EPSS; D-033). TLS always on. The v1 schema is camelCase
+  (`name`=cycle, `isEol`+`eolFrom`, `isLts`, `isMaintained`, `latest.{name,date}`, `releaseDate`); `eol_cycle`
+  column types mirror it. Confirmed slugs: `spring-boot`, `dotnet`, `nodejs`, `keycloak`, `alpine-linux`.
+  **There is no `java` product in v1** — a bare Java language level uses the slug **`eclipse-temurin`** (the
+  configurable default; a Dockerfile `FROM <vendor-jdk>:N` maps to the named distro slug). `/eol/sync` is added
+  to `AdminIntelController` (OD-9 endpoint list extended for M10 role-gating).
+- **BLOCKER 2 — never false-solve (`EolEnricher`):** for each candidate the worker looks up `eol_cycle`;
+  past-EOL / ending-soon (within 90 days, `core.eol.EolStatus`) become findings, still-maintained is dropped
+  (not an issue). A candidate with **no `eol_cycle` coverage** cannot be classified, so it is dropped AND the
+  whole EOL scanner is marked **non-solvable** for that scan (`closes_findings=false`) with an
+  `EOL_COVERAGE_GAP` warning — mirroring D-034's `NO_MANIFESTS`. So a rescan with empty/partial coverage can
+  never solve an open EOL finding (proven by `EolSolvabilityIT`). An EOL finding is solved only when the
+  detector succeeded AND the product/cycle is genuinely gone or now-maintained.
+- **Fingerprint / overload:** EOL fingerprint is `product | cycle | file_path` (`core.Fingerprints.eol`, NO line
+  number). `product` reuses the `package` column and `cycle` the `installed_version` column (documented in
+  `ReconcileService.fingerprintOf`), so no new business column is added. `eol_cycle` is the one new table (V16),
+  a global cache with no `workspace_id` (D-050). The EOL base (past-EOL 75 / ending-soon 45) is wired in Slice 4.
+Consequences: offline static EOL detection with faithful, conservative issue classification; one new table, one
+new api egress host, and the detector reaches no network. Java EOL tracks a single configurable JDK distro slug
+(revisit if per-vendor JDK tracking is needed).
+
 ## D-053 Opengrep (SAST) pinned 1.31.0 (musllinux), with baked rule packs and ignored in-repo suppressors (2026-10-20, accepted)
 Context: M6 adds SAST. SPEC/D-005 chose Opengrep (LGPL-2.1 Semgrep fork); we pin every scanner by version +
 checksum (D-034/D-036).
@@ -724,7 +756,7 @@ Decision: `workspace_id` on every business table from day one.
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
 - OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
-  (`POST /api/v1/admin/intel/{kev,epss}/sync`, `/rescore`) is callable by any authenticated user: there is no
+  (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
   Add role gating when M10 introduces authorities. (M5 review N5.)

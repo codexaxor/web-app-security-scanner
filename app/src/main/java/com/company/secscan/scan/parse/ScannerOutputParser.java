@@ -98,6 +98,8 @@ public class ScannerOutputParser {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
             } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
                 findings.addAll(parseCheckov(outDir.resolve(s.findingsFile)));
+            } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
+                findings.addAll(parseEol(outDir.resolve(s.findingsFile)));
             }
         }
 
@@ -314,6 +316,40 @@ public class ScannerOutputParser {
             }
             addCheckovFindings(results.get("failed_checks"), out);
             addCheckovFindings(results.get("skipped_checks"), out); // D-037 recovery (promote suppressed)
+        }
+        return out;
+    }
+
+    /**
+     * Parses the static EOL detector's JSON ({@code eol.json}) into one {@link RawFinding} per detection (M6,
+     * D-055): {@code product}/{@code cycle}/{@code filePath} — the EOL fingerprint ({@code product | cycle |
+     * file_path}), never a line number. These are CANDIDATES; the worker's EOL enricher decides which are
+     * actual issues (past-EOL / ending-soon) against the eol_cycle cache and whether the EOL scanner is solvable
+     * this scan. A detection missing a product or cycle is skipped.
+     */
+    List<RawFinding> parseEol(Path json) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+            root = mapper.readTree(json.toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not parse scanner output " + json.getFileName(), e);
+        }
+        com.fasterxml.jackson.databind.JsonNode dets = root == null ? null : root.get("detections");
+        if (dets == null || !dets.isArray()) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode d : dets) {
+            String product = text(d, "product");
+            String cycle = text(d, "cycle");
+            String filePath = text(d, "filePath");
+            if (product == null || product.isBlank() || cycle == null || cycle.isBlank()) {
+                continue;
+            }
+            out.add(RawFinding.eol(product, cycle, filePath));
         }
         return out;
     }

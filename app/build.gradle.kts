@@ -109,6 +109,22 @@ val gradleResolverTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-055 gate: the static EOL detector (scanner-image/eol_detect.py) is Python; its unit tests run under the
+// host python3 wired into the DEFAULT build (offline, stdlib unittest), mirroring gradleResolverTest.
+val eolDetectTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the static EOL detector's Python unit tests (D-055)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("eol_detect.py")).withPropertyName("eolDetect")
+    inputs.file(scannerDir.resolve("eol_detect_test.py")).withPropertyName("eolDetectTest")
+    val marker = layout.buildDirectory.file("eol-detect-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "eol_detect_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
-    dependsOn(gradleResolverTest)
+    dependsOn(gradleResolverTest, eolDetectTest)
 }

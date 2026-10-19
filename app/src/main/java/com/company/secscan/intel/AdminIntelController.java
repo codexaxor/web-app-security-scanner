@@ -18,11 +18,14 @@ public class AdminIntelController {
 
     private final KevSyncService kevSync;
     private final EpssSyncService epssSync;
+    private final EolSyncService eolSync;
     private final ReScoreService reScore;
 
-    public AdminIntelController(KevSyncService kevSync, EpssSyncService epssSync, ReScoreService reScore) {
+    public AdminIntelController(KevSyncService kevSync, EpssSyncService epssSync, EolSyncService eolSync,
+                                ReScoreService reScore) {
         this.kevSync = kevSync;
         this.epssSync = epssSync;
+        this.eolSync = eolSync;
         this.reScore = reScore;
     }
 
@@ -40,6 +43,14 @@ public class AdminIntelController {
         int loaded = epssSync.refresh();
         int rescored = reScore.rescoreAll();
         return new SyncResult("epss", loaded, rescored);
+    }
+
+    /** Re-fetches endoflife.date cycles for the detected products (per-product upsert), then re-scores. */
+    @PostMapping("/eol/sync")
+    public SyncResult syncEol() {
+        int loaded = eolSync.refresh();
+        int rescored = reScore.rescoreAll();
+        return new SyncResult("eol", loaded, rescored);
     }
 
     /** Re-scores open sub-issues against the current caches without re-fetching a feed. */

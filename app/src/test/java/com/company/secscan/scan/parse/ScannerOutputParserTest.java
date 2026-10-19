@@ -538,6 +538,21 @@ class ScannerOutputParserTest {
         assertThat(parser.parseCheckov(json)).isEmpty();
     }
 
+    @org.junit.jupiter.api.Test
+    void parsesEolDetectionsAsCandidatesSkippingIncompleteOnes(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/eol/detections.json", outDir);
+
+        java.util.List<RawFinding> findings = parser.parseEol(json);
+
+        // The entry with an empty product is skipped; the other three become EOL candidates.
+        assertThat(findings).hasSize(3);
+        assertThat(findings).allSatisfy(f -> assertThat(f.type()).isEqualTo(RawFinding.TYPE_EOL));
+        RawFinding sb = findings.stream().filter(f -> "spring-boot".equals(f.packageName())).findFirst()
+                .orElseThrow();
+        assertThat(sb.installedVersion()).isEqualTo("2.1"); // cycle in the installed_version column
+        assertThat(sb.filePath()).isEqualTo("pom.xml");
+    }
+
     private Path sample(String resource, Path outDir) throws Exception {
         Path target = outDir.resolve(resource.substring(resource.lastIndexOf('/') + 1));
         copyResource(resource, target);

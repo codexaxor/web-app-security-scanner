@@ -1,0 +1,10 @@
+{
+  "detections": [
+    { "product": "spring-boot", "version": "2.1.5", "cycle": "2.1", "filePath": "pom.xml" },
+    { "product": "eclipse-temurin", "version": "1.8", "cycle": "8", "filePath": "pom.xml" },
+    { "product": "nodejs", "version": "16", "cycle": "16", "filePath": "Dockerfile" },
+    { "product": "", "cycle": "x", "filePath": "bad.txt" }
+  ],
+  "warnings": [],
+  "status": "ok"
+}
