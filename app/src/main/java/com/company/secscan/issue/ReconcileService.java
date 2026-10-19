@@ -135,13 +135,14 @@ public class ReconcileService {
         Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
 
         Set<UUID> touchedGroups = new HashSet<>();
+        Set<String> unmappedSecretRules = new TreeSet<>();
         for (String fp : plan.newOpen()) {
             ScanFinding f = findByFp(findingByFp, fp);
             IssueGroup group = upsertGroup(workspaceId, repositoryId, f);
             SubIssue sub = new SubIssue(workspaceId, group.getId(), repositoryId, f.getType(), f.getScanner(),
                     fp, scanId);
             copyDescriptive(f, sub);
-            scorer.score(sub, sensitivity);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), null, SubIssue.STATUS_OPEN,
                     TriageEvent.REASON_SEEN, scanId));
@@ -151,7 +152,7 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.reopen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
-            scorer.score(sub, sensitivity);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_SOLVED,
                     SubIssue.STATUS_OPEN, TriageEvent.REASON_REOPENED, scanId));
@@ -161,8 +162,12 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.recordSeen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
-            scorer.score(sub, sensitivity);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub); // no status change, no event
+        }
+        for (String ruleId : unmappedSecretRules) { // once per rule per scan, not per sub-issue (N2)
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    ruleId);
         }
         for (String fp : plan.solved()) {
             SubIssue sub = subByFp.get(fp);
@@ -282,6 +287,12 @@ public class ReconcileService {
         sub.setAdvisorySummary(f.getAdvisorySummary());
         if (ScanFinding.TYPE_SECRET.equals(f.getType()) && fingerprinter.isConfigured()) {
             sub.setKeyId(fingerprinter.require().keyId());
+        }
+    }
+
+    private static void collectUnmapped(String unmappedSecretRule, Set<String> sink) {
+        if (unmappedSecretRule != null) {
+            sink.add(unmappedSecretRule);
         }
     }
 

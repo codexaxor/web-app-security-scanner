@@ -93,6 +93,29 @@ class ScoringReconcileIT extends AbstractScanWorkerIT {
     }
 
     @Test
+    void kevMatchesOnACveAliasWhenTheVulnIdIsAGhsa() {
+        // The preferred vuln id is a GHSA (not a CVE), and ONLY its CVE alias is in the KEV catalog. KEV matching
+        // is "any CVE alias is listed" (D-046/D-051), so this must still be in_kev with the +5 line — proving the
+        // scorer keys KEV on cve_aliases, not just the vuln id.
+        String ghsa = "GHSA-aaaa-bbbb-cccc";
+        String aliasCve = "CVE-2021-44228";
+        UUID repo = seedRepository("normal");
+        UUID scan = seedScanWithOkSca(repo);
+        seedScaFinding(scan, repo, ghsa, "org.example:lib", "1.0.0", "1.0.1", "9.0",
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "CRITICAL", List.of("CWE-502"),
+                List.of(aliasCve), "Alias-only KEV match");
+        kevEntries.save(new KevEntry(aliasCve, "Log4Shell", null));
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        SubIssue sub = onlySub();
+        assertThat(sub.getVulnId()).isEqualTo(ghsa);        // fingerprint id is the GHSA
+        assertThat(sub.getCveAliases()).containsExactly(aliasCve);
+        assertThat(sub.isInKev()).isTrue();                 // matched on the alias
+        assertThat(sub.getScoreBreakdown()).anyMatch(l -> l.code().equals("on_kev") && l.delta() == 5);
+    }
+
+    @Test
     void repoSensitivityHighAddsFiveLowSubtractsTen() {
         UUID highRepo = seedRepository("high");
         UUID highScan = seedScanWithOkSca(highRepo);
@@ -132,10 +155,11 @@ class ScoringReconcileIT extends AbstractScanWorkerIT {
     }
 
     @Test
-    void groupFixTimeMinutesIsTheSumOfOpenSubIssues() {
+    void scaGroupFixTimeIsTheSingleWorstUpgradeNotTheSum() {
         UUID repo = seedRepository("normal");
         UUID scan = seedScanWithOkSca(repo);
-        // Two vulns on ONE package (one group): a minor upgrade (15) and a major upgrade (60) -> sum 75.
+        // Two vulns on ONE package (one group): a minor upgrade (15) and a major upgrade (60). An SCA group is
+        // fixed by ONE dependency upgrade, so the group fix time is the larger category (60), never the sum (D-052).
         seedScaFinding(scan, repo, "CVE-2100-1000", "org.apache.commons:commons-text", "1.9", "1.10.0", "7.0",
                 null, "HIGH", List.of("CWE-94"), List.of(), "minor");
         seedScaFinding(scan, repo, "CVE-2100-2000", "org.apache.commons:commons-text", "1.9", "2.0.0", "9.0",
@@ -146,7 +170,7 @@ class ScoringReconcileIT extends AbstractScanWorkerIT {
         List<SubIssue> subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
         assertThat(subs).hasSize(2);
         IssueGroup group = groups.findById(subs.get(0).getGroupId()).orElseThrow();
-        assertThat(group.getFixTimeMinutes()).isEqualTo(75);   // 15 (minor) + 60 (major)
+        assertThat(group.getFixTimeMinutes()).isEqualTo(60);   // max(15 minor, 60 major) — one upgrade, not 75
         assertThat(group.getSeverityScore()).isEqualTo(90);    // max(70, 90)
     }
 

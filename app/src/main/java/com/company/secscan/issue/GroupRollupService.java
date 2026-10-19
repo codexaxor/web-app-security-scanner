@@ -14,10 +14,11 @@ import org.springframework.stereotype.Service;
 
 /**
  * Recomputes a group's derived status (M3) and its M5 rollup — {@code severity_score} = max open sub-issue
- * score, {@code fix_time_minutes} = sum of open sub-issues' fix times, and (sca/sast/iac) the subtitle from the
- * worst open sub-issue's CWE phrase (SPEC "Issue lifecycle"/"Grouping"/"Fix time"). Shared by scan-time
- * reconcile and the api re-score job so both roll groups up identically. Writes no triage_event and never
- * changes a sub-issue.
+ * score, {@code fix_time_minutes} (see {@link #fixTimeMinutes}), and (sca/sast/iac) the subtitle from the worst
+ * open sub-issue's CWE phrase (SPEC "Issue lifecycle"/"Grouping"/"Fix time"). Shared by scan-time reconcile and
+ * the api re-score job so both roll groups up identically — except that the re-score path
+ * ({@link #recomputeScoreRollup}) never writes {@code status}, which only reconcile owns (B1). Writes no
+ * triage_event and never changes a sub-issue.
  */
 @Service
 public class GroupRollupService {
@@ -42,33 +43,68 @@ public class GroupRollupService {
         return config;
     }
 
-    /** Recomputes status, severity, fix-time and subtitle for one group. */
+    /** Recomputes status, severity, fix-time and subtitle for one group (scan-time reconcile). */
     public void recompute(UUID workspaceId, UUID groupId, Map<String, Integer> fixConfig) {
-        List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, groupId);
-        boolean anyOpen = subs.stream().anyMatch(s -> SubIssue.STATUS_OPEN.equals(s.getStatus()));
-        boolean allIgnored = !subs.isEmpty()
-                && subs.stream().allMatch(s -> SubIssue.STATUS_IGNORED.equals(s.getStatus()));
-        String status = anyOpen ? IssueGroup.STATUS_OPEN
-                : allIgnored ? IssueGroup.STATUS_IGNORED : IssueGroup.STATUS_SOLVED;
+        rollup(workspaceId, groupId, fixConfig, true);
+    }
 
+    /**
+     * Recomputes ONLY severity, fix-time and subtitle for one group, from a fresh query over the currently-OPEN
+     * sub-issues — never {@code status} (B1). The re-score job uses this: status is owned by reconcile after a
+     * scan, so a maintenance re-score must never flip a group open/solved/ignored.
+     */
+    public void recomputeScoreRollup(UUID workspaceId, UUID groupId, Map<String, Integer> fixConfig) {
+        rollup(workspaceId, groupId, fixConfig, false);
+    }
+
+    private void rollup(UUID workspaceId, UUID groupId, Map<String, Integer> fixConfig, boolean updateStatus) {
+        List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, groupId);
         List<SubIssue> open = subs.stream().filter(s -> SubIssue.STATUS_OPEN.equals(s.getStatus())).toList();
         Integer severity = open.stream().map(SubIssue::getScore).filter(Objects::nonNull)
                 .max(Integer::compareTo).orElse(null);
-        Integer fixMinutes = open.isEmpty() ? null : open.stream()
-                .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
-                        fixConfig))
-                .sum();
 
         groups.findByIdAndWorkspaceId(groupId, workspaceId).ifPresent(g -> {
-            g.setStatus(status);
+            if (updateStatus) {
+                g.setStatus(deriveStatus(subs, open));
+            }
             g.setSeverityScore(severity);
-            g.setFixTimeMinutes(fixMinutes);
+            g.setFixTimeMinutes(fixTimeMinutes(g.getType(), open, fixConfig));
             String subtitle = subtitleFor(g.getType(), worstOpen(open));
             if (subtitle != null) {
                 g.setSubtitle(subtitle);
             }
             groups.save(g);
         });
+    }
+
+    private static String deriveStatus(List<SubIssue> subs, List<SubIssue> open) {
+        boolean allIgnored = !subs.isEmpty()
+                && subs.stream().allMatch(s -> SubIssue.STATUS_IGNORED.equals(s.getStatus()));
+        return !open.isEmpty() ? IssueGroup.STATUS_OPEN
+                : allIgnored ? IssueGroup.STATUS_IGNORED : IssueGroup.STATUS_SOLVED;
+    }
+
+    /**
+     * Group fix time in minutes from the OPEN sub-issues (D-052). SCA is remediated by ONE dependency upgrade, so
+     * its fix time is the <em>largest</em> single category among the open sub-issues (a major bump if any open
+     * vuln needs one, else patch/minor) — NOT the sum, which would multiply one upgrade by the number of CVEs on
+     * the package. Every other type (one fix per finding) keeps the sum of its open sub-issues' fix times.
+     * Returns null when nothing is open.
+     */
+    private static Integer fixTimeMinutes(String groupType, List<SubIssue> open, Map<String, Integer> fixConfig) {
+        if (open.isEmpty()) {
+            return null;
+        }
+        if (ScanFinding.TYPE_SCA.equals(groupType)) {
+            return open.stream()
+                    .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
+                            fixConfig))
+                    .max().orElse(0);
+        }
+        return open.stream()
+                .mapToInt(s -> FixTime.minutesFor(s.getType(), s.getInstalledVersion(), s.getFixedVersion(),
+                        fixConfig))
+                .sum();
     }
 
     /** The worst (highest-scored) open sub-issue, or null when none is open; nulls sort lowest, ties keep first. */
@@ -87,6 +123,8 @@ public class GroupRollupService {
     /**
      * Subtitle for a group type (change #4): sca/sast/iac from the worst open sub-issue's CWE phrase (first cwe
      * id, else the advisory summary); secret/eol keep their SPEC title (null → caller leaves the subtitle as is).
+     * The subtitle is also left unchanged (null returned) when the worst open sub-issue has neither a known CWE
+     * phrase nor an advisory summary, so an enrichment gap never blanks an existing subtitle (N8).
      */
     private static String subtitleFor(String groupType, SubIssue worst) {
         if (worst == null) {

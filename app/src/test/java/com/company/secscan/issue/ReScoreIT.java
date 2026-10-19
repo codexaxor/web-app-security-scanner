@@ -117,6 +117,39 @@ class ReScoreIT {
         assertThat(groups.findById(group.getId()).orElseThrow().getSeverityScore()).isEqualTo(100);
     }
 
+    @Test
+    void reScoreHandlesAPreM5SubIssueWithNullScoringColumns() {
+        // A sub-issue created before M5: score/score_breakdown/cve_aliases/severity_label are all null (the V12
+        // columns defaulted to null on existing rows). A re-score must score it correctly, not NPE — KEV matching
+        // falls back to the CVE vuln id when cve_aliases is null, and the base comes from tool_severity.
+        UUID repoId = seedRepo();
+        IssueGroup group = groups.save(new IssueGroup(WORKSPACE, repoId, "sca",
+                Fingerprints.groupKey("sca", "Maven/org.apache.commons:commons-text"),
+                "org.apache.commons:commons-text", null));
+        SubIssue sub = new SubIssue(WORKSPACE, group.getId(), repoId, "sca", "sca",
+                Fingerprints.sca("org.apache.commons:commons-text", CVE, "pom.xml"), null);
+        sub.setVulnId(CVE);
+        sub.setPackageName("org.apache.commons:commons-text");
+        sub.setInstalledVersion("1.9");
+        sub.setFixedVersion("1.10.0");
+        sub.setToolSeverity("9.8");
+        // Deliberately leave score, scoreBreakdown, cveAliases, severityLabel null (pre-M5 shape).
+        sub = subIssues.save(sub);
+        UUID subId = sub.getId();
+        assertThat(sub.getScore()).isNull();
+        assertThat(sub.getCveAliases()).isNull();
+
+        kevEntries.save(new KevEntry(CVE, "Apache Commons Text RCE", null));
+        int rescored = reScore.rescoreAll();
+
+        SubIssue after = subIssues.findById(subId).orElseThrow();
+        assertThat(rescored).isEqualTo(1);
+        assertThat(after.getScore()).isEqualTo(100);          // base 98 + KEV 5, clamped
+        assertThat(after.isInKev()).isTrue();                 // matched on the CVE vuln id (cve_aliases was null)
+        assertThat(after.getScoreBreakdown()).anyMatch(l -> l.code().equals("on_kev"));
+        assertThat(events.count()).isZero();                  // still no triage_event
+    }
+
     private UUID seedRepo() {
         GitlabConnection conn = connections.save(GitlabConnection.forGroup(
                 WORKSPACE, "http://localhost", "svc", 42L, "ct", "read_api,read_repository", null));

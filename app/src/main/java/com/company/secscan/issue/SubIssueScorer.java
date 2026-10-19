@@ -4,13 +4,12 @@ import com.company.secscan.intel.EpssScore;
 import com.company.secscan.intel.EpssScoreRepository;
 import com.company.secscan.intel.KevEntryRepository;
 import com.company.secscan.scoring.ScoreInput;
+import com.company.secscan.scoring.ScoreLine;
 import com.company.secscan.scoring.ScoreResult;
 import com.company.secscan.scoring.Scoring;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -18,14 +17,16 @@ import org.springframework.stereotype.Service;
  * D-044..D-049). The ONE place both scan-time reconcile and the api re-score job go through, so a stored score
  * and a recomputed score are identical: it resolves KEV ("any CVE alias", D-046) and EPSS (stored only —
  * adjustments are OFF in M5, D-047) from the global caches, then delegates the arithmetic to the pure
- * {@link Scoring#score}. It sets {@code in_kev}, {@code epss}, {@code score} and {@code score_breakdown}; the
- * descriptive fields (cvss/severity_label/cwe/cve_aliases/advisory_summary) are copied from the finding by the
- * caller. Nothing it writes is ever a fingerprint input.
+ * {@link Scoring#score}. It produces {@code in_kev}, {@code epss}, {@code score} and {@code score_breakdown};
+ * the descriptive fields (cvss/severity_label/cwe/cve_aliases/advisory_summary) are copied from the finding by
+ * the caller. Nothing it produces is ever a fingerprint input.
+ *
+ * <p>This class does no logging and never decides when to warn about an unmapped secret rule: it surfaces the
+ * unmapped rule id on the {@link Computation} and the orchestrator (reconcile per scan, re-score per sweep)
+ * logs each distinct rule once per run (N2), not once per sub-issue.
  */
 @Service
 public class SubIssueScorer {
-
-    private static final Logger log = LoggerFactory.getLogger(SubIssueScorer.class);
 
     private final KevEntryRepository kevEntries;
     private final EpssScoreRepository epssScores;
@@ -36,11 +37,21 @@ public class SubIssueScorer {
     }
 
     /**
-     * Recomputes {@code in_kev}, {@code epss}, {@code score} and {@code score_breakdown} on {@code sub} from its
-     * persisted inputs and the current KEV/EPSS caches. {@code repoSensitivity} is the owning repository's
-     * sensitivity ({@code high}/{@code low}/{@code normal}); the caller supplies it once per repository.
+     * The recomputed scoring outputs for a sub-issue, derived from its persisted inputs and the current
+     * KEV/EPSS caches. Pure data — the caller either writes these to the entity ({@link #score}) or to the
+     * DB directly (the re-score column-scoped update). {@code unmappedSecretRule} is the Betterleaks rule id
+     * that fell through to the default base (D-045), or null; the caller dedupes and logs it once per run.
      */
-    public void score(SubIssue sub, String repoSensitivity) {
+    public record Computation(boolean inKev, BigDecimal epss, int score, List<ScoreLine> breakdown,
+                              String unmappedSecretRule) {
+    }
+
+    /**
+     * Computes the scoring outputs for {@code sub} WITHOUT mutating it or touching the DB. {@code repoSensitivity}
+     * is the owning repository's sensitivity ({@code high}/{@code low}/{@code normal}); the caller supplies it
+     * once per repository. Used by the re-score job, which then writes only the score columns of OPEN rows.
+     */
+    public Computation compute(SubIssue sub, String repoSensitivity) {
         List<String> cves = candidateCves(sub);
         boolean onKev = !cves.isEmpty() && !kevEntries.findPresentCves(cves).isEmpty();
         BigDecimal epss = maxEpss(cves);
@@ -49,16 +60,26 @@ public class SubIssueScorer {
                 sub.getRuleId(), onKev, repoSensitivity);
         ScoreResult result = Scoring.score(in);
 
+        String unmapped = null;
         if ("secret".equals(sub.getType()) && sub.getRuleId() != null
                 && !Scoring.isMappedSecretRule(sub.getRuleId())) {
-            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
-                    sub.getRuleId());
+            unmapped = sub.getRuleId();
         }
+        return new Computation(onKev, epss, result.score(), result.breakdown(), unmapped);
+    }
 
-        sub.setInKev(onKev);
-        sub.setEpss(epss);
-        sub.setScore(result.score());
-        sub.setScoreBreakdown(result.breakdown());
+    /**
+     * Recomputes {@code in_kev}, {@code epss}, {@code score} and {@code score_breakdown} on {@code sub} from its
+     * persisted inputs and the current KEV/EPSS caches, writing them onto the entity (scan-time reconcile path).
+     * Returns the unmapped secret rule id (or null) so the caller can log it once per run (N2).
+     */
+    public String score(SubIssue sub, String repoSensitivity) {
+        Computation c = compute(sub, repoSensitivity);
+        sub.setInKev(c.inKev());
+        sub.setEpss(c.epss());
+        sub.setScore(c.score());
+        sub.setScoreBreakdown(c.breakdown());
+        return c.unmappedSecretRule();
     }
 
     /** The CVEs to match against KEV/EPSS: the group's CVE aliases plus the preferred vuln id when it is a CVE. */
