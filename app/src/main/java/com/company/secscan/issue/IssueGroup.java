@@ -87,6 +87,16 @@ public class IssueGroup {
         this.subtitle = subtitle;
     }
 
+    /** M5 rollup: the max open sub-issue score (null when no sub-issue has a score yet). */
+    public void setSeverityScore(Integer severityScore) {
+        this.severityScore = severityScore;
+    }
+
+    /** M5 rollup: the sum of open sub-issues' fix times in minutes (null when no sub-issue is open). */
+    public void setFixTimeMinutes(Integer fixTimeMinutes) {
+        this.fixTimeMinutes = fixTimeMinutes;
+    }
+
     public UUID getId() {
         return id;
     }

@@ -135,6 +135,11 @@ public class Repository {
         this.lastScannedSha = sha;
     }
 
+    /** Sets the repository sensitivity ({@code normal}/{@code high}/{@code low}) that drives the M5 score adjustment. */
+    public void setSensitivity(String sensitivity) {
+        this.sensitivity = sensitivity;
+    }
+
     public void refreshFromGitlab(String pathWithNamespace, String defaultBranch, List<String> languages) {
         this.pathWithNamespace = pathWithNamespace;
         this.defaultBranch = defaultBranch;

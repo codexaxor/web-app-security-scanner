@@ -6,6 +6,8 @@ import com.company.secscan.reconcile.Reconciler;
 import com.company.secscan.reconcile.Reconciler.Existing;
 import com.company.secscan.reconcile.Reconciler.Incoming;
 import com.company.secscan.reconcile.Reconciler.Plan;
+import com.company.secscan.repository.Repository;
+import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.Scan;
 import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scan.ScanFindingRepository;
@@ -44,11 +46,15 @@ public class ReconcileService {
     private final SubIssueRepository subIssues;
     private final TriageEventRepository events;
     private final SecretFingerprinterHolder fingerprinter;
+    private final SubIssueScorer scorer;
+    private final RepositoryRepository repositories;
+    private final GroupRollupService rollup;
     private final Reconciler reconciler = new Reconciler();
 
     public ReconcileService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                             IssueGroupRepository groups, SubIssueRepository subIssues, TriageEventRepository events,
-                            SecretFingerprinterHolder fingerprinter) {
+                            SecretFingerprinterHolder fingerprinter, SubIssueScorer scorer,
+                            RepositoryRepository repositories, GroupRollupService rollup) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
@@ -56,6 +62,9 @@ public class ReconcileService {
         this.subIssues = subIssues;
         this.events = events;
         this.fingerprinter = fingerprinter;
+        this.scorer = scorer;
+        this.repositories = repositories;
+        this.rollup = rollup;
     }
 
     /**
@@ -120,13 +129,20 @@ public class ReconcileService {
 
         Plan plan = reconciler.reconcile(incoming, existing, solvableScanners, frozenFingerprints);
 
+        // Scoring inputs (M5): repo sensitivity (adjustment) and the tunable fix-time config, loaded once.
+        String sensitivity = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
+                .map(Repository::getSensitivity).orElse("normal");
+        Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
+
         Set<UUID> touchedGroups = new HashSet<>();
+        Set<String> unmappedSecretRules = new TreeSet<>();
         for (String fp : plan.newOpen()) {
             ScanFinding f = findByFp(findingByFp, fp);
             IssueGroup group = upsertGroup(workspaceId, repositoryId, f);
             SubIssue sub = new SubIssue(workspaceId, group.getId(), repositoryId, f.getType(), f.getScanner(),
                     fp, scanId);
             copyDescriptive(f, sub);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), null, SubIssue.STATUS_OPEN,
                     TriageEvent.REASON_SEEN, scanId));
@@ -136,6 +152,7 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.reopen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_SOLVED,
                     SubIssue.STATUS_OPEN, TriageEvent.REASON_REOPENED, scanId));
@@ -145,7 +162,12 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.recordSeen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
+            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
             subIssues.save(sub); // no status change, no event
+        }
+        for (String ruleId : unmappedSecretRules) { // once per rule per scan, not per sub-issue (N2)
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    ruleId);
         }
         for (String fp : plan.solved()) {
             SubIssue sub = subByFp.get(fp);
@@ -157,7 +179,7 @@ public class ReconcileService {
         }
 
         for (UUID groupId : touchedGroups) {
-            recomputeGroupStatus(workspaceId, groupId);
+            rollup.recompute(workspaceId, groupId, fixConfig);
         }
 
         scan.markReconciled();
@@ -257,22 +279,21 @@ public class ReconcileService {
         sub.setSecretHash(f.getSecretHash());
         sub.setSecretPreview(f.getSecretPreview());
         sub.setToolSeverity(f.getToolSeverity());
+        // M5 descriptive scoring inputs (never fingerprint inputs); the scorer reads these next.
+        sub.setCvss(f.getCvss());
+        sub.setSeverityLabel(f.getSeverityLabel());
+        sub.setCwe(f.getCwe());
+        sub.setCveAliases(f.getCveAliases());
+        sub.setAdvisorySummary(f.getAdvisorySummary());
         if (ScanFinding.TYPE_SECRET.equals(f.getType()) && fingerprinter.isConfigured()) {
             sub.setKeyId(fingerprinter.require().keyId());
         }
     }
 
-    private void recomputeGroupStatus(UUID workspaceId, UUID groupId) {
-        List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, groupId);
-        boolean anyOpen = subs.stream().anyMatch(s -> SubIssue.STATUS_OPEN.equals(s.getStatus()));
-        boolean allIgnored = !subs.isEmpty()
-                && subs.stream().allMatch(s -> SubIssue.STATUS_IGNORED.equals(s.getStatus()));
-        String status = anyOpen ? IssueGroup.STATUS_OPEN
-                : allIgnored ? IssueGroup.STATUS_IGNORED : IssueGroup.STATUS_SOLVED;
-        groups.findByIdAndWorkspaceId(groupId, workspaceId).ifPresent(g -> {
-            g.setStatus(status);
-            groups.save(g);
-        });
+    private static void collectUnmapped(String unmappedSecretRule, Set<String> sink) {
+        if (unmappedSecretRule != null) {
+            sink.add(unmappedSecretRule);
+        }
     }
 
     private static ScanFinding findByFp(Map<String, ScanFinding> findingByFp, String fp) {

@@ -14,6 +14,107 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-052 SCA group fix-time is one upgrade (max category), not the sum of its sub-issues (2026-10-19, accepted)
+Context: an SCA issue group is one vulnerable package; several CVEs on it are remediated by a SINGLE dependency
+upgrade. Summing each CVE's fix-time (as M5 first did) multiplied one upgrade by the number of CVEs, badly
+over-stating remediation effort (e.g. a package with a minor and a major CVE reported 75 min for what is one
+bump).
+Decision: for `type = sca`, the group `fix_time_minutes` is the LARGEST single fix-time category among the open
+sub-issues — a major bump (60) if any open vuln needs one, else patch/minor (15) — never the sum. Every other
+type (one fix per finding) keeps the sum of its open sub-issues' fix times. Implemented in
+`GroupRollupService.fixTimeMinutes`; proven by `ScoringReconcileIT.scaGroupFixTimeIsTheSingleWorstUpgradeNotTheSum`.
+Consequences: SCA fix-time reflects the single upgrade that clears the group. Revisit if a package ever needs
+multiple non-coalescable upgrades.
+
+## D-051 Persist cve_aliases on sub_issue + scan_finding for KEV matching and DB-only re-score (2026-10-19, accepted)
+Context: KEV membership is "ANY CVE alias is in kev_entry" (D-046), and the re-score job (D-049) recomputes
+`in_kev` from the database alone (no rescan), so the CVE aliases must be persisted, not just the single preferred
+`vuln_id`.
+Decision: add `cve_aliases jsonb` to `sub_issue` (and `scan_finding`, which reconcile reads to build the
+sub-issue). The OSV parser fills it with every `CVE-…` in the alias group's ids+aliases. The scorer matches KEV
+(and exposes the max EPSS) over these aliases plus the preferred id when it is a CVE. `cve_aliases` is
+descriptive scoring input and is **NEVER a fingerprint input** — the SCA fingerprint stays `package | vulnId |
+manifestPath` (D-035), so persisting aliases cannot cause a mass solve/reopen (proven by `ReScoreIT`: a re-score
+changes the score with 0 triage_event rows and an unchanged fingerprint).
+Consequences: one extra descriptive column on two tables; faithful "any CVE alias" KEV matching that also works
+in the rescan-free re-score path.
+
+## D-050 KEV/EPSS/fix-time are global reference/config tables, no workspace_id (2026-10-19, accepted)
+Context: domain rule 1 puts `workspace_id` on every business table, but the SPEC data model already lists
+`epss_score`/`kev_entry` as CVE/product-keyed intel caches alongside the advisory cache, i.e. shared public
+reference data, not per-tenant business data; `fix_time_config` is global tuning.
+Decision: `kev_entry`, `epss_score` and `fix_time_config` carry **no** `workspace_id` — the justified exception
+to domain rule 1 for global caches. They are keyed by CVE / category and joined to workspace-scoped `sub_issue`
+rows; the scoring query's scoping lives on the `sub_issue` side. The intel sync and the re-score sweep are
+system maintenance jobs that run across workspaces; the re-score iterates each workspace and loads that
+workspace's open sub-issues, so every sub-issue/repository/group query remains workspace-scoped by the row's own
+`workspace_id`.
+Consequences: no per-workspace duplication of ~1.3k KEV + ~350k EPSS rows. Revisit when multi-tenant intel
+isolation or per-workspace fix-time tuning is needed (then add `workspace_id` + a default/global fallback row).
+
+## D-049 Re-score job recomputes OPEN sub-issues after a KEV/EPSS refresh, without rescanning (2026-10-19, accepted)
+Context: KEV/EPSS refresh daily; stored scores must reflect new intel without waiting for the next scan.
+Decision: an api-side `ReScoreService.rescoreAll()` recomputes `score`/`score_breakdown`/`in_kev`/`epss` on OPEN
+sub-issues via the same `SubIssueScorer` that scan-time reconcile uses, then rolls affected groups up. It writes
+**no `triage_event`** and never changes status or the fingerprint (scoring is derived, domain rule 2). Triggered
+after each feed load (scheduler) and via `POST /api/v1/admin/intel/rescore`.
+Consequences: fresh scores between scans with zero risk of a scoring change mass-solving/reopening (proven by
+`ReScoreIT`). It is a cross-workspace maintenance sweep (see D-050).
+
+## D-048 CWE ids from OSV; a seeded CWE→phrase lookup drives the group subtitle (2026-10-19, accepted)
+Context: the group subtitle is a plain-language CWE phrase of the worst sub-issue (SPEC "Grouping").
+Decision: CWE ids come from OSV `vulnerabilities[].database_specific.cwe_ids` (array; may be empty). A maintained
+seeded lookup (`core/src/main/resources/cwe-phrases.properties`, implemented as a core resource rather than a DB
+table so it is unit-testable without Spring) maps a CWE id to a phrase, covering the fixtures' CWEs with
+headroom (~150 entries). Within one finding's multiple cwe_ids the **first** id in OSV array order is used (CWE
+"worst" is undefined — change #4); an empty/unknown first id falls back to the advisory summary (persisted as
+`sub_issue.advisory_summary`, V14). Only sca/sast/iac groups derive the subtitle this way; secret/eol keep their
+SPEC title and never break on empty cwe.
+Consequences: readable subtitles; a maintainable dictionary; one descriptive column (`advisory_summary`).
+
+## D-047 EPSS synced daily, stored and displayed, adjustments OFF in M5 (2026-10-19, accepted)
+Context: EPSS tiers can reduce noise but are opt-in (SPEC: off by default; an M7 toggle).
+Decision: a daily `EpssSyncJob` (api profile) loads the FIRST bulk CSV
+(https://epss.cyentia.com/epss_scores-current.csv.gz) into `epss_score` (cve, epss, percentile) via a bulk
+staged swap (temp table + upsert/delete, never ~350k row-by-row upserts — change #3). The value is stored and
+exposed on the sub-issue API, but EPSS score adjustments stay OFF (the scorer never reads EPSS). Attribution is
+required: EPSS data © FIRST.org — surfaced as `SubIssueView.epssAttribution` wherever an EPSS value appears.
+Consequences: EPSS visible now, tunable in M7; a new api-side egress host (see D-033).
+
+## D-046 KEV synced daily; any CVE alias on KEV adds +5 (2026-10-19, accepted)
+Context: CISA KEV is the "known exploited" signal (SPEC: +5, always on).
+Decision: a daily `KevSyncJob` (api profile) loads the CISA KEV JSON feed
+(https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json) into `kev_entry` keyed on
+CVE (full refresh). A sub-issue whose vuln id or **any** CVE alias (D-051) is in `kev_entry` gets +5 and an
+`on_kev` line in `score_breakdown`. KEV is US-gov public domain. The done-when is proven offline with a seeded
+`kev_entry` (`ScoringReconcileIT`); the live feed is validated by `@Tag("live-intel")` tests excluded from the
+default build, and the fixture∩live-KEV intersection is reported from that run.
+Consequences: an exploited-in-the-wild finding always scores at least High-ish; a new api-side egress host
+(see D-033).
+
+## D-045 Secret base score by Betterleaks rule id (2026-10-19, accepted)
+Context: secrets have no CVSS; the base must come from the kind of secret (SPEC: private keys/cloud creds 90,
+other tokens 75, generic passwords 60).
+Decision: map the Betterleaks rule id → base: private-key & cloud-credential rules 90, generic-password rules
+60, all other tokens 75. Live rules today: `private-key`→90, `github-pat`→75. An **unmapped** rule scores 75 and
+is logged (by `SubIssueScorer`; the pure `Scoring` exposes `isMappedSecretRule`). Recorded in `score_breakdown`
+(`base_secret`).
+Consequences: secret scoring without a CVSS calculator; new rules default safely and are flagged for mapping.
+
+## D-044 CVSS base for SCA = max_severity × 10, else advisory label; cvss/severity_label split (2026-10-19, accepted)
+Context: SCA base is the highest CVSS base × 10, with an advisory-severity fallback when there is no vector (SPEC
+"Base score"). OSV's `groups[].max_severity` already folds in CVSS v4 and tracks the higher of v3/v4.
+Decision: base = `max_severity × 10` (the numeric OSV value, persisted as `tool_severity`), clamped 1–100; when
+`max_severity` is "" fall back to `database_specific.severity`: CRITICAL 95 / HIGH 80 / MODERATE 55 / LOW 25. No
+CVSS calculator is built. The base source (vector vs label) is recorded in `score_breakdown`
+(`base_cvss`/`base_label`). **cvss/severity_label split (change #2):** the `cvss` column stores the chosen CVSS
+**vector string only** (v4 preferred over v3, null when none); a separate `severity_label` column stores the
+advisory label. The scorer/re-score recompute the base from these persisted inputs (`tool_severity` number,
+else `severity_label`) and never read anything scoring-related back out of the `score_breakdown` jsonb.
+Consequences: a faithful, explainable base with no calculator; two descriptive columns (`cvss`,
+`severity_label`). The single scoring function (`core` `Scoring.score`) is called by both scan-time reconcile
+and the re-score job.
+
 ## D-043 Full NuGet transitive resolution deferred; lockfile-less .csproj surfaces an honest gap (2026-10-18, accepted)
 Context: OSV-Scanner v2.7.0 does transitive dependency resolution only for Maven `pom.xml` and Python
 `requirements.txt`. NuGet is lockfile-only: a bare `.csproj` yields DIRECT `<PackageReference>` versions only,
@@ -238,6 +339,10 @@ read-only rootfs, `--cap-drop=ALL`, `no-new-privileges`, CPU/memory/PID limits, 
 Revisit when: before any deployment or M10, whichever comes first.
 Consequences: a compromised scanner could reach arbitrary hosts until the allowlist lands; accepted for local
 single-tenant mode.
+M5 egress note (2026-10-19): the api process gained two new outbound hosts for the daily intel sync —
+`www.cisa.gov` (KEV, D-046) and `epss.cyentia.com` (EPSS, D-047) — over HTTPS with TLS verification always on.
+These are api-side (not scanner) egress; fold them into the pre-deploy allowlist item alongside the scanner's
+GitLab/osv.dev/deps.dev/Maven-Central hosts.
 
 ## D-032 Public package registries assumed; private-registry detection is M4b (2026-10-16, accepted; resolves OD-3)
 Context: OD-3 — private registries (Nexus, Artifactory, GitLab package registry) — had to be settled before M4.
@@ -539,6 +644,11 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
+- OD-7 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+  (`POST /api/v1/admin/intel/{kev,epss}/sync`, `/rescore`) is callable by any authenticated user: there is no
+  role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
+  (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
+  Add role gating when M10 introduces authorities. (M5 review N5.)
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
