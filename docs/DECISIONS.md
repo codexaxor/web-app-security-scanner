@@ -14,6 +14,18 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-052 SCA group fix-time is one upgrade (max category), not the sum of its sub-issues (2026-10-19, accepted)
+Context: an SCA issue group is one vulnerable package; several CVEs on it are remediated by a SINGLE dependency
+upgrade. Summing each CVE's fix-time (as M5 first did) multiplied one upgrade by the number of CVEs, badly
+over-stating remediation effort (e.g. a package with a minor and a major CVE reported 75 min for what is one
+bump).
+Decision: for `type = sca`, the group `fix_time_minutes` is the LARGEST single fix-time category among the open
+sub-issues — a major bump (60) if any open vuln needs one, else patch/minor (15) — never the sum. Every other
+type (one fix per finding) keeps the sum of its open sub-issues' fix times. Implemented in
+`GroupRollupService.fixTimeMinutes`; proven by `ScoringReconcileIT.scaGroupFixTimeIsTheSingleWorstUpgradeNotTheSum`.
+Consequences: SCA fix-time reflects the single upgrade that clears the group. Revisit if a package ever needs
+multiple non-coalescable upgrades.
+
 ## D-051 Persist cve_aliases on sub_issue + scan_finding for KEV matching and DB-only re-score (2026-10-19, accepted)
 Context: KEV membership is "ANY CVE alias is in kev_entry" (D-046), and the re-score job (D-049) recomputes
 `in_kev` from the database alone (no rescan), so the CVE aliases must be persisted, not just the single preferred
@@ -632,6 +644,11 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
+- OD-7 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+  (`POST /api/v1/admin/intel/{kev,epss}/sync`, `/rescore`) is callable by any authenticated user: there is no
+  role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
+  (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
+  Add role gating when M10 introduces authorities. (M5 review N5.)
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
