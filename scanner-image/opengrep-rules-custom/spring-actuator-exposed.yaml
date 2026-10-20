@@ -1,0 +1,10 @@
+rules:
+  - id: spring-actuator-exposed
+    languages: [generic]
+    severity: WARNING
+    message: "All Spring Boot Actuator endpoints are exposed over the web."
+    metadata: {cwe: ["CWE-200: Exposure of Sensitive Information"], category: security}
+    paths:
+      include: ["*.properties", "*.yml", "*.yaml"]
+    patterns:
+      - pattern-regex: 'management\.endpoints\.web\.exposure\.include\s*[:=]\s*["'']?\*|exposure:\s*\n\s*include:\s*["'']?\*'

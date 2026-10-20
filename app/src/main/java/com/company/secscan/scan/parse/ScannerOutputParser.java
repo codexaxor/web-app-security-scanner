@@ -94,6 +94,12 @@ public class ScannerOutputParser {
             } else if (RawFinding.SCANNER_SCA.equals(s.name)) {
                 findings.addAll(parseOsv(outDir.resolve(s.findingsFile), m.checkoutPath, csprojMissingLockfile,
                         warnings, syntheticPoms));
+            } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
+                findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
+            } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
+                findings.addAll(parseCheckov(outDir.resolve(s.findingsFile), warnings));
+            } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
+                findings.addAll(parseEol(outDir.resolve(s.findingsFile)));
             }
         }
 
@@ -229,6 +235,249 @@ public class ScannerOutputParser {
             }
         }
         return out;
+    }
+
+    /**
+     * Parses Opengrep JSON ({@code opengrep.json}) into one {@link RawFinding} per result (M6 SAST, D-053).
+     * {@code check_id} is the rule id, the matched snippet ({@code extra.lines}) is normalized and hashed for
+     * the fingerprint (never the line number), and the absolute container path is made repo-relative. A result
+     * whose path escapes the checkout is dropped with an {@code UNRESOLVED_PATH} warning (defense in depth — it
+     * must never enter a fingerprint). Opengrep's {@code errors[]} (rule-load issues) are ignored here; the scan
+     * status already gated success on a valid report.
+     */
+    List<RawFinding> parseOpengrep(Path json, String checkoutPath, List<ScanWarning> warningsOut) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        if (report == null || report.results == null) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        for (OpengrepResult r : report.results) {
+            if (r.checkId == null) {
+                continue;
+            }
+            String filePath = relativize(r.path, checkoutPath);
+            if (isPathOutsideCheckout(filePath)) {
+                log.warn("Dropping Opengrep result with a path outside the checkout (UNRESOLVED_PATH): {}",
+                        r.path);
+                warningsOut.add(new ScanWarning(WARN_UNRESOLVED_PATH,
+                        "Opengrep reported a finding at a path outside the repository checkout; it was dropped "
+                                + "(source path: " + r.path + ").", null));
+                continue;
+            }
+            Integer line = r.start == null ? null : r.start.line;
+            // The snippet hash is computed and sanitized INSIDE the scanner container (run-scan.sh, D-023/S1):
+            // Opengrep's raw matched lines never reach /out, so we read only the precomputed hash here.
+            String snippetHash = r.extra == null ? null : r.extra.snippetSha256;
+            String rawLevel = r.extra == null ? null : r.extra.severity;
+            String label = sastSeverityLabel(r.extra);
+            List<String> cwe = r.extra == null ? List.of() : cweOf(r.extra.metadata);
+            out.add(RawFinding.sast(r.checkId, filePath, line, snippetHash, label, rawLevel, cwe));
+        }
+        return out;
+    }
+
+    /**
+     * Parses Checkov JSON ({@code checkov.json}) into one {@link RawFinding} per IaC misconfiguration (M6,
+     * D-054). The output is a JSON ARRAY of per-{@code check_type} reports when several frameworks match, a
+     * single report object for one framework, or a summary-only object (no {@code results}) when nothing matched
+     * — all handled. Both {@code failed_checks} and {@code skipped_checks} become findings: an inline
+     * {@code #checkov:skip} cannot be disabled by a flag, so we RECOVER the skipped checks and promote them back
+     * (D-037) — a scanned repo cannot hide its own IaC findings. The IaC fingerprint is
+     * {@code rule_id | file_path | resource_name} (the resource goes in the {@code package} column), never the
+     * line number; Checkov's {@code file_path} has a leading {@code /} (relative to the scan root) which is
+     * stripped to a repo-relative path.
+     */
+    List<RawFinding> parseCheckov(Path json, List<ScanWarning> warningsOut) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+            root = mapper.readTree(json.toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not parse scanner output " + json.getFileName(), e);
+        }
+        if (root == null || root.isNull()) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        List<com.fasterxml.jackson.databind.JsonNode> reports = new ArrayList<>();
+        if (root.isArray()) {
+            root.forEach(reports::add);
+        } else {
+            reports.add(root);
+        }
+        for (com.fasterxml.jackson.databind.JsonNode report : reports) {
+            com.fasterxml.jackson.databind.JsonNode results = report.get("results");
+            if (results == null || results.isNull()) {
+                continue; // summary-only object (nothing matched this framework)
+            }
+            addCheckovFindings(results.get("failed_checks"), out, warningsOut);
+            addCheckovFindings(results.get("skipped_checks"), out, warningsOut); // D-037 recovery (promote suppressed)
+        }
+        return out;
+    }
+
+    /**
+     * Parses the static EOL detector's JSON ({@code eol.json}) into one {@link RawFinding} per detection (M6,
+     * D-055): {@code product}/{@code cycle}/{@code filePath} — the EOL fingerprint ({@code product | cycle |
+     * file_path}), never a line number. These are CANDIDATES; the worker's EOL enricher decides which are
+     * actual issues (past-EOL / ending-soon) against the eol_cycle cache and whether the EOL scanner is solvable
+     * this scan. A detection missing a product or cycle is skipped.
+     */
+    List<RawFinding> parseEol(Path json) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+            root = mapper.readTree(json.toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not parse scanner output " + json.getFileName(), e);
+        }
+        com.fasterxml.jackson.databind.JsonNode dets = root == null ? null : root.get("detections");
+        if (dets == null || !dets.isArray()) {
+            return List.of();
+        }
+        List<RawFinding> out = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode d : dets) {
+            String product = text(d, "product");
+            String cycle = text(d, "cycle");
+            String filePath = text(d, "filePath");
+            if (product == null || product.isBlank() || cycle == null || cycle.isBlank()) {
+                continue;
+            }
+            out.add(RawFinding.eol(product, cycle, filePath));
+        }
+        return out;
+    }
+
+    /** Emits a SAST-style IaC {@link RawFinding} for each check in a Checkov {@code failed_checks}/{@code
+     * skipped_checks} array ({@code null}/non-array is ignored). A check whose file path escapes the checkout
+     * (absolute, or containing {@code ..}, after stripping Checkov's leading slash) is dropped with an
+     * {@code UNRESOLVED_PATH} warning — such a path must never enter a fingerprint (matching the SCA/Opengrep
+     * guard). */
+    private static void addCheckovFindings(com.fasterxml.jackson.databind.JsonNode checks, List<RawFinding> out,
+                                           List<ScanWarning> warningsOut) {
+        if (checks == null || !checks.isArray()) {
+            return;
+        }
+        for (com.fasterxml.jackson.databind.JsonNode c : checks) {
+            String checkId = text(c, "check_id");
+            if (checkId == null) {
+                continue;
+            }
+            String resource = normalizeIacResource(text(c, "resource"));
+            String filePath = stripLeadingSlash(text(c, "file_path"));
+            if (isPathOutsideCheckout(filePath)) {
+                warningsOut.add(new ScanWarning(WARN_UNRESOLVED_PATH,
+                        "Checkov reported an IaC finding at a path outside the repository checkout; it was "
+                                + "dropped (file_path: " + text(c, "file_path") + ").", null));
+                continue;
+            }
+            Integer line = null;
+            com.fasterxml.jackson.databind.JsonNode range = c.get("file_line_range");
+            if (range != null && range.isArray() && !range.isEmpty() && range.get(0).isInt()) {
+                line = range.get(0).asInt();
+            }
+            String severityLabel = text(c, "severity"); // usually null for OSS checks → base MEDIUM (D-054)
+            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel));
+        }
+    }
+
+    private static String text(com.fasterxml.jackson.databind.JsonNode node, String field) {
+        com.fasterxml.jackson.databind.JsonNode v = node == null ? null : node.get(field);
+        return v == null || v.isNull() ? null : v.asText();
+    }
+
+    /** Checkov reports {@code file_path} relative to the scan root with a leading {@code /}; strip it. */
+    static String stripLeadingSlash(String path) {
+        if (path == null) {
+            return null;
+        }
+        return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /**
+     * Normalizes a Checkov {@code resource} to a STABLE, repo-relative IaC fingerprint input (review bug;
+     * D-054). Checkov reports file-based frameworks (Dockerfile) as {@code "<leading-slash path>.<stage>"} — a
+     * stageless Dockerfile yields e.g. {@code "/iac/docker/Dockerfile."} (leading {@code /}, trailing {@code .}
+     * for the empty stage), unlike the already-clean Terraform resources ({@code aws_s3_bucket.foo}). We collapse
+     * {@code //}, strip a leading {@code /}, and strip a single trailing {@code .}, so a stageless Dockerfile's
+     * resource becomes its repo-relative path (the chosen stable synthetic resource — a named stage keeps its
+     * {@code .<stage>}), while Terraform/Kubernetes/CloudFormation resources (no leading slash, no trailing dot)
+     * are unchanged. Deterministic — the IaC fingerprint {@code rule_id | file_path | resource_name} is frozen.
+     */
+    static String normalizeIacResource(String resource) {
+        if (resource == null) {
+            return null;
+        }
+        String r = resource.replace('\\', '/');
+        while (r.contains("//")) {
+            r = r.replace("//", "/");
+        }
+        if (r.startsWith("/")) {
+            r = r.substring(1);
+        }
+        if (r.endsWith(".")) {
+            r = r.substring(0, r.length() - 1);
+        }
+        return r;
+    }
+
+    /**
+     * The SAST severity label (CRITICAL/HIGH/MEDIUM/LOW) that drives the base score (D-053): prefer the rule's
+     * {@code metadata.severity} when it is one of those, else map Opengrep's level — ERROR→HIGH, WARNING→MEDIUM,
+     * INFO→LOW — defaulting to MEDIUM.
+     */
+    static String sastSeverityLabel(OpengrepExtra extra) {
+        if (extra != null && extra.metadata != null) {
+            Object s = extra.metadata.get("severity");
+            if (s instanceof String str) {
+                switch (str.trim().toUpperCase(java.util.Locale.ROOT)) {
+                    case "CRITICAL" -> { return "CRITICAL"; }
+                    case "HIGH" -> { return "HIGH"; }
+                    case "MEDIUM" -> { return "MEDIUM"; }
+                    case "LOW" -> { return "LOW"; }
+                    default -> { }
+                }
+            }
+        }
+        String level = extra == null ? null : extra.severity;
+        if (level == null) {
+            return "MEDIUM";
+        }
+        return switch (level.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "ERROR" -> "HIGH";
+            case "WARNING" -> "MEDIUM";
+            case "INFO" -> "LOW";
+            default -> "MEDIUM";
+        };
+    }
+
+    /** CWE ids from an Opengrep rule's {@code metadata.cwe}, which may be a single string or an array. */
+    @SuppressWarnings("unchecked")
+    static List<String> cweOf(Map<String, Object> metadata) {
+        if (metadata == null) {
+            return List.of();
+        }
+        Object cwe = metadata.get("cwe");
+        if (cwe instanceof String s && !s.isBlank()) {
+            return List.of(s);
+        }
+        if (cwe instanceof List<?> list) {
+            List<String> out = new ArrayList<>();
+            for (Object o : list) {
+                if (o != null) {
+                    out.add(o.toString());
+                }
+            }
+            return List.copyOf(out);
+        }
+        return List.of();
     }
 
     /**
@@ -617,5 +866,37 @@ public class ScannerOutputParser {
     private static final class OsvEvent {
         public String introduced;
         public String fixed;
+    }
+
+    // --- Opengrep JSON bindings (Semgrep-compatible; https://semgrep.dev/docs output schema) ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepReport {
+        public List<OpengrepResult> results;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepResult {
+        @com.fasterxml.jackson.annotation.JsonProperty("check_id")
+        public String checkId;
+        public String path;
+        public OpengrepPos start;
+        public OpengrepExtra extra;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepPos {
+        public Integer line;
+    }
+
+    /** {@code extra}: the rule level ({@code severity} = ERROR/WARNING/INFO), free-form {@code metadata}
+     * (severity/cwe/owasp/…), and {@code snippet_sha256} — the normalized-snippet hash computed in the container
+     * (the raw {@code lines}/{@code metavars} are stripped there, D-023/S1, so they are absent here). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static final class OpengrepExtra {
+        public String severity;
+        @com.fasterxml.jackson.annotation.JsonProperty("snippet_sha256")
+        public String snippetSha256;
+        public Map<String, Object> metadata;
     }
 }

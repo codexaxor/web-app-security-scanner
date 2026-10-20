@@ -20,6 +20,9 @@ public class ScanTask {
 
     public static final String SCANNER_SECRET = "secret";
     public static final String SCANNER_SCA = "sca";
+    public static final String SCANNER_SAST = "sast";
+    public static final String SCANNER_IAC = "iac";
+    public static final String SCANNER_EOL = "eol";
 
     public static final String STATUS_OK = "ok";
     public static final String STATUS_FAILED = "failed";

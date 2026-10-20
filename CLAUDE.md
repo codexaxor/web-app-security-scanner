@@ -60,6 +60,7 @@ docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag mus
 cd ui && npm ci && npm run dev
 ./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"   # live-osv tests (osv.dev/deps.dev); excluded by default
 ./gradlew :app:test -PliveIntel --tests "*LiveIntelIT"     # live-intel tests (CISA KEV / FIRST EPSS); excluded by default
+./gradlew :app:test -PliveOpengrep -PliveCheckov -PliveEol # M6 live tests (real Opengrep/Checkov container + endoflife.date); excluded by default
 ```
 
 Update this section whenever a command changes.
@@ -79,10 +80,11 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
      part of this trust root and is likewise unscoped.
    - the stale-lease sweep (`staleLeases`) — reclaims hung leases across all workspaces; each reclaimed job's
      `workspace_id` scopes its own state change.
-   - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`) carry no `workspace_id`
-     (shared public reference data / global tuning, not per-tenant business data), so their lookups are
-     intentionally workspace-agnostic: `KevEntryRepository.findPresentCves`, `EpssScoreRepository.findByCveIn`,
-     `FixTimeConfigRepository.findAll`. They are joined to workspace-scoped `sub_issue` rows, which carry the
+   - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`, and the D-053 EOL
+     feed cache `eol_cycle`) carry no `workspace_id` (shared public reference data / global tuning, not
+     per-tenant business data), so their lookups are intentionally workspace-agnostic:
+     `KevEntryRepository.findPresentCves`, `EpssScoreRepository.findByCveIn`, `FixTimeConfigRepository.findAll`,
+     `EolCycleRepository.findByProductAndCycle`. They are joined to workspace-scoped `sub_issue` rows, which carry the
      scoping. The intel sync and the re-score sweep (`ReScoreService`, driven by `WorkspaceRepository.findAll`)
      are system maintenance jobs that run across all workspaces; the sweep then loads each workspace's own
      open sub-issues, so every sub-issue/repository/group query stays scoped by the row's own `workspace_id`.

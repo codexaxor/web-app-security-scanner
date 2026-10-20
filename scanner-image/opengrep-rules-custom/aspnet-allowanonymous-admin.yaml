@@ -1,0 +1,8 @@
+rules:
+  - id: aspnet-allowanonymous-admin
+    languages: [csharp]
+    severity: ERROR
+    message: "[AllowAnonymous] on an admin controller exposes privileged endpoints."
+    metadata: {cwe: ["CWE-285: Improper Authorization"], category: security}
+    patterns:
+      - pattern-regex: '\[AllowAnonymous\][\s\S]{0,200}?class\s+\w*[Aa]dmin\w*'

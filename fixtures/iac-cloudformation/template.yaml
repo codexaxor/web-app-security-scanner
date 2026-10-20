@@ -1,0 +1,5 @@
+Resources:
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: secscan-fixture-cfn-bucket

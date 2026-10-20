@@ -1,0 +1,8 @@
+rules:
+  - id: spring-csrf-disabled
+    languages: [java]
+    severity: ERROR
+    message: "Spring Security CSRF protection is disabled."
+    metadata: {cwe: ["CWE-352: Cross-Site Request Forgery (CSRF)"], category: security, owasp: ["A01:2021"]}
+    patterns:
+      - pattern-regex: 'csrf\(\)\s*\.\s*disable\(\)|csrf\([^)]*->[^)]*\.disable\(\)'

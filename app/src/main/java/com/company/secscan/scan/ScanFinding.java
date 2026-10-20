@@ -156,6 +156,56 @@ public class ScanFinding {
         return f;
     }
 
+    /**
+     * A SAST finding from Opengrep (M6). {@code ruleId} = Opengrep check_id, {@code snippetHash} = normalized
+     * snippet hash — with {@code filePath} these are the SAST fingerprint (never {@code line}). {@code line} is
+     * display-only; {@code severityLabel} (the rule severity) and {@code cwe} are descriptive scoring inputs.
+     */
+    public static ScanFinding sast(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
+                                   String filePath, Integer line, String snippetHash, String severityLabel,
+                                   String toolSeverity, List<String> cwe) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_SAST, ScanTask.SCANNER_SAST);
+        f.ruleId = ruleId;
+        f.filePath = filePath;
+        f.line = line;
+        f.snippetHash = snippetHash;
+        f.severityLabel = severityLabel;
+        f.toolSeverity = toolSeverity;
+        f.cwe = cwe;
+        return f;
+    }
+
+    /**
+     * An IaC finding from Checkov (M6). {@code ruleId} = check_id, {@code resourceName} = Checkov resource
+     * (stored in the {@code package} column) — with {@code filePath} these are the IaC fingerprint (never
+     * {@code line}). {@code line} is display-only; {@code severityLabel} is usually null (→ base MEDIUM, D-054).
+     */
+    public static ScanFinding iac(UUID workspaceId, UUID scanId, UUID repositoryId, String ruleId,
+                                  String filePath, String resourceName, Integer line, String severityLabel) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_IAC, ScanTask.SCANNER_IAC);
+        f.ruleId = ruleId;
+        f.filePath = filePath;
+        f.packageName = resourceName; // the resource name is carried in the package column (fingerprint input)
+        f.line = line;
+        f.severityLabel = severityLabel;
+        return f;
+    }
+
+    /**
+     * An EOL finding (static detector, M6). {@code product} is carried in the {@code package} column and
+     * {@code cycle} in {@code installed_version} — with {@code filePath} these are the EOL fingerprint
+     * ({@code product | cycle | file_path}), never {@code line}. The EOL date/base come from the eol_cycle cache
+     * at score time, not here.
+     */
+    public static ScanFinding eol(UUID workspaceId, UUID scanId, UUID repositoryId, String product, String cycle,
+                                  String filePath) {
+        ScanFinding f = new ScanFinding(workspaceId, scanId, repositoryId, TYPE_EOL, ScanTask.SCANNER_EOL);
+        f.packageName = product;
+        f.installedVersion = cycle;
+        f.filePath = filePath;
+        return f;
+    }
+
     public UUID getId() {
         return id;
     }

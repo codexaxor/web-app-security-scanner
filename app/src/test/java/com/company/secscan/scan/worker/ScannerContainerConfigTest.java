@@ -39,6 +39,22 @@ class ScannerContainerConfigTest {
         assertThat(hc.getMemorySwap()).isEqualTo(4L * 1024 * 1024 * 1024);
         assertThat(hc.getNanoCPUs()).isEqualTo(2_000_000_000L);
         assertThat(hc.getTmpFs().get("/work")).contains("noexec").contains("nosuid").contains("size=2g");
+        // The SAST engine's exec-able tmpfs is isolated from /work (the repo is never on it) and is still
+        // nosuid/nodev and size-capped (D-053 / D-004).
+        // The SAST exec tmpfs is owned by the scan uid:gid and mode 0700 (not world-writable), nosuid/nodev,
+        // size-capped (D-056 / review 0700 nit).
+        assertThat(hc.getTmpFs().get("/opt/sast-exec"))
+                .contains("rw,exec,").doesNotContain("noexec")
+                .contains("nosuid").contains("nodev").contains("size=512m")
+                .contains("mode=0700").contains("uid=1000").contains("gid=1000").doesNotContain("mode=1777");
+    }
+
+    @org.junit.jupiter.api.Test
+    void execMountFallsBackToWorldWritableWhenUserIsNotANumericPair() {
+        assertThat(ScannerContainerConfig.execMountOpts("1000:1000"))
+                .contains("mode=0700").contains("uid=1000").contains("gid=1000");
+        assertThat(ScannerContainerConfig.execMountOpts("root")).contains("mode=1777").doesNotContain("uid=");
+        assertThat(ScannerContainerConfig.execMountOpts(null)).contains("mode=1777");
     }
 
     @Test

@@ -1,0 +1,13 @@
+{
+  "version": "1.31.0",
+  "comment": "SYNTHETIC sample (CLAUDE.md rule 5): hand-crafted to exercise the UNRESOLVED_PATH guard — one normal finding under the checkout and one whose path escapes it. Shape matches the container-sanitized output (snippet_sha256, no lines).",
+  "results": [
+    { "check_id": "opengrep-rules.custom.spring-csrf-disabled", "path": "/work/checkout/src/A.java",
+      "start": {"line": 5}, "end": {"line": 5},
+      "extra": {"severity": "ERROR", "snippet_sha256": "bca1fb7ee871432b8686467f613c5bb9aa41b4c11f69e13e18f2f6adc4a1a0ca", "metadata": {"cwe": ["CWE-352: CSRF"]}} },
+    { "check_id": "opengrep-rules.java.lang.security.audit.xxe", "path": "/etc/passwd",
+      "start": {"line": 1},
+      "extra": {"severity": "ERROR", "snippet_sha256": "0000", "metadata": {}} }
+  ],
+  "errors": []
+}

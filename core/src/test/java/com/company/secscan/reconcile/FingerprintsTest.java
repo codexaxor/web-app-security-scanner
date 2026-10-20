@@ -54,6 +54,25 @@ class FingerprintsTest {
     }
 
     @Test
+    void m6FingerprintsAreLineFreeAndPathFormInsensitive() {
+        // The SAST/IaC/EOL fingerprint functions take NO line number, so identity cannot depend on it (domain
+        // rule 2 — the FROZEN M6 fingerprints). Path form is normalized so a backslash / ./ prefix never churns.
+        assertThat(Fingerprints.sast("rule", "src/A.java", "snip"))
+                .isEqualTo(Fingerprints.sast("rule", ".\\src\\A.java", "snip"));
+        assertThat(Fingerprints.iac("ckv.1", "k8s/pod.yaml", "Pod.default.demo"))
+                .isEqualTo(Fingerprints.iac("ckv.1", "./k8s/pod.yaml", "Pod.default.demo"));
+        assertThat(Fingerprints.eol("spring-boot", "2.1", "pom.xml"))
+                .isEqualTo(Fingerprints.eol("spring-boot", "2.1", "./pom.xml"));
+        // Every field still changes the identity.
+        assertThat(Fingerprints.sast("rule", "src/A.java", "s1"))
+                .isNotEqualTo(Fingerprints.sast("rule", "src/A.java", "s2"));
+        assertThat(Fingerprints.iac("ckv.1", "k8s/pod.yaml", "res1"))
+                .isNotEqualTo(Fingerprints.iac("ckv.1", "k8s/pod.yaml", "res2"));
+        assertThat(Fingerprints.eol("spring-boot", "2.1", "pom.xml"))
+                .isNotEqualTo(Fingerprints.eol("spring-boot", "2.2", "pom.xml"));
+    }
+
+    @Test
     void groupKeyPrefixesTheTypeSoDiscriminatorsDoNotCollideAcrossTypes() {
         assertThat(Fingerprints.groupKey("secret", "aws-access-token")).isEqualTo("secret|aws-access-token");
         assertThat(Fingerprints.groupKey("sast", "rule-x"))

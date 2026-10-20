@@ -1,7 +1,9 @@
 package com.company.secscan.scoring;
 
 import com.company.secscan.finding.RawFinding;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Derives the remediation-effort category for a finding and resolves it to minutes against the tunable
@@ -25,7 +27,30 @@ public final class FixTime {
 
     private static final int DEFAULT_MINUTES = 20;
 
+    /** CWE ids that mark an injection-class SAST finding (→ SAST_INJECTION fix-time): OS/command, SQL, code,
+     * expression-language, LDAP, XML/XPath injection. Everything else is DEFAULT. */
+    private static final Set<String> INJECTION_CWES = Set.of(
+            "77", "78", "88", "89", "90", "91", "94", "564", "643", "917", "943");
+
     private FixTime() {
+    }
+
+    /**
+     * SAST fix-time category from the rule's CWE ids: {@link #SAST_INJECTION} (30) when any CWE is an
+     * injection class, else {@link #DEFAULT} (20) (SPEC "Fix time"; M6). Tunable via {@code fix_time_config}.
+     */
+    public static String sastCategory(List<String> cweIds) {
+        if (cweIds != null) {
+            for (String cwe : cweIds) {
+                if (cwe != null) {
+                    String num = cwe.replaceAll("(?i)^cwe-?", "").replaceAll("[^0-9].*$", "");
+                    if (INJECTION_CWES.contains(num)) {
+                        return SAST_INJECTION;
+                    }
+                }
+            }
+        }
+        return DEFAULT;
     }
 
     /** The fix-time category for a finding, from its type and (for SCA) the installed→fixed semver magnitude. */

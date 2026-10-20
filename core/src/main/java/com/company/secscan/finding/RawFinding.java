@@ -41,6 +41,9 @@ public record RawFinding(
 
     public static final String SCANNER_SECRET = "secret";
     public static final String SCANNER_SCA = "sca";
+    public static final String SCANNER_SAST = "sast";
+    public static final String SCANNER_IAC = "iac";
+    public static final String SCANNER_EOL = "eol";
 
     /**
      * A secret finding. The raw value is never passed in; {@code secretHash} is its SHA-256 and
@@ -67,5 +70,47 @@ public record RawFinding(
         return new RawFinding(TYPE_SCA, SCANNER_SCA, null, vulnId, packageName, ecosystem, installedVersion,
                 fixedVersion, manifestPath, null, null, null, null, toolSeverity, cvss, severityLabel, cwe,
                 cveAliases, advisorySummary);
+    }
+
+    /**
+     * A SAST finding (Opengrep, M6). {@code ruleId} is the Opengrep {@code check_id} and {@code filePath} the
+     * repo-relative path; {@code snippetHash} is the normalized-snippet SHA-256 computed inside the scanner
+     * container (run-scan.sh, D-023/S1 — the raw matched line never leaves the container) — these
+     * three are the SAST fingerprint ({@code rule_id | file_path | normalized_snippet_hash}), never the line
+     * number. {@code line} is carried for display only. {@code severityLabel} is the rule severity
+     * (CRITICAL/HIGH/MEDIUM/LOW, mapped from Opengrep's metadata/level) that drives the SAST base (D-053);
+     * {@code toolSeverity} is Opengrep's raw level; {@code cwe} the rule's CWE ids (subtitle input).
+     */
+    public static RawFinding sast(String ruleId, String filePath, Integer line, String snippetHash,
+                                  String severityLabel, String toolSeverity, List<String> cwe) {
+        return new RawFinding(TYPE_SAST, SCANNER_SAST, ruleId, null, null, null, null, null, filePath, line,
+                snippetHash, null, null, toolSeverity, null, severityLabel, cwe, null, null);
+    }
+
+    /**
+     * An IaC finding (Checkov, M6). {@code ruleId} is the Checkov {@code check_id}, {@code resourceName} the
+     * Checkov {@code resource} (e.g. {@code aws_s3_bucket.foo}) — with {@code filePath} these are the IaC
+     * fingerprint ({@code rule_id | file_path | resource_name}), never the line number. The resource name is
+     * carried in {@code packageName} (the column reused for it; see {@code ReconcileService.fingerprintOf}).
+     * {@code line} is display only; {@code severityLabel} is usually null (OSS Checkov checks carry no
+     * severity), which the scorer maps to the IaC base MEDIUM (D-054).
+     */
+    public static RawFinding iac(String ruleId, String filePath, String resourceName, Integer line,
+                                 String severityLabel) {
+        return new RawFinding(TYPE_IAC, SCANNER_IAC, ruleId, null, resourceName, null, null, null, filePath,
+                line, null, null, null, null, null, severityLabel, null, null, null);
+    }
+
+    /**
+     * An EOL finding candidate (static detector, M6, D-055). {@code product} is the endoflife.date slug and
+     * {@code cycle} the detected release cycle — with {@code filePath} these are the EOL fingerprint
+     * ({@code product | cycle | file_path}), never a line number. The product is carried in {@code packageName}
+     * and the cycle in {@code installedVersion} (the columns reused for them; see
+     * {@code ReconcileService.fingerprintOf}). The detector makes NO EOL judgement; whether this is an actual
+     * issue (past-EOL / ending-soon) and its base score are decided by the worker against the eol_cycle cache.
+     */
+    public static RawFinding eol(String product, String cycle, String filePath) {
+        return new RawFinding(TYPE_EOL, SCANNER_EOL, null, null, product, null, cycle, null, filePath, null,
+                null, null, null, null, null, null, null, null, null);
     }
 }

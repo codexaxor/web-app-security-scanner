@@ -1,0 +1,27 @@
+# SecScan pinned Checkov config, baked into the scanner image and passed with --config-file (D-037 / D-054).
+# Passing our own --config-file makes Checkov ignore any in-repo .checkov.yaml/.checkov.yml, so a scanned repo
+# cannot relax or hide its own IaC findings; this config may only KEEP detection strong, never weaken it.
+#
+# BLOCKER 1 (D-004 — never execute scanned code): only STATIC-parse frameworks are enabled. Helm and Kustomize
+# are deliberately OMITTED — Checkov renders Helm charts / Kustomize overlays by shelling out to the `helm` /
+# `kustomize` binaries, which we do not install and must not run. The Helm-chart-rendering coverage gap is
+# recorded in D-054 and the deferred register (D-030: a gap is shown, not hidden — run-scan.sh raises an
+# IAC_HELM_NOT_RENDERED warning when a Chart.yaml is present).
+#
+# NOTE: Checkov 3.3.29 has NO `docker_compose` framework (the architect's blocker-1 list named it, but the tool
+# does not offer it — valid values are dockerfile/kubernetes/terraform/cloudformation/helm/kustomize/…, no
+# compose). docker-compose misconfig coverage is therefore a recorded gap (D-054 / deferred register), not a
+# silent drop. The four frameworks below are all pure static parsers.
+framework:
+  - dockerfile
+  - kubernetes
+  - terraform
+  - cloudformation
+# Offline posture (SHOULD-FIX 3): never fetch external checks/modules/data. Combined with the scanner
+# container's network isolation and CKV_SKIP_PACKAGE_UPDATE_CHECK=True (set in run-scan.sh) this means zero
+# egress; the Opengrep/Checkov config-injection ITs run the container with the network disabled to prove it.
+skip-download: true
+# `compact` drops the code blocks (we consume the JSON, not stdout). We DELIBERATELY do NOT set `quiet`: it
+# strips passed_checks AND skipped_checks from the JSON, and D-037 requires us to RECOVER inline `#checkov:skip`
+# suppressions from skipped_checks[] and promote them back to findings.
+compact: true
