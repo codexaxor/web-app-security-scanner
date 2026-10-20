@@ -1,6 +1,7 @@
 #!/bin/sh
-# SecScan scanner entrypoint (M2 + M4b): clone one repo at one commit, run Betterleaks, and write SANITIZED
-# results.
+# SecScan scanner entrypoint (M2 + M4b + M6): clone one repo at one commit, run Betterleaks (secrets),
+# OSV-Scanner (SCA), Opengrep (SAST) and Checkov (IaC), and write SANITIZED results. All scanners run fully
+# offline on the clone (no new egress host in M6; D-053/D-054).
 #
 # Security contract (CLAUDE.md + D-014 + D-024 + D-036 + D-037):
 #   - The token (if any) arrives only as a read-only file, never an env var or the clone URL, and is sent as a
@@ -263,6 +264,166 @@ if [ "$SCA_STATUS" = "failed" ] && [ -s "$WORK/osv.log" ]; then
     tail -c 4000 "$WORK/osv.log" >&2 || true
 fi
 
+# --- SAST scan (Opengrep over the clone; fully offline, D-053) ---
+# Rules come ONLY via --config (no in-repo rule auto-load). In-repo suppressors are ignored (D-037):
+# --disable-nosem ignores inline nosemgrep/nosem/noopengrep, and --x-ignore-semgrepignore-files ignores every
+# in-repo .semgrepignore. --disable-version-check keeps it offline (Opengrep sends no telemetry; the removed
+# Semgrep --metrics flag does not exist). We run from /etc/secscan with a RELATIVE `--config opengrep-rules`, so
+# every check_id is the stable `opengrep-rules.<pack>.<id>` (never an absolute path); the parser relativizes the
+# absolute $CHECKOUT file paths. Findings are read from the JSON, not the exit code: success = a valid JSON
+# report AND exit 0/1 (1 is possible per Opengrep build); any other code = scanner failure.
+SAST_JSON="$OUT/opengrep.json"
+SAST_RAW="$WORK/opengrep-raw.json"
+# Opengrep unpacks its (trusted, pinned) core binary to HOME/TMPDIR and execs it. /work is tmpfs noexec (so no
+# CLONED repo code can ever run), so point Opengrep's own runtime at the separate exec-able tmpfs
+# /opt/sast-exec (ScannerContainerConfig.TOOL_EXEC_MOUNT). The scanned repo stays on /work and is never placed
+# on an exec mount, so "never execute scanned code" (D-004) is preserved — only our pinned tool runs here.
+# NOTE: even `opengrep --version` execs the core, so it also needs the exec-able HOME/TMPDIR.
+# The RAW report is written to tmpfs /work (NOT /out) because Opengrep's `extra.lines`/`extra.metavars` carry
+# matched SOURCE LINES — which include secrets our own rules match — and must never leave the container
+# (D-023/D-027). We compute the normalized-snippet SHA-256 HERE and write a sanitized report to /out with the
+# raw lines/metavars stripped (S1); only the hash leaves the container.
+SAST_TMP=/opt/sast-exec
+OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" opengrep --version 2>/dev/null | head -1)"
+START="$(date +%s)"
+set +e
+( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
+    opengrep scan --config opengrep-rules --json-output="$SAST_RAW" \
+    --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
+    >"$WORK/opengrep.log" 2>&1
+SAST_EXIT=$?
+set -e
+END="$(date +%s)"
+SAST_DUR_MS=$(( (END - START) * 1000 ))
+[ -f "$SAST_RAW" ] || printf '{"results":[],"errors":[]}' > "$SAST_RAW"
+if { [ "$SAST_EXIT" -eq 0 ] || [ "$SAST_EXIT" -eq 1 ]; } \
+        && jq -e 'has("results")' "$SAST_RAW" >/dev/null 2>&1; then
+    SAST_STATUS=ok
+else
+    SAST_STATUS=failed
+fi
+# --- Sanitize SAST (mirror the secret sanitize, D-023/S1): per result, compute the NORMALIZED-snippet SHA-256
+# (lines trimmed, internal whitespace collapsed, blank lines dropped — same algorithm as the old Java
+# SnippetNormalizer, which this replaces) and emit a cleaned result with extra.lines/metavars/fingerprint
+# REMOVED and extra.snippet_sha256 added. The raw matched lines never reach /out. ---
+: > "$WORK/sast.ndjson"
+if [ "$SAST_STATUS" = "ok" ]; then
+    jq -c '.results[]?' "$SAST_RAW" 2>/dev/null | while IFS= read -r result; do
+        snippet="$(printf '%s' "$result" | jq -r '.extra.lines // ""')"
+        hash="$(printf '%s' "$snippet" | awk 'NF>0{$1=$1;print}' | sha256sum | cut -d' ' -f1)"
+        unset snippet
+        printf '%s' "$result" | jq -c --arg h "$hash" \
+            'del(.extra.lines, .extra.metavars, .extra.fingerprint) | .extra.snippet_sha256 = $h' \
+            >> "$WORK/sast.ndjson"
+    done
+fi
+jq -s '{results: ., errors: []}' "$WORK/sast.ndjson" > "$SAST_JSON"
+if [ "$SAST_STATUS" = "failed" ] && [ -s "$WORK/opengrep.log" ]; then
+    echo "opengrep failed (exit $SAST_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/opengrep.log" >&2 || true
+fi
+
+# --- IaC scan (Checkov over the clone; fully offline, D-054) ---
+# Only STATIC-parse frameworks are enabled (checkov.yaml: dockerfile, kubernetes, terraform, cloudformation).
+# Helm/Kustomize are NOT run — rendering them shells out to helm/kustomize (D-004, BLOCKER 1); Checkov 3.3.29 has
+# no docker_compose framework (compose files are flagged as a gap below). A Chart.yaml present raises an honest
+# IAC_HELM_NOT_RENDERED warning below (D-030). In-repo config is ignored (D-037): we pass our baked
+# --config-file AND delete any in-repo .checkov.yaml/.checkov.yml from the clone (below), because --config-file
+# alone does NOT stop Checkov honoring a repo config. Inline
+# `#checkov:skip=` CANNOT be disabled by a flag, but a skipped check is still reported in skipped_checks[] — the
+# parser RECOVERS those and promotes them back to findings. Offline (SHOULD-FIX 3): --skip-download (in the
+# config) plus CKV_SKIP_PACKAGE_UPDATE_CHECK suppress every network call. Multi-framework JSON is an ARRAY of
+# per-framework report objects. Exit: 0 = all passed/skipped, 1 = a check failed; both are success (findings are
+# read from the JSON). Any other code = scanner failure.
+IAC_JSON="$OUT/checkov.json"
+CHECKOV_VERSION="$(checkov --version 2>/dev/null | head -1)"
+export CKV_SKIP_PACKAGE_UPDATE_CHECK=True
+# D-037: Checkov reads an in-repo .checkov.yaml/.checkov.yml from the scanned tree and HONORS its `skip-check`
+# EVEN when we pass our own --config-file (verified), so a repo could silently hide its own findings. Our
+# --config-file cannot override that, so we REMOVE every in-repo Checkov config from the EPHEMERAL in-container
+# clone (never the real repo — the clone dies with the container; D-030 is about the real repository) before
+# scanning. The removal is CLONE-SCOPED (rooted at $CHECKOUT), covers BOTH .checkov.yaml and .checkov.yml at ANY
+# depth, and is SYMLINK-SAFE: find runs in -P mode (never follows a symlink), and we delete symlink ENTRIES too
+# (-type l) so Checkov can never follow a symlinked .checkov.yaml out of the clone; a symlink's target (outside
+# the clone) is never touched. We delete every ENTRY of that name — regular file, symlink OR DIRECTORY (S3: a
+# repo could commit a *directory* named .checkov.yaml, which `-type f`/`-type l` missed, making Checkov crash and
+# IaC always fail) — with `-depth -exec rm -rf` (contents first; rm removes a symlink entry without following it).
+# No `|| true`: if removal FAILS we must NOT scan with a repo config present — we mark IaC failed (closes
+# nothing). Inline `#checkov:skip=` can't be flag-disabled but is reported in skipped_checks[] and recovered.
+IAC_STATUS=ok
+START="$(date +%s)"
+if ! find "$CHECKOUT" -depth \( -name '.checkov.yaml' -o -name '.checkov.yml' \) -exec rm -rf {} + \
+        2>"$WORK/ckcfg.err"; then
+    echo "failed to remove in-repo Checkov config from the clone; failing IaC (not scanning with it present)" >&2
+    sed 's/[A-Za-z0-9+/=]\{20,\}/<redacted>/g' "$WORK/ckcfg.err" >&2 || true
+    IAC_STATUS=failed
+fi
+set +e
+if [ "$IAC_STATUS" = "ok" ]; then
+    # `checkov -o json` writes the JSON report to stdout (banner/chatter to stderr); capture each separately.
+    checkov -d "$CHECKOUT" -o json --config-file /etc/secscan/checkov.yaml >"$IAC_JSON" 2>"$WORK/checkov.log"
+    IAC_EXIT=$?
+else
+    IAC_EXIT=1
+fi
+set -e
+END="$(date +%s)"
+IAC_DUR_MS=$(( (END - START) * 1000 ))
+if [ "$IAC_STATUS" = "ok" ] && { [ "$IAC_EXIT" -eq 0 ] || [ "$IAC_EXIT" -eq 1 ]; } \
+        && [ -f "$IAC_JSON" ] && jq -e 'type == "array" or type == "object"' "$IAC_JSON" >/dev/null 2>&1; then
+    IAC_STATUS=ok
+else
+    IAC_STATUS=failed
+fi
+[ -f "$IAC_JSON" ] || printf '[]' > "$IAC_JSON"
+if [ "$IAC_STATUS" = "failed" ] && [ -s "$WORK/checkov.log" ]; then
+    echo "checkov failed (exit $IAC_EXIT); last output follows:" >&2
+    tail -c 4000 "$WORK/checkov.log" >&2 || true
+fi
+# D-030 honest gap: Helm charts are not rendered (no helm binary, D-004). Flag any Chart.yaml so the coverage
+# gap is shown, not hidden.
+if find "$CHECKOUT" -type f -name Chart.yaml 2>/dev/null | head -1 | grep -q .; then
+    add_warning IAC_HELM_NOT_RENDERED \
+        "Helm charts are not rendered or scanned (chart rendering requires executing helm, which is disallowed; D-004/D-054)." \
+        ""
+fi
+# D-030 honest gap: Checkov 3.3.29 has no docker_compose framework, so compose files are not scanned. Flag any
+# docker-compose/compose file so the coverage gap is shown, not hidden (D-054).
+if find "$CHECKOUT" -type f \( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \
+        -o -name 'compose.yml' -o -name 'compose.yaml' \) 2>/dev/null | head -1 | grep -q .; then
+    add_warning IAC_DOCKER_COMPOSE_UNSUPPORTED \
+        "Docker Compose files are not scanned (Checkov 3.3.29 has no docker_compose framework; D-054)." \
+        ""
+fi
+
+# --- EOL detection (static; M6, D-055) ---
+# Our own detector identifies runtimes/frameworks (Spring Boot, Java, .NET, Node, Dockerfile base images, …)
+# by PARSING files only (no build execution, D-004) and emits {detections:[{product,version,cycle,filePath}]}.
+# It reaches no network; the worker joins these against the eol_cycle intel cache to decide which are actually
+# EOL/ending-soon issues. `python3 -I` keeps the scanned tree off sys.path.
+EOL_JSON="$OUT/eol.json"
+START="$(date +%s)"
+set +e
+python3 -I /usr/local/bin/eol_detect.py "$CHECKOUT" > "$EOL_JSON" 2>"$WORK/eol.log"
+EOL_EXIT=$?
+set -e
+END="$(date +%s)"
+EOL_DUR_MS=$(( (END - START) * 1000 ))
+# Success = exit 0 AND a valid JSON document with a detections array; otherwise the EOL scanner failed (and so
+# closes nothing — domain rule 3).
+if [ "$EOL_EXIT" -eq 0 ] && [ -f "$EOL_JSON" ] && jq -e 'has("detections")' "$EOL_JSON" >/dev/null 2>&1; then
+    EOL_STATUS=ok
+else
+    EOL_STATUS=failed
+fi
+[ -f "$EOL_JSON" ] || printf '{"detections":[],"warnings":[],"status":"error"}' > "$EOL_JSON"
+# Surface the detector's own warnings into the scan warnings.
+jq -c '.warnings[]?' "$EOL_JSON" >> "$WORK/warnings.ndjson" 2>/dev/null || true
+if [ "$EOL_STATUS" = "failed" ] && [ -s "$WORK/eol.log" ]; then
+    echo "eol detector failed (exit $EOL_EXIT); last output follows:" >&2
+    tail -c 2000 "$WORK/eol.log" >&2 || true
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -271,6 +432,8 @@ jq -nc \
     --arg git "$GIT_VERSION" \
     --arg betterleaks "$BETTERLEAKS_VERSION" \
     --arg osv "$OSV_VERSION" \
+    --arg opengrep "$OPENGREP_VERSION" \
+    --arg checkov "$CHECKOV_VERSION" \
     --arg sstatus "$SECRET_STATUS" \
     --argjson sexit "$GL_EXIT" \
     --argjson sdur "$DUR_MS" \
@@ -278,22 +441,35 @@ jq -nc \
     --argjson caexit "$OSV_EXIT" \
     --argjson cadur "$OSV_DUR_MS" \
     --argjson nopkg "$OSV_NO_PACKAGES" \
+    --arg saststatus "$SAST_STATUS" \
+    --argjson sastexit "$SAST_EXIT" \
+    --argjson sastdur "$SAST_DUR_MS" \
+    --arg iacstatus "$IAC_STATUS" \
+    --argjson iacexit "$IAC_EXIT" \
+    --argjson iacdur "$IAC_DUR_MS" \
+    --arg eolstatus "$EOL_STATUS" \
+    --argjson eolexit "$EOL_EXIT" \
+    --argjson eoldur "$EOL_DUR_MS" \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
-      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv},
+      toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv, opengrep:$opengrep, checkov:$checkov},
       warnings: ($warnings[0] // []),
       syntheticPoms: ($synth[0] // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",
-         noPackages:$nopkg}
+         noPackages:$nopkg},
+        {name:"sast", status:$saststatus, exitCode:$sastexit, durationMs:$sastdur, findingsFile:"opengrep.json"},
+        {name:"iac", status:$iacstatus, exitCode:$iacexit, durationMs:$iacdur, findingsFile:"checkov.json"},
+        {name:"eol", status:$eolstatus, exitCode:$eolexit, durationMs:$eoldur, findingsFile:"eol.json"}
       ]}' \
     > "$OUT/result.json"
 
 # A scanner failure is reported per-scanner in the manifest (the worker records a partial scan). Exit non-zero
 # only to signal an unexpected scanner failure; clone failures exit 10 above.
-if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ]; then
+if [ "$SECRET_STATUS" = "failed" ] || [ "$SCA_STATUS" = "failed" ] \
+        || [ "$SAST_STATUS" = "failed" ] || [ "$IAC_STATUS" = "failed" ] || [ "$EOL_STATUS" = "failed" ]; then
     exit 20
 fi
 exit 0

@@ -1,0 +1,9 @@
+rules:
+  - id: spring-spel-injection
+    languages: [java]
+    severity: ERROR
+    message: "Expression parsed from a non-literal value (possible SpEL/OGNL injection)."
+    metadata: {cwe: ["CWE-917: Expression Language Injection"], category: security}
+    patterns:
+      - pattern: $P.parseExpression($ARG)
+      - pattern-not: $P.parseExpression("...")

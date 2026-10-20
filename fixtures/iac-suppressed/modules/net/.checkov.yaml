@@ -1,0 +1,3 @@
+# A NESTED in-repo config trying to hide the open-ingress finding. SecScan removes it from the clone (D-037).
+skip-check:
+  - CKV_AWS_24

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.intel.EolCycle;
+import com.company.secscan.intel.EolCycleRepository;
 import com.company.secscan.intel.EpssScore;
 import com.company.secscan.intel.EpssScoreRepository;
 import com.company.secscan.intel.KevEntry;
@@ -57,12 +59,142 @@ class ScoringReconcileIT extends AbstractScanWorkerIT {
     KevEntryRepository kevEntries;
     @Autowired
     EpssScoreRepository epssScores;
+    @Autowired
+    EolCycleRepository eolCycles;
 
     @BeforeEach
     void clearIntel() {
         kevEntries.deleteAllInBatch();
         epssScores.deleteAllInBatch();
+        eolCycles.deleteAllInBatch();
     }
+
+    // --- M6 scoring (SAST/IaC/EOL bases, test-path −15, non-SCA fix-time sum) ---
+
+    @Test
+    void sastScoresFromSeverityLabelAndTestPathSubtractsFifteen() {
+        UUID repo = seedRepository("normal");
+        UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_SAST);
+        // A HIGH SAST finding in a test path: base 75 − 15 = 60, both lines itemized.
+        scanFindings.save(ScanFinding.sast(WORKSPACE, scan, repo, "opengrep-rules.custom.spring-csrf-disabled",
+                "src/test/java/app/FooTest.java", 12, "snip", "HIGH", "ERROR", List.of("CWE-352")));
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        SubIssue sub = onlySub();
+        assertThat(sub.getScore()).isEqualTo(60);
+        assertThat(sub.getScoreBreakdown()).anyMatch(l -> l.code().equals("base_sast") && l.delta() == 75);
+        assertThat(sub.getScoreBreakdown()).anyMatch(l -> l.code().equals("test_path") && l.delta() == -15);
+    }
+
+    @Test
+    void iacScoresBaseMediumWhenCheckovGivesNoSeverity() {
+        UUID repo = seedRepository("normal");
+        UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_IAC);
+        scanFindings.save(ScanFinding.iac(WORKSPACE, scan, repo, "CKV_AWS_24", "main.tf",
+                "aws_security_group.open", 4, null));
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        SubIssue sub = onlySub();
+        assertThat(sub.getScore()).isEqualTo(50);
+        assertThat(sub.getScoreBreakdown()).anyMatch(l -> l.code().equals("base_iac") && l.delta() == 50);
+    }
+
+    @Test
+    void eolPastEolScoresBase75() {
+        UUID repo = seedRepository("normal");
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, java.time.LocalDate.of(2019, 10, 1), "2.1.18",
+                null, null, false, false));
+        UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan, repo, "spring-boot", "2.1", "pom.xml"));
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        assertThat(onlySub().getScore()).isEqualTo(75);
+        assertThat(onlySub().getScoreBreakdown()).anyMatch(l -> l.code().equals("base_eol") && l.delta() == 75);
+    }
+
+    @Test
+    void eolEndingSoonScoresBase45() {
+        UUID repo = seedRepository("normal");
+        // Not yet EOL, but the EOL date is within 90 days → ending-soon (base 45).
+        eolCycles.save(new EolCycle("nodejs", "20", false, java.time.LocalDate.now().plusDays(30), "20.1.0",
+                null, null, true, true));
+        UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan, repo, "nodejs", "20", "Dockerfile"));
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        assertThat(onlySub().getScore()).isEqualTo(45);
+        assertThat(onlySub().getScoreBreakdown()).anyMatch(l -> l.code().equals("base_eol") && l.delta() == 45);
+    }
+
+    @Test
+    void eolFreezeIsPerProductCoveredSolvesWhileUncoveredStaysFrozen() {
+        // S5 (default build): per-(product,cycle) never-false-solve. Two covered EOL findings open; dotnet's
+        // coverage then disappears; a later scan with NO eol findings solves the still-covered spring-boot but
+        // FREEZES the now-uncovered dotnet (never false-solved).
+        UUID repo = seedRepository("normal");
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, java.time.LocalDate.of(2019, 10, 1), "2.1.18",
+                null, null, false, false));
+        eolCycles.save(new EolCycle("dotnet", "8", true, java.time.LocalDate.of(2026, 1, 1), "8.0.11",
+                null, null, false, false));
+        UUID scan1 = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan1, repo, "spring-boot", "2.1", "pom.xml"));
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan1, repo, "dotnet", "8", "App.csproj"));
+        reconcile.reconcile(scan1, WORKSPACE);
+        assertThat(subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo))
+                .filteredOn(s -> ScanFinding.TYPE_EOL.equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getStatus()).isEqualTo(SubIssue.STATUS_OPEN)).hasSize(2);
+
+        // dotnet coverage vanishes (never synced / dropped from the feed); spring-boot stays covered.
+        eolCycles.deleteAllInBatch();
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, java.time.LocalDate.of(2019, 10, 1), "2.1.18",
+                null, null, false, false));
+
+        // Scan 2: EOL scanner ok, NO detections (both absent).
+        UUID scan2 = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        reconcile.reconcile(scan2, WORKSPACE);
+
+        var subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
+        SubIssue springBoot = subs.stream().filter(s -> "spring-boot".equals(s.getPackageName())).findFirst()
+                .orElseThrow();
+        SubIssue dotnet = subs.stream().filter(s -> "dotnet".equals(s.getPackageName())).findFirst().orElseThrow();
+        assertThat(springBoot.getStatus()).as("covered + absent → solved").isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(dotnet.getStatus()).as("uncovered → frozen, never false-solved").isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(dotnet.getSolvedAt()).isNull();
+    }
+
+    @Test
+    void nonScaGroupFixTimeIsTheSumOfOpenSubIssues() {
+        UUID repo = seedRepository("normal");
+        UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_SAST);
+        // Two SAST findings under the SAME rule (one group): injection (30) + default (20) → group sum 50.
+        scanFindings.save(ScanFinding.sast(WORKSPACE, scan, repo, "rule.x", "a/A.java", 1, "s1", "HIGH",
+                "ERROR", List.of("CWE-89")));   // injection → 30
+        scanFindings.save(ScanFinding.sast(WORKSPACE, scan, repo, "rule.x", "b/B.java", 1, "s2", "HIGH",
+                "ERROR", List.of("CWE-200")));  // default → 20
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        List<SubIssue> subs = subIssues.findAll();
+        assertThat(subs).hasSize(2);
+        IssueGroup group = groups.findById(subs.get(0).getGroupId()).orElseThrow();
+        assertThat(group.getFixTimeMinutes()).isEqualTo(50); // SUM for non-SCA (SHOULD-FIX 4)
+    }
+
+    private UUID seedScanWithOkTask(UUID repoId, String scanner) {
+        Scan scan = Scan.manual(WORKSPACE, repoId);
+        scan.markRunning();
+        scan.finish(Scan.STATUS_COMPLETED);
+        scan = scans.save(scan);
+        ScanTask task = new ScanTask(WORKSPACE, scan.getId(), scanner, ScanTask.STATUS_OK, 0, 5L, null);
+        task.setClosesFindings(true);
+        tasks.save(task);
+        return scan.getId();
+    }
+
 
     @Test
     void kevListedCveScoresPlusFiveWithTheReasonInBreakdown() {

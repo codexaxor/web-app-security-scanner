@@ -474,6 +474,129 @@ class ScannerOutputParserTest {
         assertThat(ScannerOutputParser.isConcreteVersion(null)).isFalse();
     }
 
+    @org.junit.jupiter.api.Test
+    void parsesRealSanitizedOpengrepSampleReadingTheContainerComputedSnippetHash(@TempDir Path outDir)
+            throws Exception {
+        // A REAL Opengrep 1.31.0 run over fixtures/sast-custom, SANITIZED exactly as run-scan.sh does (D-023/S1:
+        // extra.lines/metavars stripped, extra.snippet_sha256 added). The parser reads the container-computed
+        // hash; the raw source line is never present.
+        Path json = sample("/samples/opengrep/real-cleaned.json", outDir);
+
+        java.util.List<RawFinding> findings = parser.parseOpengrep(json, "/work/checkout", new java.util.ArrayList<>());
+
+        assertThat(findings).hasSize(7).allSatisfy(f -> assertThat(f.type()).isEqualTo(RawFinding.TYPE_SAST));
+        RawFinding csrf = findings.stream()
+                .filter(f -> f.ruleId().equals("opengrep-rules.custom.spring-csrf-disabled")).findFirst()
+                .orElseThrow();
+        assertThat(csrf.filePath()).isEqualTo("SecurityConfig.java"); // /work/checkout prefix stripped
+        assertThat(csrf.severityLabel()).isEqualTo("HIGH");           // ERROR level, no metadata.severity
+        assertThat(csrf.toolSeverity()).isEqualTo("ERROR");
+        assertThat(csrf.cwe()).containsExactly("CWE-352: Cross-Site Request Forgery (CSRF)");
+        // The snippet hash is the container-computed value passed straight through (64 hex chars, no raw line).
+        assertThat(csrf.snippetHash())
+                .isEqualTo("bca1fb7ee871432b8686467f613c5bb9aa41b4c11f69e13e18f2f6adc4a1a0ca");
+        RawFinding cors = findings.stream()
+                .filter(f -> f.ruleId().equals("opengrep-rules.custom.spring-cross-origin-wildcard")).findFirst()
+                .orElseThrow();
+        assertThat(cors.severityLabel()).isEqualTo("MEDIUM"); // WARNING level → MEDIUM
+    }
+
+    @org.junit.jupiter.api.Test
+    void parsesOpengrepDropsPathsOutsideTheCheckout(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/opengrep/synthetic-path-escape.json", outDir);
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+
+        java.util.List<RawFinding> findings = parser.parseOpengrep(json, "/work/checkout", warnings);
+
+        // The /etc/passwd result (outside the checkout) is dropped with an UNRESOLVED_PATH warning; the in-checkout
+        // finding is kept and relativized.
+        assertThat(findings).singleElement().satisfies(f -> {
+            assertThat(f.ruleId()).isEqualTo("opengrep-rules.custom.spring-csrf-disabled");
+            assertThat(f.filePath()).isEqualTo("src/A.java");
+        });
+        assertThat(warnings).anySatisfy(w -> assertThat(w.code()).isEqualTo("UNRESOLVED_PATH"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void parsesCheckovArrayFailedAndRecoversSkippedAndStripsLeadingSlash(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/checkov/multi-framework.json", outDir);
+
+        java.util.List<RawFinding> findings = parser.parseCheckov(json, new java.util.ArrayList<>());
+
+        // 1 failed (terraform) + 1 skipped-recovered (terraform) + 1 failed (dockerfile); the empty "secrets"
+        // report with no results contributes nothing.
+        assertThat(findings).hasSize(3);
+        assertThat(findings).allSatisfy(f -> assertThat(f.type()).isEqualTo(RawFinding.TYPE_IAC));
+
+        RawFinding failed = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_23")).findFirst()
+                .orElseThrow();
+        assertThat(failed.filePath()).isEqualTo("main.tf");            // leading slash stripped
+        assertThat(failed.packageName()).isEqualTo("aws_security_group.open"); // resource in the package column
+
+        // D-037: the inline-skipped check is RECOVERED and promoted to a finding.
+        RawFinding recovered = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_21")).findFirst()
+                .orElseThrow();
+        assertThat(recovered.packageName()).isEqualTo("aws_s3_bucket.logs");
+        assertThat(recovered.filePath()).isEqualTo("main.tf");
+
+        RawFinding docker = findings.stream().filter(f -> f.ruleId().equals("CKV_DOCKER_2")).findFirst()
+                .orElseThrow();
+        assertThat(docker.filePath()).isEqualTo("iac/docker/Dockerfile");
+        // The Dockerfile resource "/iac//docker/Dockerfile." is normalized (no leading slash, no trailing dot,
+        // no double slash) to the repo-relative path — the stable synthetic resource (review bug).
+        assertThat(docker.packageName()).isEqualTo("iac/docker/Dockerfile");
+        assertThat(docker.packageName()).doesNotStartWith("/").doesNotEndWith(".").doesNotContain("//");
+        // A Terraform resource is already clean and is left untouched.
+        assertThat(failed.packageName()).isEqualTo("aws_security_group.open");
+    }
+
+    @org.junit.jupiter.api.Test
+    void normalizeIacResourceStripsSlashDotAndCollapsesButLeavesCleanResources() {
+        assertThat(ScannerOutputParser.normalizeIacResource("/iac//docker/Dockerfile."))
+                .isEqualTo("iac/docker/Dockerfile");
+        assertThat(ScannerOutputParser.normalizeIacResource("/app/Dockerfile.builder"))
+                .isEqualTo("app/Dockerfile.builder"); // a named stage is kept
+        assertThat(ScannerOutputParser.normalizeIacResource("aws_s3_bucket.public_fixture"))
+                .isEqualTo("aws_s3_bucket.public_fixture"); // Terraform unchanged
+        assertThat(ScannerOutputParser.normalizeIacResource("Pod.default.demo"))
+                .isEqualTo("Pod.default.demo"); // Kubernetes unchanged
+    }
+
+    @org.junit.jupiter.api.Test
+    void parsesCheckovSummaryOnlyObjectAsNoFindings(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/checkov/empty.json", outDir);
+        assertThat(parser.parseCheckov(json, new java.util.ArrayList<>())).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void parseCheckovDropsFindingsWithPathsOutsideTheCheckout(@TempDir Path outDir) throws Exception {
+        // file_path that escapes the checkout (absolute after the leading-slash strip, or containing "..") is
+        // dropped with an UNRESOLVED_PATH warning — matching the SCA/Opengrep guard.
+        Path json = outDir.resolve("checkov.json");
+        Files.writeString(json, "{\"check_type\":\"terraform\",\"results\":{\"failed_checks\":["
+                + "{\"check_id\":\"CKV_X\",\"resource\":\"r\",\"file_path\":\"/../../etc/evil.tf\"}],"
+                + "\"skipped_checks\":null}}");
+        java.util.List<ScanWarning> warnings = new java.util.ArrayList<>();
+
+        assertThat(parser.parseCheckov(json, warnings)).isEmpty();
+        assertThat(warnings).anySatisfy(w -> assertThat(w.code()).isEqualTo("UNRESOLVED_PATH"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void parsesEolDetectionsAsCandidatesSkippingIncompleteOnes(@TempDir Path outDir) throws Exception {
+        Path json = sample("/samples/eol/detections.json", outDir);
+
+        java.util.List<RawFinding> findings = parser.parseEol(json);
+
+        // The entry with an empty product is skipped; the other three become EOL candidates.
+        assertThat(findings).hasSize(3);
+        assertThat(findings).allSatisfy(f -> assertThat(f.type()).isEqualTo(RawFinding.TYPE_EOL));
+        RawFinding sb = findings.stream().filter(f -> "spring-boot".equals(f.packageName())).findFirst()
+                .orElseThrow();
+        assertThat(sb.installedVersion()).isEqualTo("2.1"); // cycle in the installed_version column
+        assertThat(sb.filePath()).isEqualTo("pom.xml");
+    }
+
     private Path sample(String resource, Path outDir) throws Exception {
         Path target = outDir.resolve(resource.substring(resource.lastIndexOf('/') + 1));
         copyResource(resource, target);

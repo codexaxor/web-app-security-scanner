@@ -1,0 +1,8 @@
+rules:
+  - id: spring-cross-origin-wildcard
+    languages: [java]
+    severity: WARNING
+    message: "@CrossOrigin(\"*\") allows any origin (CORS misconfiguration)."
+    metadata: {cwe: ["CWE-942: Permissive Cross-domain Policy"], category: security}
+    patterns:
+      - pattern-regex: '@CrossOrigin\s*\(\s*(origins\s*=\s*)?[\{]?\s*["'']\*["'']'

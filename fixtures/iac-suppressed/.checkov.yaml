@@ -1,0 +1,5 @@
+# The repo tries to turn off checks via its own config. SecScan removes this file from the clone before
+# scanning (D-037), so CKV_AWS_23 (open ingress, below) still fires.
+skip-check:
+  - CKV_AWS_23
+  - CKV_AWS_260

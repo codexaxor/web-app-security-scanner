@@ -54,4 +54,19 @@ class FixTimeTest {
         assertThat(FixTime.isMajorUpgrade("1.9", "1.10.0")).isFalse();
         assertThat(FixTime.isMajorUpgrade("1.9", "2.0")).isTrue();
     }
+
+    @org.junit.jupiter.api.Test
+    void sastInjectionCweYieldsInjectionCategoryElseDefault() {
+        assertThat(FixTime.sastCategory(java.util.List.of("CWE-89: SQL Injection")))
+                .isEqualTo(FixTime.SAST_INJECTION);
+        assertThat(FixTime.sastCategory(java.util.List.of("CWE-917")))
+                .isEqualTo(FixTime.SAST_INJECTION);
+        assertThat(FixTime.sastCategory(java.util.List.of("CWE-352: CSRF")))
+                .isEqualTo(FixTime.DEFAULT);
+        assertThat(FixTime.sastCategory(null)).isEqualTo(FixTime.DEFAULT);
+        // Minutes resolve against the seeded config (SAST_INJECTION 30, DEFAULT 20).
+        java.util.Map<String, Integer> cfg = java.util.Map.of(FixTime.SAST_INJECTION, 30, FixTime.DEFAULT, 20);
+        assertThat(FixTime.minutes(FixTime.sastCategory(java.util.List.of("CWE-78")), cfg)).isEqualTo(30);
+        assertThat(FixTime.minutes(FixTime.sastCategory(java.util.List.of("CWE-200")), cfg)).isEqualTo(20);
+    }
 }

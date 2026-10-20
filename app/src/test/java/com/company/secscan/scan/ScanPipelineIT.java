@@ -117,11 +117,13 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
             assertThat(f.getSecretPreview()).isEqualTo("ghp_").isNotEqualTo(RAW_KEY);
         });
 
-        // Two scanners now run in the one container: the secret scanner and OSV-Scanner (SCA). The fixture has
-        // no dependency manifests, so SCA is ok with no packages (exit 128) and the scan still completes.
+        // Five scanners now run in the one container (M6): secrets, OSV-Scanner (SCA), Opengrep (SAST),
+        // Checkov (IaC) and the EOL detector. This fixture has no dependency manifests (SCA ok with no packages,
+        // exit 128) and no source/IaC/EOL findings, so every scanner is ok and the scan completes.
         List<ScanTask> scanTasks = tasks.findByScanId(scan.id());
         assertThat(scanTasks).extracting(ScanTask::getScanner)
-                .containsExactlyInAnyOrder(ScanTask.SCANNER_SECRET, ScanTask.SCANNER_SCA);
+                .containsExactlyInAnyOrder(ScanTask.SCANNER_SECRET, ScanTask.SCANNER_SCA,
+                        ScanTask.SCANNER_SAST, ScanTask.SCANNER_IAC, ScanTask.SCANNER_EOL);
         assertThat(scanTasks).allSatisfy(t -> assertThat(t.getStatus()).isEqualTo(ScanTask.STATUS_OK));
         ScanTask secretTask = scanTasks.stream()
                 .filter(t -> ScanTask.SCANNER_SECRET.equals(t.getScanner())).findFirst().orElseThrow();

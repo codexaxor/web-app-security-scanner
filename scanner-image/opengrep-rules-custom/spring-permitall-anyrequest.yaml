@@ -1,0 +1,8 @@
+rules:
+  - id: spring-permitall-anyrequest
+    languages: [java]
+    severity: ERROR
+    message: "anyRequest().permitAll() makes every endpoint public."
+    metadata: {cwe: ["CWE-285: Improper Authorization"], category: security}
+    patterns:
+      - pattern-regex: 'anyRequest\(\)\s*\.\s*permitAll\(\)'

@@ -1,0 +1,205 @@
+{
+  "version": "1.31.0",
+  "results": [
+    {
+      "check_id": "opengrep-rules.custom.aspnet-allowanonymous-admin",
+      "path": "/work/checkout/AdminController.cs",
+      "start": {
+        "line": 1,
+        "col": 1,
+        "offset": 0
+      },
+      "end": {
+        "line": 2,
+        "col": 29,
+        "offset": 45
+      },
+      "extra": {
+        "message": "[AllowAnonymous] on an admin controller exposes privileged endpoints.",
+        "metadata": {
+          "cwe": [
+            "CWE-285: Improper Authorization"
+          ],
+          "category": "security"
+        },
+        "severity": "ERROR",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "9e14123f3380b8eb72f1b283e765f81e3425bfaad2f57b51ab0458cbc1c5ad01"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.spring-spel-injection",
+      "path": "/work/checkout/Eval.java",
+      "start": {
+        "line": 3,
+        "col": 12,
+        "offset": 89
+      },
+      "end": {
+        "line": 3,
+        "col": 45,
+        "offset": 122
+      },
+      "extra": {
+        "message": "Expression parsed from a non-literal value (possible SpEL/OGNL injection).",
+        "metadata": {
+          "cwe": [
+            "CWE-917: Expression Language Injection"
+          ],
+          "category": "security"
+        },
+        "severity": "ERROR",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "4c05ce612e9197f5848af755ac7ac143c7ba310543d0aca578e7f6b179e3bf0f"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.spring-cross-origin-wildcard",
+      "path": "/work/checkout/SecurityConfig.java",
+      "start": {
+        "line": 3,
+        "col": 3,
+        "offset": 48
+      },
+      "end": {
+        "line": 3,
+        "col": 19,
+        "offset": 64
+      },
+      "extra": {
+        "message": "@CrossOrigin(\"*\") allows any origin (CORS misconfiguration).",
+        "metadata": {
+          "cwe": [
+            "CWE-942: Permissive Cross-domain Policy"
+          ],
+          "category": "security"
+        },
+        "severity": "WARNING",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "b99caf94d71acb53dc869e42ce64ca4b3b926349223963ac9aea200d752db7d4"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.spring-csrf-disabled",
+      "path": "/work/checkout/SecurityConfig.java",
+      "start": {
+        "line": 8,
+        "col": 10,
+        "offset": 187
+      },
+      "end": {
+        "line": 8,
+        "col": 26,
+        "offset": 203
+      },
+      "extra": {
+        "message": "Spring Security CSRF protection is disabled.",
+        "metadata": {
+          "cwe": [
+            "CWE-352: Cross-Site Request Forgery (CSRF)"
+          ],
+          "category": "security",
+          "owasp": [
+            "A01:2021"
+          ]
+        },
+        "severity": "ERROR",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "bca1fb7ee871432b8686467f613c5bb9aa41b4c11f69e13e18f2f6adc4a1a0ca"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.spring-permitall-anyrequest",
+      "path": "/work/checkout/SecurityConfig.java",
+      "start": {
+        "line": 9,
+        "col": 39,
+        "offset": 242
+      },
+      "end": {
+        "line": 9,
+        "col": 63,
+        "offset": 266
+      },
+      "extra": {
+        "message": "anyRequest().permitAll() makes every endpoint public.",
+        "metadata": {
+          "cwe": [
+            "CWE-285: Improper Authorization"
+          ],
+          "category": "security"
+        },
+        "severity": "ERROR",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "2d4f714f8c45a2b6a42d94e1687766f4b9805b9b7e3e16f9eaebb5b6ecec1707"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.spring-actuator-exposed",
+      "path": "/work/checkout/application.properties",
+      "start": {
+        "line": 2,
+        "col": 1,
+        "offset": 17
+      },
+      "end": {
+        "line": 2,
+        "col": 44,
+        "offset": 60
+      },
+      "extra": {
+        "message": "All Spring Boot Actuator endpoints are exposed over the web.",
+        "metadata": {
+          "cwe": [
+            "CWE-200: Exposure of Sensitive Information"
+          ],
+          "category": "security"
+        },
+        "severity": "WARNING",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "7b98bbc8ce1b48fe5164217d61049c00bbcb04ab193b1e14abc66969c6868348"
+      }
+    },
+    {
+      "check_id": "opengrep-rules.custom.hardcoded-connection-string",
+      "path": "/work/checkout/appsettings.json",
+      "start": {
+        "line": 3,
+        "col": 51,
+        "offset": 77
+      },
+      "end": {
+        "line": 3,
+        "col": 75,
+        "offset": 101
+      },
+      "extra": {
+        "message": "Hardcoded database password in a connection string.",
+        "metadata": {
+          "cwe": [
+            "CWE-798: Use of Hard-coded Credentials"
+          ],
+          "category": "security"
+        },
+        "severity": "ERROR",
+        "is_ignored": false,
+        "validation_state": "NO_VALIDATOR",
+        "engine_kind": "OSS",
+        "snippet_sha256": "eb1c75152006d6c64e286cc5de5043924741d5d7e9576128b901fff1fa96fb8e"
+      }
+    }
+  ],
+  "errors": []
+}

@@ -1,5 +1,6 @@
 package com.company.secscan.intel;
 
+import com.company.secscan.intel.IntelRows.EolRow;
 import com.company.secscan.intel.IntelRows.EpssRow;
 import com.company.secscan.intel.IntelRows.KevFeed;
 import com.company.secscan.intel.IntelRows.KevRow;
@@ -112,6 +113,39 @@ public class IntelFetcher {
         return rows;
     }
 
+    /**
+     * Fetches one endoflife.date v1 product's release cycles (D-055): GET {@code <base>/products/<slug>/}, whose
+     * {@code result.releases[]} carries the camelCase cycle facts. HTTPS + TLS always on. Returns one
+     * {@link EolRow} per release; an empty/absent releases list yields an empty list (never throws for "no data").
+     */
+    public List<EolRow> fetchEol(String baseUrl, String slug) {
+        String base = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String url = base + "/products/" + slug + "/";
+        requireHttpsOrLoopback(url);
+        byte[] body = client().get().uri(url).retrieve().body(byte[].class);
+        if (body == null) {
+            throw new IllegalStateException("Empty EOL response from " + url);
+        }
+        try {
+            EolEnvelope env = mapper.readValue(body, EolEnvelope.class);
+            List<EolRow> rows = new ArrayList<>();
+            if (env.result != null && env.result.releases != null) {
+                for (EolRelease r : env.result.releases) {
+                    if (r.name == null || r.name.isBlank()) {
+                        continue;
+                    }
+                    String latestName = r.latest == null ? null : r.latest.name;
+                    LocalDate latestDate = r.latest == null ? null : parseDate(r.latest.date);
+                    rows.add(new EolRow(slug, r.name.trim(), r.isEol, parseDate(r.eolFrom), latestName,
+                            latestDate, parseDate(r.releaseDate), r.isLts, r.isMaintained));
+                }
+            }
+            return rows;
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not parse EOL feed from " + url, e);
+        }
+    }
+
     private RestClient client() {
         HttpClient http = HttpClient.newBuilder()
                 .connectTimeout(props.getConnectTimeout())
@@ -179,5 +213,34 @@ public class IntelFetcher {
         public String cveID;
         public String vulnerabilityName;
         public String dateAdded;
+    }
+
+    // --- endoflife.date v1 bindings (D-055): {schema_version, generated_at, result:{releases:[...]}} ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class EolEnvelope {
+        public EolProduct result;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class EolProduct {
+        public List<EolRelease> releases;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class EolRelease {
+        public String name;         // the cycle identifier
+        public String releaseDate;
+        public boolean isEol;
+        public String eolFrom;
+        public boolean isLts;
+        public boolean isMaintained;
+        public EolLatest latest;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class EolLatest {
+        public String name;
+        public String date;
     }
 }

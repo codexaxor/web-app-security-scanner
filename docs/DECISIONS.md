@@ -14,6 +14,196 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-056 Opengrep needs a dedicated exec-able tmpfs — a bounded hardening carve-out (2026-10-20, accepted)
+Context: Opengrep 1.31.0 (musllinux) is a PyInstaller single-file binary that, on every run, unpacks its own
+interpreter + `opengrep-core` under `$HOME` and execs the core. The scanner's `/work` tmpfs is `noexec` (so no
+cloned repo code can run, D-004), which blocks that unpack+exec. This is a change to scanner hardening and must
+be justified, not silent (hard rule #7).
+Avoidance investigated and ruled out: (a) pre-unpacking the runtime onto the read-only image layer does NOT
+work — Opengrep re-unpacks and re-execs into a writable+exec dir at runtime even with a pre-warmed read-only
+`$HOME` (verified: it fails with "couldn't launch child (exec): Permission denied" when the writable dir is
+`noexec`); (b) the release ships no standalone musl `opengrep-core`, only glibc `opengrep-core_linux_*` which
+does not run on Alpine; (c) there is no `opengrep` pip package to install onto the read-only layer. So a
+dedicated writable+exec directory at runtime is genuinely required for the pinned release.
+Decision: add ONE dedicated EXEC-able tmpfs at **`/opt/sast-exec`** (`ScannerContainerConfig.TOOL_EXEC_MOUNT`),
+mounted `rw,exec,nosuid,nodev,mode=1777,size=512m`, SEPARATE from `/work` and `/out`. `run-scan.sh` points ONLY
+Opengrep's `HOME`/`TMPDIR`/`XDG_CACHE_HOME` there. Properties (the carve-out is minimal and does not weaken the
+repo-code guarantee):
+- `/work` (the clone) and `/out` remain **`noexec`**; only `/opt/sast-exec` is exec-able.
+- It holds ONLY Opengrep's own unpacked PyInstaller runtime, copies of OUR rule configs, and Opengrep's run log.
+  **No scanned-repo file is ever copied onto it or executed from it**, and the scanned repo cannot write to it
+  (only Opengrep does). The one repo-derived artefact is Opengrep's own debug log (it may name scanned paths /
+  matched lines); it never leaves the throwaway container (only `/out` leaves).
+- The scanned repository stays on `noexec` `/work` and is never executed — "never execute scanned code" (D-004)
+  is unchanged.
+- All other container controls are unchanged: `--cap-drop=ALL`, `--no-new-privileges`, read-only root
+  filesystem, 2 CPU / 4 GB / 512 PID limits, 30-min hard timeout, and NO Docker socket mount.
+Consequences: one bounded, auditable writable+exec mount for one trusted pinned tool. Revisit at an Opengrep
+release that ships a standalone musl core or a pip distribution — then run the core from the read-only image
+layer and drop this mount.
+
+## D-055 EOL via a static detector + endoflife.date API v1, with a never-false-solve guard (2026-10-20, accepted)
+Context: M6 adds end-of-life detection for runtimes/frameworks. The SPEC uses our own detector + endoflife.date
+data; we must never run a build (D-004) and never false-solve a finding.
+Decision: a **static** detector (`scanner-image/eol_detect.py`, `python3 -I`, stdlib, reads files as data —
+Spring Boot, Java, .NET TargetFramework, Node `.nvmrc`/`engines`, Dockerfile base images, Keycloak) emits
+`{product, cycle, filePath}` candidates and reaches no network; its unit tests run on the host
+(`eolDetectTest`, D-039 pattern). The worker joins candidates against the **`eol_cycle`** intel cache to decide
+which are issues.
+- **endoflife.date v1** (`https://endoflife.date/api/v1`, MIT): the weekly `EolSyncService` (api profile) does a
+  **per-product UPSERT** of `/products/<slug>/` release cycles into `eol_cycle` — it **NEVER wipes** (a failed
+  or empty product fetch keeps that product's existing rows and fails loud; other products still sync). One new
+  api-side egress host `endoflife.date` (beside KEV/EPSS; D-033). TLS always on. The v1 schema is camelCase
+  (`name`=cycle, `isEol`+`eolFrom`, `isLts`, `isMaintained`, `latest.{name,date}`, `releaseDate`); `eol_cycle`
+  column types mirror it. Confirmed slugs: `spring-boot`, `dotnet`, `nodejs`, `keycloak`, `alpine-linux`.
+  **There is no `java` product in v1** — a bare Java language level uses the slug **`eclipse-temurin`** (the
+  configurable default; a Dockerfile `FROM <vendor-jdk>:N` maps to the named distro slug). `/eol/sync` is added
+  to `AdminIntelController` (OD-9 endpoint list extended for M10 role-gating).
+- **Cycle normalization (review BUG 2, `core.eol.EolCycles`):** products key cycles differently — .NET as bare
+  majors (`8`), Spring Boot / Alpine as major.minor (`2.1`, `3.21`). The detector's cycle is normalized to the
+  feed's OWN published cycle key per product, GENERICALLY (no per-product rules): match the detected version
+  against the product's published cycles and take the most specific (longest) one whose numeric components are
+  a prefix of the detected version's (component-wise, so `2.1` never matches `2.10`). So `8.0`→`8`, `2.1`→`2.1`,
+  `3.21`→`3.21`; the NORMALIZED cycle is the frozen fingerprint input (Spring Boot/Alpine are unchanged). No
+  published cycle matches → the coverage gap below.
+- **BLOCKER 2 / review BUG 1 — never false-solve, PER (product, cycle):** `EolEnricher` keeps only covered,
+  issue-worthy INCOMING detections (past-EOL / ending-soon within 90 days, `core.eol.EolStatus`); a detection
+  with no matching published cycle is dropped with an `EOL_COVERAGE_GAP` warning. Solvability is NOT scanner-wide:
+  `scan_task.closes_findings` stays per-scanner (= the EOL scanner succeeded — unchanged behaviour for every
+  type), and whether an EXISTING open EOL finding may be solved is decided **per fingerprint** in
+  `ReconcileService.eolCoverageGuard` — an open EOL sub-issue whose stored `(product, cycle)` has no `eol_cycle`
+  coverage is FROZEN (left untouched, never solved), exactly like a superseded secret under a replaced key
+  (D-029). So one uncovered product (e.g. an unsynced .NET) never blocks solving a fully-covered product
+  (Spring Boot, Alpine) in the same scan, and a covered finding that genuinely disappears still solves. An EOL
+  finding is solved only when the scanner succeeded AND its `(product, cycle)` is covered AND it is now absent.
+  Proven by `EolSolvabilityIT` (`aRescanWithEmptyEolCacheDoesNotSolveAnOpenEolFinding` and
+  `aCoveredProductSolvesEvenWhenAnUncoveredProductIsInTheSameScan`).
+- **Fingerprint / overload:** EOL fingerprint is `product | cycle | file_path` (`core.Fingerprints.eol`, NO line
+  number; `cycle` is the NORMALIZED cycle). `product` reuses the `package` column and `cycle` the
+  `installed_version` column (documented in `ReconcileService.fingerprintOf`), so no new business column is
+  added. `eol_cycle` is the one new table (V16), a global cache with no `workspace_id` (D-050). The EOL base
+  (past-EOL 75 / ending-soon 45) is wired in Slice 4.
+Consequences: offline static EOL detection with faithful, conservative issue classification; one new table, one
+new api egress host, and the detector reaches no network. Java EOL tracks a single configurable JDK distro slug
+(revisit if per-vendor JDK tracking is needed).
+
+## D-053 Opengrep (SAST) pinned 1.31.0 (musllinux), with baked rule packs and ignored in-repo suppressors (2026-10-20, accepted)
+Context: M6 adds SAST. SPEC/D-005 chose Opengrep (LGPL-2.1 Semgrep fork); we pin every scanner by version +
+checksum (D-034/D-036).
+Decision: pin Opengrep **1.31.0** (stable, released 2026-10-15; NOT the 2.0.0 alpha line). The base image is
+Alpine (musl), so we bake the **musllinux** per-arch binaries — the `manylinux` (glibc) builds do NOT run on
+Alpine (they fail with exit 127, confirmed). Checksums verified before use:
+`opengrep_musllinux_x86 = 02c9fba481611aa0664bc79ccf7ce59e9e334b76af8921c80b2f738d17fabf9b`,
+`opengrep_musllinux_aarch64 = b7cbedab0b6c9953ea27ce3baa006ad8b6fa1c50ee7433638b63f7fc731519d9`. Version recorded
+in `scan.tool_versions.opengrep`. (The glibc `manylinux` checksums from the plan are NOT pinned — those builds
+fail on Alpine.)
+- **Provenance (Cosign, SHOULD-FIX 3):** the Dockerfile ALSO verifies the release's keyless Sigstore signature
+  before pinning — it downloads the asset's `.sig` + `.cert` and runs `cosign verify-blob` with
+  `--certificate-identity-regexp 'https://github.com/opengrep/opengrep/.*'` and
+  `--certificate-oidc-issuer 'https://token.actions.githubusercontent.com'`, so the binary must have been signed
+  by Opengrep's own GitHub Actions identity. Cosign itself is pinned (v3.1.3, per-arch SHA-256) and is build-time
+  only (removed, never in the runtime image). Verified OK against v1.31.0's musllinux assets.
+- **Offline:** `--disable-version-check`. Opengrep has **no `--metrics` flag** (Semgrep's telemetry was removed),
+  so there is nothing else to disable; the container also runs with the network disabled for fixture ITs.
+- **In-repo suppressors ignored (D-037):** rules come ONLY via `--config` (no in-repo rule auto-load);
+  `--disable-nosem` ignores inline `nosemgrep`/`nosem`/`noopengrep`; `--x-ignore-semgrepignore-files` ignores
+  every in-repo `.semgrepignore`. Proven by `OpengrepConfigInjectionIT`.
+- **Rule packs (frozen by commit SHA so every `check_id`, a fingerprint input, is stable):** (a)
+  AikidoSec/opengrep-rules @`7ac79affecf709eb7263a243b518a417cd7e0ab2` (MIT); (b) select language packs
+  (java, csharp, javascript, typescript) from opengrep/opengrep-rules @`f1d2b562b414783763fd02a6ed2736eaed622efa`
+  — **Commons Clause** (restricts resale/SaaS): INTERNAL USE OK, **FLAGGED** for the open "SAST rule licensing
+  before any SaaS" SPEC item and the D-005 note (does NOT block internal M6); (c) our custom Spring/.NET rules
+  (MIT, `scanner-image/opengrep-rules-custom/`). NEVER `semgrep/semgrep-rules` (restrictive Semgrep Rules
+  License). Opengrep runs from `/etc/secscan` with a relative `--config opengrep-rules`, so `check_id`s are the
+  stable `opengrep-rules.<pack>.<id>` (never an absolute path); the parser relativizes the absolute checkout
+  file paths.
+- **Base score:** SAST base from the rule severity label — `extra.metadata.severity` (CRITICAL/HIGH/MEDIUM/LOW)
+  if present, else `extra.severity` ERROR→HIGH(75) / WARNING→MEDIUM(50) / INFO→LOW(25); CRITICAL(90) only via
+  metadata. Recorded as `base_sast` in `score_breakdown`.
+- **Exec-tmpfs carve-out (full rationale in D-056):** Opengrep unpacks its (trusted, pinned) core and execs it
+  from HOME/TMPDIR; `/work` is tmpfs `noexec` (so no cloned repo code can ever execute, D-004). run-scan.sh
+  points ONLY Opengrep's HOME/TMPDIR/XDG_CACHE_HOME at a separate exec-able tmpfs `/opt/sast-exec`
+  (`ScannerContainerConfig.TOOL_EXEC_MOUNT`, `nosuid,nodev,mode=0700` owned by the scan uid:gid, `size=512m`).
+  The scanned repo is never placed on an exec mount, so "never execute scanned code" is unchanged.
+- **Snippet sanitize (S1):** Opengrep's `extra.lines`/`extra.metavars` carry matched SOURCE LINES (including
+  secrets our own rules match), so run-scan.sh computes the normalized-snippet SHA-256 INSIDE the container and
+  strips `extra.lines`/`extra.metavars` before writing `/out` (mirrors D-023/D-027); only the hash leaves the
+  container. The parser reads that hash — it never sees the raw line.
+- **Snippet basis — DECIDED: whole matched region, normalized (not the metavar sub-capture).** The hash is
+  computed over the full set of SOURCE LINES Opengrep reports as the match (`extra.lines`), whitespace-normalized
+  (`awk 'NF>0{$1=$1;print}'` — blank lines dropped, runs of whitespace collapsed, leading/trailing trimmed),
+  NOT over the per-metavar capture or a byte offset. Reasoning: (a) the whole-region text is stable across the
+  cosmetic edits (reindentation, reflowed whitespace) that would otherwise churn the fingerprint, whereas a
+  byte offset moves on any edit above the match and a metavar capture is often just an identifier that collides
+  across unrelated matches; (b) it needs no AST/column data we would have to carry out of the container. Known
+  caveat: a *substantive* edit to the matched lines (not just whitespace) yields a new fingerprint, so the old
+  finding solves and a new one opens — a one-time re-fingerprint, acceptable because triage history for a
+  changed snippet is genuinely a new finding. Ignore-churn minimization (carrying an ignore across such a
+  re-fingerprint) is out of scope for M6 and deferred to M7. This basis is frozen with the other fingerprints.
+- **Fingerprint / overload:** SAST fingerprint is `rule_id | file_path | normalized_snippet_hash` (`core.Fingerprints.sast`;
+  snippet normalized + hashed in the container, NO line number). No new business column is added: `rule_id`, `file_path`,
+  `snippet_hash` already exist. (IaC reuses the `package` column for the resource name and EOL reuses
+  `package`/`installed_version` for product/cycle — the overload is documented in `ReconcileService.fingerprintOf`
+  and D-054/D-055.)
+Consequences: a maintained, reproducible SAST engine; rule-pack licensing stays flagged for SaaS; a small,
+isolated exec-able tmpfs is the only hardening carve-out and does not weaken the repo-code guarantee.
+
+## D-054 IaC = Checkov 3.3.29 (static frameworks only), with skip recovery and ignored in-repo config (2026-10-20, accepted)
+Context: M6 adds IaC. We chose Checkov (not KICS) for graph-based cross-resource analysis (Apache-2.0,
+Palo Alto/Bridgecrew). We pin every scanner.
+Decision: pin **Checkov 3.3.29** (the current line; the 3.2.x line ended at 3.2.533 on 2026-06-04, so "latest
+3.2.x" is superseded — the rationale, licence and engine are unchanged). Checkov is Python, so "pin" = install
+with pip into an isolated venv constrained by `scanner-image/checkov-constraints.txt` — the full transitive
+closure pinned at exact versions (captured from a clean Alpine 3.21 venv) — so the install is reproducible.
+Checkov installs cleanly on Alpine musl (musllinux wheels; no build deps). Version in
+`scan.tool_versions.checkov`. Rejected KICS (no cross-resource graph, smaller TF ruleset, a remediated Mar-2026
+GitHub-Action supply-chain incident).
+- **BLOCKER 1 (D-004 — never execute scanned code):** only STATIC-parse frameworks are enabled —
+  `dockerfile, kubernetes, terraform, cloudformation`. **Helm and Kustomize are NOT run** (Checkov renders them
+  by shelling out to the `helm`/`kustomize` binaries, which we do not install). The Helm-chart-rendering gap is
+  shown, not hidden (D-030): run-scan.sh raises an `IAC_HELM_NOT_RENDERED` warning when a `Chart.yaml` is
+  present. **Checkov 3.3.29 has NO `docker_compose` framework** (the planned framework list named it, but the
+  tool does not offer it — valid values are dockerfile/kubernetes/terraform/cloudformation/helm/kustomize/…),
+  so docker-compose misconfig coverage is a recorded gap too: run-scan.sh raises an
+  `IAC_DOCKER_COMPOSE_UNSUPPORTED` warning when a `docker-compose.{yml,yaml}`/`compose.{yml,yaml}` is present
+  (D-030 — gap shown, not hidden; deferred register).
+- **Offline (SHOULD-FIX 3):** `--skip-download` (baked in `checkov.yaml`) + env `CKV_SKIP_PACKAGE_UPDATE_CHECK=True`
+  suppress every network call; the config-injection ITs run the container with the network disabled to prove it.
+- **In-repo config ignored (D-037):** passing our `--config-file` does NOT stop Checkov reading and honoring an
+  in-repo `.checkov.yaml`/`.checkov.yml` (verified: its `skip-check` silently suppresses findings even with our
+  `--config-file`). So run-scan.sh **deletes** every in-repo Checkov config from the EPHEMERAL in-container clone
+  before scanning (the clone dies with the container; the real repo is untouched, D-030). The deletion is
+  CLONE-SCOPED (rooted at `$CHECKOUT`), covers BOTH `.checkov.yaml` and `.checkov.yml` at ANY depth (nested
+  modules), and is SYMLINK-SAFE: `find` runs in `-P` mode (never follows a symlink) and deletes the symlink
+  ENTRY too (`-type l`), so Checkov can never follow a symlinked `.checkov.yaml` out of the clone and a symlink
+  target outside the clone is never touched. Inline `#checkov:skip=` CANNOT be disabled by a flag, but a skipped
+  check is still reported in `results.skipped_checks[]` — the parser **recovers** those and promotes them back
+  to findings. (`quiet` is NOT set in `checkov.yaml`: it would strip `skipped_checks` and defeat the recovery.)
+  Proven by `CheckovConfigInjectionIT` — `inlineSkipIsRecoveredAndInRepoCheckovConfigIsIgnored` (root inline +
+  root config) and `nestedAndSymlinkedInRepoConfigsAreIgnored` (a nested `.checkov.yaml` and a symlinked one
+  both ignored, findings still fire).
+- **JSON shape:** multi-framework output is a JSON **array** of per-`check_type` report objects; a single
+  matching framework is one object; an empty scan is a summary-only object (no `results`). The parser handles
+  all three. Fields used: `check_id` (→ rule_id), `file_path` (leading `/` stripped → repo-relative), `resource`
+  (→ the IaC resource name, stored in the `package` column, **normalized** — see below), `file_line_range`
+  (display only, never a fingerprint input).
+- **Resource normalization (frozen fingerprint input):** Checkov reports file-based frameworks (Dockerfile) as
+  `"<leading-slash path>.<stage>"` — a stageless Dockerfile yields e.g. `"/iac/docker/Dockerfile."` (leading
+  `/`, trailing `.` for the empty stage), unlike the already-clean Terraform resources (`aws_s3_bucket.foo`).
+  Since `resource` is a FROZEN fingerprint input, `ScannerOutputParser.normalizeIacResource` makes it stable and
+  repo-relative: collapse `//`, strip a leading `/`, strip a single trailing `.`. A stageless Dockerfile's
+  resource therefore becomes its repo-relative path (the chosen stable synthetic resource; a named stage keeps
+  `.<stage>`), while Terraform / Kubernetes / CloudFormation resources are unchanged. Deterministic, so a clean
+  rescan is 0-triage.
+- **Base score (NIT 7):** OSS Checkov checks carry no `severity` (null), so **all IaC findings score base 50
+  (MEDIUM)** in M6 (`base_iac`). A maintained per-`check_id` severity-override table is deferred (deferred
+  register).
+- **Fingerprint / overload:** IaC fingerprint is `rule_id | file_path | resource_name` (`core.Fingerprints.iac`,
+  NO line number). `resource_name` reuses the existing `package` column (documented in
+  `ReconcileService.fingerprintOf`), so no new business column is added.
+Consequences: a reproducible, offline, static IaC engine; Helm and docker-compose coverage are explicit gaps;
+no schema change for IaC.
+
 ## D-052 SCA group fix-time is one upgrade (max category), not the sum of its sub-issues (2026-10-19, accepted)
 Context: an SCA issue group is one vulnerable package; several CVEs on it are remediated by a SINGLE dependency
 upgrade. Summing each CVE's fix-time (as M5 first did) multiplied one upgrade by the number of CVEs, badly
@@ -637,6 +827,26 @@ Decision: `workspace_id` on every business table from day one.
 
 ## Open decisions
 
+- M6 deferred register (recorded 2026-10-20, for M7+):
+  - **SAST rule-pack SaaS licensing** (D-053): opengrep/opengrep-rules carries a Commons Clause (no resale/SaaS).
+    Internal use is fine; recheck before any multi-tenant/SaaS deployment (the open SPEC item + D-005).
+  - **Opengrep bump re-fingerprint risk** (NIT 9): the SAST fingerprint hashes the normalized `extra.lines`
+    snippet; a future Opengrep version that changes how `extra.lines` is emitted could re-fingerprint stored
+    SAST sub-issues (mass solve+reopen). Verify the snippet output is unchanged (or time a deliberate
+    re-fingerprint) before bumping Opengrep.
+  - **IaC severity override table** (D-054, NIT 7): all IaC findings score base 50 in M6 (OSS Checkov has no
+    severity). A maintained per-`check_id` severity override is deferred.
+  - **Checkov Helm + docker-compose coverage** (D-054, D-030): Helm charts are not rendered (needs the helm
+    binary, D-004 — an `IAC_HELM_NOT_RENDERED` warning is raised when a `Chart.yaml` is present); Checkov 3.3.29
+    has no `docker_compose` framework (an `IAC_DOCKER_COMPOSE_UNSUPPORTED` warning is raised when a compose file
+    is present). Both gaps are shown as scan-health warnings, not hidden. Revisit if/when a safe static path exists.
+  - **By design (NIT 11):** two identical SAST snippets in the same file share one fingerprint
+    (`rule_id | file_path | normalized_snippet_hash`) and collapse to a single sub-issue (first-wins dedup);
+    EOL findings require the `eol_cycle` cache to be populated at scan time (an unsynced/uncovered product is
+    not reported, and an existing open EOL finding for an uncovered `(product,cycle)` is frozen — never
+    false-solved — per fingerprint, D-055 / review BUG 1).
+  - **SAST test-path is an adjustment, not an exclusion:** the −15 is itemized in `score_breakdown`; dev/test
+    scope EXCLUSION (`DEV_DEPENDENCY`/`TEST_SCOPE` auto-triage) remains M7.
 - OD-1 Gradle repos without lockfiles — PARTLY RESOLVED by D-031 (warn-only in M4); finished in M4b
 - OD-2 .NET repos without `packages.lock.json` — PARTLY RESOLVED by D-031 (`.csproj` direct fallback in M4);
   finished in M4b
@@ -644,8 +854,8 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — needed before M9
 - OD-6 Product name
-- OD-7 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
-  (`POST /api/v1/admin/intel/{kev,epss}/sync`, `/rescore`) is callable by any authenticated user: there is no
+- OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+  (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
   Add role gating when M10 introduces authorities. (M5 review N5.)

@@ -1,0 +1,11 @@
+rules:
+  - id: hardcoded-connection-string
+    languages: [generic]
+    severity: ERROR
+    message: "Hardcoded database password in a connection string."
+    metadata: {cwe: ["CWE-798: Use of Hard-coded Credentials"], category: security}
+    paths:
+      include: ["appsettings*.json", "application*.yml", "application*.yaml", "application*.properties"]
+    patterns:
+      - pattern-regex: '(?i)(password|pwd)\s*=\s*[^;"'' \t]{3,}'
+      - pattern-not-regex: '(?i)(password|pwd)\s*=\s*(changeme|example|your_password|placeholder|\$\{|%)'
