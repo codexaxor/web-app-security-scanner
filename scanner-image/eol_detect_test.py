@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Unit tests for the static EOL detector (D-055). Run on the host under ./gradlew build (eolDetectTest task),
 stdlib unittest only; no network, no build execution."""
+import contextlib
+import io
+import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import eol_detect
 
@@ -73,6 +77,39 @@ class EolDetectTest(unittest.TestCase):
     def test_no_detections_is_empty_not_error(self):
         dets = _scan({"README.md": "hello"})
         self.assertEqual(dets, [])
+
+    def test_symlinked_version_file_is_not_followed_and_target_is_not_read(self):
+        # B3: a scanned repo plants a .nvmrc symlinked to a secret OUTSIDE the clone. The detector must NOT
+        # follow it, so the target is never read and its value never reaches the output.
+        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as root:
+            secret_path = os.path.join(outside, "token")
+            with open(secret_path, "w", encoding="utf-8") as fh:
+                fh.write("20\nghp_SUPERSECRETTOKENVALUE\n")  # looks like a node version + a secret
+            os.symlink(secret_path, os.path.join(root, ".nvmrc"))
+            dets = eol_detect.scan(root)
+            self.assertEqual(dets, [])  # symlink skipped → no nodejs detection
+            self.assertNotIn("ghp_SUPERSECRETTOKENVALUE", json.dumps(dets))
+
+    def test_symlinked_pom_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as root:
+            tgt = os.path.join(outside, "p.xml")
+            with open(tgt, "w", encoding="utf-8") as fh:
+                fh.write('<parent><artifactId>spring-boot-starter-parent</artifactId>'
+                         '<version>2.1.0</version></parent>')
+            os.symlink(tgt, os.path.join(root, "pom.xml"))
+            self.assertEqual(eol_detect.scan(root), [])
+
+    def test_error_path_fails_with_no_detections_key_and_nonzero_exit(self):
+        # B1: on any error the detector must FAIL (non-zero exit, no detections key) so run-scan records EOL as
+        # FAILED and reconcile closes nothing — never a successful empty result that would false-solve.
+        buf = io.StringIO()
+        with mock.patch.object(eol_detect, "scan", side_effect=RuntimeError("boom")):
+            with contextlib.redirect_stdout(buf):
+                rc = eol_detect.main(["eol_detect.py", "/some/root"])
+        self.assertEqual(rc, 1)
+        out = json.loads(buf.getvalue())
+        self.assertNotIn("detections", out)
+        self.assertEqual(out["status"], "error")
 
 
 if __name__ == "__main__":

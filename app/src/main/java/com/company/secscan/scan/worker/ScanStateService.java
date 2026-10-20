@@ -82,9 +82,10 @@ public class ScanStateService {
         scan.finish(terminalStatus);
         scans.save(scan);
 
-        // EOL enrichment (BLOCKER 2): classify EOL candidates against the eol_cycle cache BEFORE persisting —
-        // only genuine issues (past-EOL / ending-soon) are stored, and an undeterminable detection makes the
-        // EOL scanner non-solvable this scan so it can never false-solve an open EOL finding.
+        // EOL enrichment (review BUG 1/2): classify EOL candidates against the eol_cycle cache BEFORE persisting
+        // — only genuine, covered issues (past-EOL / ending-soon, cycle normalized to the feed key) are stored;
+        // an uncovered detection is dropped with a warning. Never-false-solve is enforced PER (product,cycle) in
+        // ReconcileService.eolCoverageGuard (freeze), not by gating this scanner's closes_findings.
         List<RawFinding> eolCandidates = parsed.findings().stream()
                 .filter(f -> RawFinding.TYPE_EOL.equals(f.type())).toList();
         EolEnricher.Result eol = eolEnricher.enrich(eolCandidates);

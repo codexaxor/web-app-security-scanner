@@ -48,4 +48,14 @@ class EolCyclesTest {
         assertThat(EolCycles.match("8.0", List.of())).isNull();
         assertThat(EolCycles.match(null, DOTNET)).isNull();
     }
+
+    @Test
+    void anOverflowingVersionComponentIsTreatedAsNoMatchNotACrash() {
+        // B2: a 20-digit component must not throw (it would turn the whole scan into a permanent error that
+        // hides SCA/secret/SAST/IaC). It parses to no components → no match → EOL_COVERAGE_GAP (safe).
+        assertThat(EolCycles.components("99999999999999999999.0")).isEmpty();
+        assertThat(EolCycles.match("99999999999999999999.0", DOTNET)).isNull();
+        // A normal 9-digit-or-less version still matches.
+        assertThat(EolCycles.match("8.0.123456789", DOTNET)).isEqualTo("8");
+    }
 }

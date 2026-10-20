@@ -131,6 +131,42 @@ class ScoringReconcileIT extends AbstractScanWorkerIT {
     }
 
     @Test
+    void eolFreezeIsPerProductCoveredSolvesWhileUncoveredStaysFrozen() {
+        // S5 (default build): per-(product,cycle) never-false-solve. Two covered EOL findings open; dotnet's
+        // coverage then disappears; a later scan with NO eol findings solves the still-covered spring-boot but
+        // FREEZES the now-uncovered dotnet (never false-solved).
+        UUID repo = seedRepository("normal");
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, java.time.LocalDate.of(2019, 10, 1), "2.1.18",
+                null, null, false, false));
+        eolCycles.save(new EolCycle("dotnet", "8", true, java.time.LocalDate.of(2026, 1, 1), "8.0.11",
+                null, null, false, false));
+        UUID scan1 = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan1, repo, "spring-boot", "2.1", "pom.xml"));
+        scanFindings.save(ScanFinding.eol(WORKSPACE, scan1, repo, "dotnet", "8", "App.csproj"));
+        reconcile.reconcile(scan1, WORKSPACE);
+        assertThat(subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo))
+                .filteredOn(s -> ScanFinding.TYPE_EOL.equals(s.getType()))
+                .allSatisfy(s -> assertThat(s.getStatus()).isEqualTo(SubIssue.STATUS_OPEN)).hasSize(2);
+
+        // dotnet coverage vanishes (never synced / dropped from the feed); spring-boot stays covered.
+        eolCycles.deleteAllInBatch();
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, java.time.LocalDate.of(2019, 10, 1), "2.1.18",
+                null, null, false, false));
+
+        // Scan 2: EOL scanner ok, NO detections (both absent).
+        UUID scan2 = seedScanWithOkTask(repo, ScanTask.SCANNER_EOL);
+        reconcile.reconcile(scan2, WORKSPACE);
+
+        var subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
+        SubIssue springBoot = subs.stream().filter(s -> "spring-boot".equals(s.getPackageName())).findFirst()
+                .orElseThrow();
+        SubIssue dotnet = subs.stream().filter(s -> "dotnet".equals(s.getPackageName())).findFirst().orElseThrow();
+        assertThat(springBoot.getStatus()).as("covered + absent → solved").isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(dotnet.getStatus()).as("uncovered → frozen, never false-solved").isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(dotnet.getSolvedAt()).isNull();
+    }
+
+    @Test
     void nonScaGroupFixTimeIsTheSumOfOpenSubIssues() {
         UUID repo = seedRepository("normal");
         UUID scan = seedScanWithOkTask(repo, ScanTask.SCANNER_SAST);

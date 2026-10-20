@@ -92,26 +92,29 @@ RUN set -eu; \
     chmod 0555 /tmp/cosign; \
     /tmp/cosign verify-blob \
         --certificate /tmp/opengrep.cert --signature /tmp/opengrep.sig \
-        --certificate-identity-regexp 'https://github.com/opengrep/opengrep/.*' \
+        --certificate-identity 'https://github.com/opengrep/opengrep/.github/workflows/rolling-release.yml@refs/heads/release-v1.31.0' \
         --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
         /usr/local/bin/opengrep; \
     rm -f /tmp/cosign /tmp/opengrep.sig /tmp/opengrep.cert; \
     chmod 0555 /usr/local/bin/opengrep; \
     opengrep --version
 
-# --- Checkov (IaC, pinned version + reproducible dependency lock; D-054). Installed with pip into an isolated
-# venv using checkov-constraints.txt (the full transitive closure pinned at exact versions, captured from a
-# clean Alpine 3.21 venv) so the install is reproducible. Apache-2.0. Runs fully offline on the clone
-# (--skip-download, CKV_SKIP_PACKAGE_UPDATE_CHECK=True; run-scan.sh). Only STATIC-parse frameworks are used
-# (no helm/kustomize binary — D-004, BLOCKER 1). The `checkov` entrypoint is symlinked onto PATH. ---
+# --- Checkov (IaC, pinned version + HASH-PINNED dependency lock; D-054 / review S2). Installed with pip into an
+# isolated venv from checkov-requirements.txt — the full transitive closure, each distribution pinned by SHA-256
+# (pip-compile --generate-hashes) and installed with --require-hashes so a tampered or substituted PyPI artifact
+# fails the build, not just a version drift. The lock lists every wheel + sdist hash per version, so it verifies
+# whatever pip selects on Alpine musl. Apache-2.0. Runs fully offline on the clone (--skip-download,
+# CKV_SKIP_PACKAGE_UPDATE_CHECK=True; run-scan.sh). Only STATIC-parse frameworks are used (no helm/kustomize
+# binary — D-004, BLOCKER 1). The `checkov` entrypoint is symlinked onto PATH. ---
 ARG CHECKOV_VERSION=3.3.29
-COPY checkov-constraints.txt /etc/secscan/checkov-constraints.txt
+COPY checkov-requirements.txt /etc/secscan/checkov-requirements.txt
 RUN set -eu; \
     python3 -m venv /opt/checkov-venv; \
     /opt/checkov-venv/bin/pip install --no-cache-dir --disable-pip-version-check \
-        -c /etc/secscan/checkov-constraints.txt "checkov==${CHECKOV_VERSION}"; \
+        --require-hashes -r /etc/secscan/checkov-requirements.txt; \
+    test "$(/opt/checkov-venv/bin/pip show checkov | awk '/^Version:/{print $2}')" = "${CHECKOV_VERSION}"; \
     ln -s /opt/checkov-venv/bin/checkov /usr/local/bin/checkov; \
-    chmod 0444 /etc/secscan/checkov-constraints.txt; \
+    chmod 0444 /etc/secscan/checkov-requirements.txt; \
     checkov --version
 
 # --- Opengrep rule bundle (D-053), baked at pinned commit SHAs so the rule set (and therefore every SAST

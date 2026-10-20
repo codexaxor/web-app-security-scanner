@@ -55,7 +55,10 @@ final class ScannerContainerConfig {
         // core exec; D-056). The repo is never placed there, so "never execute scanned code" (D-004) holds; it
         // is nosuid/nodev and size-capped (512m — Opengrep's unpacked runtime is ~240 MiB).
         String workOpts = "rw,noexec,nosuid,nodev,mode=1777,size=" + s.tmpfsSize();
-        String toolExecOpts = "rw,exec,nosuid,nodev,mode=1777,size=512m";
+        // The exec tmpfs is owned by the scan uid:gid and mode 0700 (not world-writable) — the scan user is the
+        // only writer, and nothing else in the container can read/write Opengrep's unpacked runtime. /work stays
+        // mode=1777 (shared scratch). Falls back to 1777 if the uid:gid is not a clean numeric pair.
+        String toolExecOpts = execMountOpts(s.runAsUser());
         return HostConfig.newHostConfig()
                 .withReadonlyRootfs(true)
                 .withCapDrop(Capability.ALL)
@@ -69,6 +72,19 @@ final class ScannerContainerConfig {
                 .withTmpFs(Map.of(WORK_MOUNT, workOpts, TOOL_EXEC_MOUNT, toolExecOpts))
                 .withBinds(binds)
                 .withNetworkMode(s.networkDisabled() ? "none" : "bridge");
+    }
+
+    /** The SAST exec tmpfs options: owned by the scan uid:gid and mode 0700 when {@code runAsUser} is a clean
+     * numeric {@code uid:gid} pair, else a safe world-writable fallback. nosuid/nodev and size-capped always. */
+    static String execMountOpts(String runAsUser) {
+        String base = "rw,exec,nosuid,nodev,size=512m";
+        if (runAsUser != null) {
+            String[] parts = runAsUser.split(":");
+            if (parts.length == 2 && parts[0].matches("\\d+") && parts[1].matches("\\d+")) {
+                return base + ",mode=0700,uid=" + parts[0] + ",gid=" + parts[1];
+            }
+        }
+        return base + ",mode=1777";
     }
 
     /** Non-secret inputs only. The token is NEVER an env var — it arrives as a mounted file (D-014). */

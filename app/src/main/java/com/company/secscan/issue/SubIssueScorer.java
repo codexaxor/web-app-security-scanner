@@ -66,12 +66,19 @@ public class SubIssueScorer {
 
         // EOL base (D-055): resolve the cycle's current status from the eol_cycle cache. A persisted EOL sub
         // normally has coverage (the enricher required it to create the finding); recompute here so the re-score
-        // path also reflects a cycle that has since crossed its EOL date. Null when type != eol / no coverage.
+        // path also reflects a cycle that has since crossed its EOL date.
         String eolStatus = null;
         if (RawFinding.TYPE_EOL.equals(sub.getType())) {
-            eolStatus = eolCycles.findByProductAndCycle(sub.getPackageName(), sub.getInstalledVersion())
-                    .map(c -> EolStatus.of(c.isEol(), c.getEolFrom(), LocalDate.now()))
-                    .orElse(null);
+            var row = eolCycles.findByProductAndCycle(sub.getPackageName(), sub.getInstalledVersion());
+            if (row.isEmpty() && sub.getScore() != null) {
+                // Uncovered now (frozen in reconcile): we cannot classify it, so do NOT recompute — recomputing
+                // with a null status would silently drop a past-EOL 75 to the ending-soon floor 45. Preserve the
+                // last score/breakdown exactly (review fix). Reconcile never scores an uncovered EOL sub; only
+                // the re-score sweep reaches here, and it must leave a frozen finding untouched.
+                return new Computation(sub.isInKev(), sub.getEpss(), sub.getScore(),
+                        sub.getScoreBreakdown() == null ? List.of() : sub.getScoreBreakdown(), null);
+            }
+            eolStatus = row.map(c -> EolStatus.of(c.isEol(), c.getEolFrom(), LocalDate.now())).orElse(null);
         }
         // SAST test-path −15 (Scoring applies it only for SAST); derived from the finding's path, never stored.
         boolean testPath = TestPaths.isTestPath(sub.getFilePath());

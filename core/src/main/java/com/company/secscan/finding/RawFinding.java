@@ -74,7 +74,8 @@ public record RawFinding(
 
     /**
      * A SAST finding (Opengrep, M6). {@code ruleId} is the Opengrep {@code check_id} and {@code filePath} the
-     * repo-relative path; {@code snippetHash} is the normalized-snippet hash ({@link SnippetNormalizer}) — these
+     * repo-relative path; {@code snippetHash} is the normalized-snippet SHA-256 computed inside the scanner
+     * container (run-scan.sh, D-023/S1 — the raw matched line never leaves the container) — these
      * three are the SAST fingerprint ({@code rule_id | file_path | normalized_snippet_hash}), never the line
      * number. {@code line} is carried for display only. {@code severityLabel} is the rule severity
      * (CRITICAL/HIGH/MEDIUM/LOW, mapped from Opengrep's metadata/level) that drives the SAST base (D-053);

@@ -59,6 +59,16 @@ class CheckovConfigInjectionIT extends AbstractScanWorkerIT {
                         + "    cidr_blocks = [\"0.0.0.0/0\"] }\n}\n");
         Files.writeString(linkMod.resolve("skip-src.yaml"), "skip-check:\n  - CKV_AWS_24\n");
         Files.createSymbolicLink(linkMod.resolve(".checkov.yaml"), Path.of("skip-src.yaml"));
+        // Directory-named-config case (S3): a module where `.checkov.yaml` is itself a DIRECTORY (not a file).
+        // A plain `rm -f .checkov.yaml` would leave the directory in place and Checkov would crash on it; the
+        // hardened `find … -exec rm -rf` removes the directory, so the finding still fires and IaC does not fail.
+        Path dirMod = Files.createDirectories(fixtureRepo.resolve("dirmod"));
+        Files.writeString(dirMod.resolve("main.tf"),
+                "resource \"aws_security_group\" \"dir_open\" {\n"
+                        + "  ingress { from_port = 22\n    to_port = 22\n    protocol = \"tcp\"\n"
+                        + "    cidr_blocks = [\"0.0.0.0/0\"] }\n}\n");
+        Path cfgDir = Files.createDirectories(dirMod.resolve(".checkov.yaml"));
+        Files.writeString(cfgDir.resolve("placeholder.txt"), "a directory, not a config file\n");
         git(fixtureRepo, "init", "-q", "-b", "main");
         git(fixtureRepo, "config", "user.email", "test@example.com");
         git(fixtureRepo, "config", "user.name", "Test");
@@ -130,6 +140,31 @@ class CheckovConfigInjectionIT extends AbstractScanWorkerIT {
         assertThat(iac).as("symlinked .checkov.yaml ignored").anySatisfy(f -> {
             assertThat(f.getRuleId()).isEqualTo("CKV_AWS_24");
             assertThat(f.getFilePath()).isEqualTo("symlinkmod/main.tf");
+        });
+    }
+
+    @Test
+    void directoryNamedCheckovConfigIsRemovedAndDoesNotCrashCheckov() {
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file://" + fixtureRepo.toAbsolutePath(), "svc/iacinj3", 713L, "ct",
+                "read_api,read_repository", null));
+        Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 713L, "svc/iacinj3", "main",
+                List.of("HCL")));
+
+        ScanView scan = scanService.startManual(repo.getId());
+        List<UUID> claimed = claimer.claimBatch(10);
+        assertThat(claimed).hasSize(1);
+        processor.process(claimed.get(0));
+
+        List<ScanFinding> iac = findings.findByScanId(scan.id()).stream()
+                .filter(f -> ScanFinding.TYPE_IAC.equals(f.getType()))
+                .toList();
+
+        // The DIRECTORY named `.checkov.yaml` (dirmod) was removed with the hardened `rm -rf`, so Checkov ran
+        // cleanly over dirmod/main.tf and the open-ingress finding fired — proving IaC did not fail on it.
+        assertThat(iac).as("directory-named .checkov.yaml removed, IaC not crashed").anySatisfy(f -> {
+            assertThat(f.getRuleId()).isEqualTo("CKV_AWS_24");
+            assertThat(f.getFilePath()).isEqualTo("dirmod/main.tf");
         });
     }
 

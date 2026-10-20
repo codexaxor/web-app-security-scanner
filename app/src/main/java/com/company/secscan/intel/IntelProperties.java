@@ -22,7 +22,7 @@ public class IntelProperties {
 
     /** endoflife.date product slugs to sync — only runtimes/frameworks the EOL detector can emit (D-055). */
     private java.util.List<String> eolProducts = java.util.List.of(
-            "spring-boot", "dotnet", "nodejs", "eclipse-temurin", "alpine-linux", "keycloak");
+            "spring-boot", "dotnet", "nodejs", "eclipse-temurin", "amazon-corretto", "alpine-linux", "keycloak");
 
     /** Whether the daily @Scheduled sync runs (api profile). Off in tests that drive sync explicitly. */
     private boolean scheduledSyncEnabled = true;

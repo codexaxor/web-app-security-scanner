@@ -57,6 +57,13 @@ public final class EolCycles {
             if (j == 0) {
                 break; // first non-numeric token (e.g. "RELEASE") ends the version
             }
+            // Guard against an overflowing/absurd component (e.g. a 20-digit version): treat the whole version
+            // as unparseable rather than let Integer.parseInt throw and turn the scan into a permanent error
+            // that hides SCA/secret/SAST/IaC (B2). An unparseable version → empty list → no match →
+            // EOL_COVERAGE_GAP (safe). Real cycle components (8, 21, 3.4, …) are ≤ 9 digits and unaffected.
+            if (j > 9) {
+                return new ArrayList<>();
+            }
             out.add(Integer.parseInt(token.substring(0, j)));
         }
         return out;

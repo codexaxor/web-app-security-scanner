@@ -97,7 +97,7 @@ public class ScannerOutputParser {
             } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
             } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
-                findings.addAll(parseCheckov(outDir.resolve(s.findingsFile)));
+                findings.addAll(parseCheckov(outDir.resolve(s.findingsFile), warnings));
             } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
                 findings.addAll(parseEol(outDir.resolve(s.findingsFile)));
             }
@@ -268,8 +268,9 @@ public class ScannerOutputParser {
                 continue;
             }
             Integer line = r.start == null ? null : r.start.line;
-            String snippet = r.extra == null ? null : r.extra.lines;
-            String snippetHash = com.company.secscan.finding.SnippetNormalizer.normalizedHash(snippet);
+            // The snippet hash is computed and sanitized INSIDE the scanner container (run-scan.sh, D-023/S1):
+            // Opengrep's raw matched lines never reach /out, so we read only the precomputed hash here.
+            String snippetHash = r.extra == null ? null : r.extra.snippetSha256;
             String rawLevel = r.extra == null ? null : r.extra.severity;
             String label = sastSeverityLabel(r.extra);
             List<String> cwe = r.extra == null ? List.of() : cweOf(r.extra.metadata);
@@ -289,7 +290,7 @@ public class ScannerOutputParser {
      * line number; Checkov's {@code file_path} has a leading {@code /} (relative to the scan root) which is
      * stripped to a repo-relative path.
      */
-    List<RawFinding> parseCheckov(Path json) {
+    List<RawFinding> parseCheckov(Path json, List<ScanWarning> warningsOut) {
         if (!Files.exists(json)) {
             return List.of();
         }
@@ -314,8 +315,8 @@ public class ScannerOutputParser {
             if (results == null || results.isNull()) {
                 continue; // summary-only object (nothing matched this framework)
             }
-            addCheckovFindings(results.get("failed_checks"), out);
-            addCheckovFindings(results.get("skipped_checks"), out); // D-037 recovery (promote suppressed)
+            addCheckovFindings(results.get("failed_checks"), out, warningsOut);
+            addCheckovFindings(results.get("skipped_checks"), out, warningsOut); // D-037 recovery (promote suppressed)
         }
         return out;
     }
@@ -355,8 +356,12 @@ public class ScannerOutputParser {
     }
 
     /** Emits a SAST-style IaC {@link RawFinding} for each check in a Checkov {@code failed_checks}/{@code
-     * skipped_checks} array ({@code null}/non-array is ignored). */
-    private static void addCheckovFindings(com.fasterxml.jackson.databind.JsonNode checks, List<RawFinding> out) {
+     * skipped_checks} array ({@code null}/non-array is ignored). A check whose file path escapes the checkout
+     * (absolute, or containing {@code ..}, after stripping Checkov's leading slash) is dropped with an
+     * {@code UNRESOLVED_PATH} warning — such a path must never enter a fingerprint (matching the SCA/Opengrep
+     * guard). */
+    private static void addCheckovFindings(com.fasterxml.jackson.databind.JsonNode checks, List<RawFinding> out,
+                                           List<ScanWarning> warningsOut) {
         if (checks == null || !checks.isArray()) {
             return;
         }
@@ -367,6 +372,12 @@ public class ScannerOutputParser {
             }
             String resource = normalizeIacResource(text(c, "resource"));
             String filePath = stripLeadingSlash(text(c, "file_path"));
+            if (isPathOutsideCheckout(filePath)) {
+                warningsOut.add(new ScanWarning(WARN_UNRESOLVED_PATH,
+                        "Checkov reported an IaC finding at a path outside the repository checkout; it was "
+                                + "dropped (file_path: " + text(c, "file_path") + ").", null));
+                continue;
+            }
             Integer line = null;
             com.fasterxml.jackson.databind.JsonNode range = c.get("file_line_range");
             if (range != null && range.isArray() && !range.isEmpty() && range.get(0).isInt()) {
@@ -878,12 +889,14 @@ public class ScannerOutputParser {
         public Integer line;
     }
 
-    /** {@code extra}: the rule level ({@code severity} = ERROR/WARNING/INFO), the matched {@code lines} (the
-     * snippet), and free-form {@code metadata} (severity/cwe/owasp/…), bound loosely since rules vary. */
+    /** {@code extra}: the rule level ({@code severity} = ERROR/WARNING/INFO), free-form {@code metadata}
+     * (severity/cwe/owasp/…), and {@code snippet_sha256} — the normalized-snippet hash computed in the container
+     * (the raw {@code lines}/{@code metavars} are stripped there, D-023/S1, so they are absent here). */
     @JsonIgnoreProperties(ignoreUnknown = true)
     static final class OpengrepExtra {
         public String severity;
-        public String lines;
+        @com.fasterxml.jackson.annotation.JsonProperty("snippet_sha256")
+        public String snippetSha256;
         public Map<String, Object> metadata;
     }
 }

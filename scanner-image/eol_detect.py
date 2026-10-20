@@ -129,10 +129,21 @@ def detect_dockerfile(text, rel, out):
 
 def scan(root):
     detections = []
+    root_real = os.path.realpath(root)
+    # os.walk does NOT follow symlinked directories (followlinks=False), and we additionally skip symlinked
+    # dirs AND files and verify each file's realpath stays inside the checkout (B3): a scanned repo must never
+    # make the detector read a file outside the clone (e.g. a .nvmrc symlinked at the mounted token file),
+    # mirroring gradle_resolver.py. We only ever read regular files.
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != ".git"]
+        dirnames[:] = [d for d in dirnames
+                       if d != ".git" and not os.path.islink(os.path.join(dirpath, d))]
         for name in filenames:
             path = os.path.join(dirpath, name)
+            if os.path.islink(path) or not os.path.isfile(path):
+                continue  # never follow a symlink to read its target; regular files only
+            real = os.path.realpath(path)
+            if real != root_real and not real.startswith(root_real + os.sep):
+                continue  # escaped the checkout
             rel = os.path.relpath(path, root)
             if name == "pom.xml":
                 text = _read(path)
@@ -161,16 +172,18 @@ def scan(root):
 
 def main(argv):
     if len(argv) < 2:
-        print(json.dumps({"detections": [], "warnings": [], "status": "error"}))
+        # No detections key + non-zero exit → run-scan.sh records EOL as FAILED → closes nothing (B1/D-055).
+        print(json.dumps({"status": "error", "error": "usage", "warnings": []}))
         return 1
     root = argv[1]
     try:
         detections = scan(root)
-    except Exception as exc:  # never crash the scan; emit a partial result + a warning
-        print(json.dumps({"detections": [], "status": "ok",
-                          "warnings": [{"code": "EOL_DETECTOR_ERROR",
-                                        "message": f"EOL detector error: {type(exc).__name__}", "filePath": ""}]}))
-        return 0
+    except Exception as exc:
+        # On ANY error we FAIL (no detections key, non-zero exit) so run-scan.sh records EOL as FAILED and
+        # reconcile closes nothing (D-055 / domain rule 3). We must NEVER emit a successful empty result, which
+        # would false-solve every covered EOL finding (B1). The exception type is logged, never a file value.
+        print(json.dumps({"status": "error", "error": type(exc).__name__, "warnings": []}))
+        return 1
     print(json.dumps({"detections": detections, "warnings": [], "status": "ok"}))
     return 0
 
