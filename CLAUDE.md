@@ -60,6 +60,7 @@ docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag mus
 cd ui && npm ci && npm run dev
 ./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"   # live-osv tests (osv.dev/deps.dev); excluded by default
 ./gradlew :app:test -PliveIntel --tests "*LiveIntelIT"     # live-intel tests (CISA KEV / FIRST EPSS); excluded by default
+./gradlew :app:test -PliveOpengrep -PliveCheckov -PliveEol # M6 live tests (real Opengrep/Checkov container + endoflife.date); excluded by default
 ```
 
 Update this section whenever a command changes.
