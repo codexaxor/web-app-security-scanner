@@ -120,13 +120,28 @@ fail on Alpine.)
 - **Base score:** SAST base from the rule severity label — `extra.metadata.severity` (CRITICAL/HIGH/MEDIUM/LOW)
   if present, else `extra.severity` ERROR→HIGH(75) / WARNING→MEDIUM(50) / INFO→LOW(25); CRITICAL(90) only via
   metadata. Recorded as `base_sast` in `score_breakdown`.
-- **Exec-tmpfs carve-out:** Opengrep unpacks its (trusted, pinned) core and execs it from HOME/TMPDIR; `/work`
-  is tmpfs `noexec` (so no cloned repo code can ever execute, D-004). run-scan.sh points ONLY Opengrep's
-  HOME/TMPDIR/XDG_CACHE_HOME at a separate small exec-able tmpfs `/opt/sast-exec`
-  (`ScannerContainerConfig.TOOL_EXEC_MOUNT`, `nosuid,nodev,size=256m`). The scanned repo is never placed on an
-  exec mount, so the "never execute scanned code" guarantee is unchanged — only our own pinned tool runs there.
+- **Exec-tmpfs carve-out (full rationale in D-056):** Opengrep unpacks its (trusted, pinned) core and execs it
+  from HOME/TMPDIR; `/work` is tmpfs `noexec` (so no cloned repo code can ever execute, D-004). run-scan.sh
+  points ONLY Opengrep's HOME/TMPDIR/XDG_CACHE_HOME at a separate exec-able tmpfs `/opt/sast-exec`
+  (`ScannerContainerConfig.TOOL_EXEC_MOUNT`, `nosuid,nodev,mode=0700` owned by the scan uid:gid, `size=512m`).
+  The scanned repo is never placed on an exec mount, so "never execute scanned code" is unchanged.
+- **Snippet sanitize (S1):** Opengrep's `extra.lines`/`extra.metavars` carry matched SOURCE LINES (including
+  secrets our own rules match), so run-scan.sh computes the normalized-snippet SHA-256 INSIDE the container and
+  strips `extra.lines`/`extra.metavars` before writing `/out` (mirrors D-023/D-027); only the hash leaves the
+  container. The parser reads that hash — it never sees the raw line.
+- **Snippet basis — DECIDED: whole matched region, normalized (not the metavar sub-capture).** The hash is
+  computed over the full set of SOURCE LINES Opengrep reports as the match (`extra.lines`), whitespace-normalized
+  (`awk 'NF>0{$1=$1;print}'` — blank lines dropped, runs of whitespace collapsed, leading/trailing trimmed),
+  NOT over the per-metavar capture or a byte offset. Reasoning: (a) the whole-region text is stable across the
+  cosmetic edits (reindentation, reflowed whitespace) that would otherwise churn the fingerprint, whereas a
+  byte offset moves on any edit above the match and a metavar capture is often just an identifier that collides
+  across unrelated matches; (b) it needs no AST/column data we would have to carry out of the container. Known
+  caveat: a *substantive* edit to the matched lines (not just whitespace) yields a new fingerprint, so the old
+  finding solves and a new one opens — a one-time re-fingerprint, acceptable because triage history for a
+  changed snippet is genuinely a new finding. Ignore-churn minimization (carrying an ignore across such a
+  re-fingerprint) is out of scope for M6 and deferred to M7. This basis is frozen with the other fingerprints.
 - **Fingerprint / overload:** SAST fingerprint is `rule_id | file_path | normalized_snippet_hash` (`core.Fingerprints.sast`;
-  snippet normalized in the parser, NO line number). No new business column is added: `rule_id`, `file_path`,
+  snippet normalized + hashed in the container, NO line number). No new business column is added: `rule_id`, `file_path`,
   `snippet_hash` already exist. (IaC reuses the `package` column for the resource name and EOL reuses
   `package`/`installed_version` for product/cycle — the overload is documented in `ReconcileService.fingerprintOf`
   and D-054/D-055.)
