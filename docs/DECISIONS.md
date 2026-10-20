@@ -59,17 +59,30 @@ which are issues.
   **There is no `java` product in v1** — a bare Java language level uses the slug **`eclipse-temurin`** (the
   configurable default; a Dockerfile `FROM <vendor-jdk>:N` maps to the named distro slug). `/eol/sync` is added
   to `AdminIntelController` (OD-9 endpoint list extended for M10 role-gating).
-- **BLOCKER 2 — never false-solve (`EolEnricher`):** for each candidate the worker looks up `eol_cycle`;
-  past-EOL / ending-soon (within 90 days, `core.eol.EolStatus`) become findings, still-maintained is dropped
-  (not an issue). A candidate with **no `eol_cycle` coverage** cannot be classified, so it is dropped AND the
-  whole EOL scanner is marked **non-solvable** for that scan (`closes_findings=false`) with an
-  `EOL_COVERAGE_GAP` warning — mirroring D-034's `NO_MANIFESTS`. So a rescan with empty/partial coverage can
-  never solve an open EOL finding (proven by `EolSolvabilityIT`). An EOL finding is solved only when the
-  detector succeeded AND the product/cycle is genuinely gone or now-maintained.
+- **Cycle normalization (review BUG 2, `core.eol.EolCycles`):** products key cycles differently — .NET as bare
+  majors (`8`), Spring Boot / Alpine as major.minor (`2.1`, `3.21`). The detector's cycle is normalized to the
+  feed's OWN published cycle key per product, GENERICALLY (no per-product rules): match the detected version
+  against the product's published cycles and take the most specific (longest) one whose numeric components are
+  a prefix of the detected version's (component-wise, so `2.1` never matches `2.10`). So `8.0`→`8`, `2.1`→`2.1`,
+  `3.21`→`3.21`; the NORMALIZED cycle is the frozen fingerprint input (Spring Boot/Alpine are unchanged). No
+  published cycle matches → the coverage gap below.
+- **BLOCKER 2 / review BUG 1 — never false-solve, PER (product, cycle):** `EolEnricher` keeps only covered,
+  issue-worthy INCOMING detections (past-EOL / ending-soon within 90 days, `core.eol.EolStatus`); a detection
+  with no matching published cycle is dropped with an `EOL_COVERAGE_GAP` warning. Solvability is NOT scanner-wide:
+  `scan_task.closes_findings` stays per-scanner (= the EOL scanner succeeded — unchanged behaviour for every
+  type), and whether an EXISTING open EOL finding may be solved is decided **per fingerprint** in
+  `ReconcileService.eolCoverageGuard` — an open EOL sub-issue whose stored `(product, cycle)` has no `eol_cycle`
+  coverage is FROZEN (left untouched, never solved), exactly like a superseded secret under a replaced key
+  (D-029). So one uncovered product (e.g. an unsynced .NET) never blocks solving a fully-covered product
+  (Spring Boot, Alpine) in the same scan, and a covered finding that genuinely disappears still solves. An EOL
+  finding is solved only when the scanner succeeded AND its `(product, cycle)` is covered AND it is now absent.
+  Proven by `EolSolvabilityIT` (`aRescanWithEmptyEolCacheDoesNotSolveAnOpenEolFinding` and
+  `aCoveredProductSolvesEvenWhenAnUncoveredProductIsInTheSameScan`).
 - **Fingerprint / overload:** EOL fingerprint is `product | cycle | file_path` (`core.Fingerprints.eol`, NO line
-  number). `product` reuses the `package` column and `cycle` the `installed_version` column (documented in
-  `ReconcileService.fingerprintOf`), so no new business column is added. `eol_cycle` is the one new table (V16),
-  a global cache with no `workspace_id` (D-050). The EOL base (past-EOL 75 / ending-soon 45) is wired in Slice 4.
+  number; `cycle` is the NORMALIZED cycle). `product` reuses the `package` column and `cycle` the
+  `installed_version` column (documented in `ReconcileService.fingerprintOf`), so no new business column is
+  added. `eol_cycle` is the one new table (V16), a global cache with no `workspace_id` (D-050). The EOL base
+  (past-EOL 75 / ending-soon 45) is wired in Slice 4.
 Consequences: offline static EOL detection with faithful, conservative issue classification; one new table, one
 new api egress host, and the detector reaches no network. Java EOL tracks a single configurable JDK distro slug
 (revisit if per-vendor JDK tracking is needed).
@@ -806,8 +819,9 @@ Decision: `workspace_id` on every business table from day one.
     is present). Both gaps are shown as scan-health warnings, not hidden. Revisit if/when a safe static path exists.
   - **By design (NIT 11):** two identical SAST snippets in the same file share one fingerprint
     (`rule_id | file_path | normalized_snippet_hash`) and collapse to a single sub-issue (first-wins dedup);
-    EOL findings require the `eol_cycle` cache to be populated at scan time (an unsynced product makes the EOL
-    scanner non-solvable that scan, D-055 / BLOCKER 2).
+    EOL findings require the `eol_cycle` cache to be populated at scan time (an unsynced/uncovered product is
+    not reported, and an existing open EOL finding for an uncovered `(product,cycle)` is frozen — never
+    false-solved — per fingerprint, D-055 / review BUG 1).
   - **SAST test-path is an adjustment, not an exclusion:** the −15 is itemized in `score_breakdown`; dev/test
     scope EXCLUSION (`DEV_DEPENDENCY`/`TEST_SCOPE` auto-triage) remains M7.
 - OD-1 Gradle repos without lockfiles — PARTLY RESOLVED by D-031 (warn-only in M4); finished in M4b

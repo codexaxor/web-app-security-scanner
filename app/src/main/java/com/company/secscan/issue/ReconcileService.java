@@ -1,6 +1,7 @@
 package com.company.secscan.issue;
 
 import com.company.secscan.config.SecretFingerprinterHolder;
+import com.company.secscan.intel.EolCycleRepository;
 import com.company.secscan.reconcile.Fingerprints;
 import com.company.secscan.reconcile.Reconciler;
 import com.company.secscan.reconcile.Reconciler.Existing;
@@ -49,12 +50,14 @@ public class ReconcileService {
     private final SubIssueScorer scorer;
     private final RepositoryRepository repositories;
     private final GroupRollupService rollup;
+    private final EolCycleRepository eolCycles;
     private final Reconciler reconciler = new Reconciler();
 
     public ReconcileService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                             IssueGroupRepository groups, SubIssueRepository subIssues, TriageEventRepository events,
                             SecretFingerprinterHolder fingerprinter, SubIssueScorer scorer,
-                            RepositoryRepository repositories, GroupRollupService rollup) {
+                            RepositoryRepository repositories, GroupRollupService rollup,
+                            EolCycleRepository eolCycles) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
@@ -65,6 +68,7 @@ public class ReconcileService {
         this.scorer = scorer;
         this.repositories = repositories;
         this.rollup = rollup;
+        this.eolCycles = eolCycles;
     }
 
     /**
@@ -120,7 +124,12 @@ public class ReconcileService {
             subByFp.put(s.getFingerprint(), s);
         }
 
-        Set<String> frozenFingerprints = secretKeyGuard(existingSubs);
+        // Freeze superseded/undeterminable identities so they are never (false-)solved this scan: secrets under
+        // a replaced fingerprint key (D-029) AND EOL findings whose (product,cycle) has no eol_cycle coverage
+        // (review BUG 1 — a PER-(product,cycle) guard, so a covered EOL product still solves even when another
+        // product in the same scan is uncovered). Both partitions keep every other finding reconciling normally.
+        Set<String> frozenFingerprints = new HashSet<>(secretKeyGuard(existingSubs));
+        frozenFingerprints.addAll(eolCoverageGuard(existingSubs));
 
         List<Existing> existing = new ArrayList<>(existingSubs.size());
         for (SubIssue s : existingSubs) {
@@ -220,6 +229,33 @@ public class ReconcileService {
                     + "avoid mass-solving re-fingerprinted secrets; secrets under the current key reconcile "
                     + "normally. Clean up the old-key rows manually (bulk ignore arrives in M7); the key must "
                     + "never change once secrets are stored (D-029).", frozen.size(), staleKeyIds, currentKeyId);
+        }
+        return frozen;
+    }
+
+    /**
+     * Review BUG 1 — per-(product,cycle) never-false-solve for EOL. An open EOL sub-issue whose stored
+     * {@code (product, cycle)} is no longer present in the {@code eol_cycle} cache cannot be classified, so its
+     * fingerprint is FROZEN (left untouched — never solved/reopened), exactly like a superseded secret (D-029).
+     * EOL subs whose cycle IS still covered are NOT frozen and reconcile normally (so a covered product solves
+     * when its finding genuinely disappears, even if another, uncovered product is in the same scan). This is a
+     * per-finding guard; {@code scan_task.closes_findings} stays per-scanner and is unchanged for every type.
+     *
+     * @return the EOL fingerprints to freeze this scan (empty when every open EOL sub is covered)
+     */
+    private Set<String> eolCoverageGuard(List<SubIssue> existingSubs) {
+        Set<String> frozen = new HashSet<>();
+        for (SubIssue s : existingSubs) {
+            if (ScanFinding.TYPE_EOL.equals(s.getType())
+                    && SubIssue.STATUS_OPEN.equals(s.getStatus())
+                    && eolCycles.findByProductAndCycle(s.getPackageName(), s.getInstalledVersion()).isEmpty()) {
+                frozen.add(s.getFingerprint());
+            }
+        }
+        if (!frozen.isEmpty()) {
+            log.info("EOL coverage guard: {} open EOL finding(s) have no eol_cycle coverage and are frozen "
+                    + "(never false-solved) this scan; covered EOL findings reconcile normally (BUG 1).",
+                    frozen.size());
         }
         return frozen;
     }

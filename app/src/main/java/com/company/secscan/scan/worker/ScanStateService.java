@@ -100,13 +100,11 @@ public class ScanStateService {
             String status = t.succeeded() ? ScanTask.STATUS_OK : ScanTask.STATUS_FAILED;
             ScanTask task = new ScanTask(scan.getWorkspaceId(), scanId, t.name(), status, t.exitCode(),
                     t.durationMs(), logExcerpt);
-            // A no-packages SCA scan is ok but not authoritative to close findings this scan (D-034); likewise
-            // an EOL scan with an undeterminable detection is ok but must not close EOL findings (BLOCKER 2).
-            boolean closes = t.closesFindings();
-            if (ScanTask.SCANNER_EOL.equals(t.name())) {
-                closes = closes && eol.solvable();
-            }
-            task.setClosesFindings(closes);
+            // A no-packages SCA scan is ok but not authoritative to close findings this scan (D-034). EOL
+            // solvability is NOT gated here (review BUG 1): closes_findings stays per-scanner (= scanner
+            // succeeded), and per-(product,cycle) never-false-solve is enforced by freezing uncovered EOL
+            // fingerprints in reconcile — so a covered EOL product still closes even when another is uncovered.
+            task.setClosesFindings(t.closesFindings());
             tasks.save(task);
         }
         for (RawFinding f : toPersist) {

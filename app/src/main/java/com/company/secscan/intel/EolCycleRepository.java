@@ -1,5 +1,6 @@
 package com.company.secscan.intel;
 
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -10,4 +11,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface EolCycleRepository extends JpaRepository<EolCycle, EolCycle.Key> {
 
     Optional<EolCycle> findByProductAndCycle(String product, String cycle);
+
+    /** All cached cycles for a product — the published cycle keys the detector's cycle is normalized against. */
+    List<EolCycle> findByProduct(String product);
 }

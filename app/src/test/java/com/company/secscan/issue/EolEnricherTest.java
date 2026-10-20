@@ -13,59 +13,77 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 /**
- * Unit-proves the EOL enricher's gate (BLOCKER 2): only determinable issues are kept, and a detection with no
- * eol_cycle coverage makes the whole EOL scanner non-solvable (so reconcile can never false-solve it).
+ * Unit-proves the EOL enricher's per-finding behaviour: it normalizes the detected cycle to the feed's key
+ * (review BUG 2) and keeps only covered, issue-worthy findings; an uncovered detection is dropped with an
+ * EOL_COVERAGE_GAP warning (it does NOT make the whole scanner unsolvable — BUG 1 moved that to a per-finding
+ * freeze in reconcile).
  */
 class EolEnricherTest {
 
     private final EolCycleRepository repo = Mockito.mock(EolCycleRepository.class);
     private final EolEnricher enricher = new EolEnricher(repo);
 
-    private static RawFinding candidate(String product, String cycle) {
-        return RawFinding.eol(product, cycle, "pom.xml");
+    private static RawFinding candidate(String product, String detectedCycle) {
+        return RawFinding.eol(product, detectedCycle, "pom.xml");
     }
 
     @Test
-    void pastEolCandidateIsKeptAndScannerStaysSolvable() {
-        when(repo.findByProductAndCycle("spring-boot", "2.1"))
-                .thenReturn(Optional.of(new EolCycle("spring-boot", "2.1", true, LocalDate.of(2019, 1, 1),
-                        "2.1.18", null, null, false, false)));
+    void pastEolCandidateIsKept() {
+        EolCycle c = new EolCycle("spring-boot", "2.1", true, LocalDate.of(2019, 1, 1), "2.1.18", null, null,
+                false, false);
+        when(repo.findByProduct("spring-boot")).thenReturn(List.of(c));
+        when(repo.findByProductAndCycle("spring-boot", "2.1")).thenReturn(Optional.of(c));
 
         EolEnricher.Result r = enricher.enrich(List.of(candidate("spring-boot", "2.1")));
 
-        assertThat(r.issues()).hasSize(1);
-        assertThat(r.solvable()).isTrue();
+        assertThat(r.issues()).singleElement().satisfies(f -> {
+            assertThat(f.packageName()).isEqualTo("spring-boot");
+            assertThat(f.installedVersion()).isEqualTo("2.1");
+        });
         assertThat(r.warnings()).isEmpty();
     }
 
     @Test
-    void maintainedCandidateIsDroppedButScannerStaysSolvable() {
-        when(repo.findByProductAndCycle("nodejs", "22"))
-                .thenReturn(Optional.of(new EolCycle("nodejs", "22", false, LocalDate.now().plusYears(2),
-                        "22.1.0", null, null, true, true)));
+    void dotnetDetectedMajorMinorIsNormalizedToTheFeedBareMajor() {
+        // BUG 2: the detector emits "8.0" but endoflife.date keys .NET as "8"; the kept finding carries "8".
+        EolCycle c = new EolCycle("dotnet", "8", true, LocalDate.of(2026, 1, 1), "8.0.11", null, null, false, false);
+        when(repo.findByProduct("dotnet")).thenReturn(List.of(c));
+        when(repo.findByProductAndCycle("dotnet", "8")).thenReturn(Optional.of(c));
+
+        EolEnricher.Result r = enricher.enrich(List.of(candidate("dotnet", "8.0")));
+
+        assertThat(r.issues()).singleElement().satisfies(f -> assertThat(f.installedVersion()).isEqualTo("8"));
+        assertThat(r.warnings()).isEmpty();
+    }
+
+    @Test
+    void maintainedCandidateIsDropped() {
+        EolCycle c = new EolCycle("nodejs", "22", false, LocalDate.now().plusYears(2), "22.1.0", null, null,
+                true, true);
+        when(repo.findByProduct("nodejs")).thenReturn(List.of(c));
+        when(repo.findByProductAndCycle("nodejs", "22")).thenReturn(Optional.of(c));
 
         EolEnricher.Result r = enricher.enrich(List.of(candidate("nodejs", "22")));
 
         assertThat(r.issues()).isEmpty();
-        assertThat(r.solvable()).isTrue(); // determinable (just not an issue) → still solvable
+        assertThat(r.warnings()).isEmpty(); // determinable (just not an issue) → no gap
     }
 
     @Test
-    void candidateWithNoCoverageDropsAndMakesTheScannerNotSolvable() {
-        when(repo.findByProductAndCycle("keycloak", "99")).thenReturn(Optional.empty());
+    void candidateWithNoMatchingPublishedCycleWarnsAndIsDropped() {
+        when(repo.findByProduct("keycloak")).thenReturn(List.of()); // nothing synced for this product
 
         EolEnricher.Result r = enricher.enrich(List.of(candidate("keycloak", "99")));
 
         assertThat(r.issues()).isEmpty();
-        assertThat(r.solvable()).isFalse(); // BLOCKER 2: cannot classify → closes nothing this scan
         assertThat(r.warnings()).singleElement()
                 .satisfies(w -> assertThat(w.code()).isEqualTo("EOL_COVERAGE_GAP"));
     }
 
     @Test
-    void noCandidatesLeavesTheScannerSolvable() {
+    void noCandidatesIsEmpty() {
         EolEnricher.Result r = enricher.enrich(List.of());
         assertThat(r.issues()).isEmpty();
-        assertThat(r.solvable()).isTrue();
+        assertThat(r.warnings()).isEmpty();
     }
 }

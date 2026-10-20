@@ -99,14 +99,65 @@ class EolSolvabilityIT extends AbstractScanWorkerIT {
         // The cache is lost/empty before the next scan (e.g. intel never synced for this product).
         eolCycles.deleteAllInBatch();
 
-        // Scan 2: the detector still finds spring-boot 2.1, but it cannot be classified → the EOL scanner is
-        // non-solvable, so the open finding must NOT be solved.
+        // Scan 2: the detector still finds spring-boot 2.1, but with no cache coverage it cannot be classified,
+        // so its fingerprint is FROZEN in reconcile (per-finding guard) and the open finding must NOT be solved.
         runScan(repo.getId());
 
         SubIssue after = subIssues.findById(opened.getId()).orElseThrow();
         assertThat(after.getStatus()).as("open EOL finding must not be false-solved on a no-coverage rescan")
                 .isEqualTo(SubIssue.STATUS_OPEN);
         assertThat(after.getSolvedAt()).isNull();
+    }
+
+    @Test
+    void aCoveredProductSolvesEvenWhenAnUncoveredProductIsInTheSameScan() throws Exception {
+        // review BUG 1: the never-false-solve guard is PER (product,cycle). The cache covers spring-boot (so a
+        // disappeared spring-boot finding can solve) but NOT dotnet. A later scan drops spring-boot and adds an
+        // uncovered dotnet detection — spring-boot must still SOLVE, and the uncovered dotnet must neither be
+        // persisted nor block anything.
+        eolCycles.deleteAllInBatch();
+        eolCycles.save(new EolCycle("spring-boot", "2.1", true, LocalDate.of(2019, 10, 1), "2.1.18", null,
+                null, false, false));
+
+        Path repoDir = Files.createTempDirectory("secscan-fixture-eolpp");
+        Files.writeString(repoDir.resolve("pom.xml"),
+                "<project><parent><artifactId>spring-boot-starter-parent</artifactId>"
+                        + "<version>2.1.5.RELEASE</version></parent></project>\n");
+        git(repoDir, "init", "-q", "-b", "main");
+        git(repoDir, "config", "user.email", "test@example.com");
+        git(repoDir, "config", "user.name", "Test");
+        git(repoDir, "add", "-A");
+        git(repoDir, "commit", "-q", "-m", "spring-boot");
+
+        GitlabConnection conn = connections.save(GitlabConnection.forProject(
+                WORKSPACE, "file://" + repoDir.toAbsolutePath(), "svc/pp", 722L, "ct",
+                "read_api,read_repository", null));
+        Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 722L, "svc/pp", "main",
+                List.of("Java")));
+
+        // Scan 1: spring-boot 2.1 (covered) opens.
+        runScan(repo.getId());
+        SubIssue springBoot = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo.getId()).stream()
+                .filter(s -> ScanFinding.TYPE_EOL.equals(s.getType()) && "spring-boot".equals(s.getPackageName()))
+                .findFirst().orElseThrow();
+        assertThat(springBoot.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+
+        // Repo now drops spring-boot and introduces a .NET project whose cycle is NOT in the cache.
+        Files.delete(repoDir.resolve("pom.xml"));
+        Files.writeString(repoDir.resolve("App.csproj"),
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>"
+                        + "<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n");
+        git(repoDir, "add", "-A");
+        git(repoDir, "commit", "-q", "-m", "switch to dotnet");
+
+        // Scan 2: spring-boot is gone (covered → SOLVED); dotnet is uncovered (dropped, never persisted).
+        runScan(repo.getId());
+
+        SubIssue after = subIssues.findById(springBoot.getId()).orElseThrow();
+        assertThat(after.getStatus()).as("a covered EOL product solves even with an uncovered one present")
+                .isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo.getId()))
+                .noneMatch(s -> "dotnet".equals(s.getPackageName())); // uncovered dotnet never became a finding
     }
 
     private void runScan(UUID repoId) {
