@@ -70,15 +70,32 @@ RUN set -eu; \
 ARG OPENGREP_VERSION=1.31.0
 ARG OPENGREP_SHA256_AMD64=02c9fba481611aa0664bc79ccf7ce59e9e334b76af8921c80b2f738d17fabf9b
 ARG OPENGREP_SHA256_ARM64=b7cbedab0b6c9953ea27ce3baa006ad8b6fa1c50ee7433638b63f7fc731519d9
+# Cosign (pinned by version + per-arch SHA-256) verifies the Opengrep release's keyless Sigstore signature:
+# the .sig/.cert must be signed by Opengrep's own GitHub Actions identity (SHOULD-FIX 3). This is build-time
+# only — cosign is removed afterwards and is never in the runtime image.
+ARG COSIGN_VERSION=3.1.3
+ARG COSIGN_SHA256_AMD64=4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
+ARG COSIGN_SHA256_ARM64=c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a
 RUN set -eu; \
     case "$TARGETARCH" in \
-        amd64) asset="opengrep_musllinux_x86";     sha="$OPENGREP_SHA256_AMD64" ;; \
-        arm64) asset="opengrep_musllinux_aarch64"; sha="$OPENGREP_SHA256_ARM64" ;; \
+        amd64) asset="opengrep_musllinux_x86";     sha="$OPENGREP_SHA256_AMD64"; carch="amd64"; csha="$COSIGN_SHA256_AMD64" ;; \
+        arm64) asset="opengrep_musllinux_aarch64"; sha="$OPENGREP_SHA256_ARM64"; carch="arm64"; csha="$COSIGN_SHA256_ARM64" ;; \
         *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
-    url="https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}/${asset}"; \
-    wget -q -O /usr/local/bin/opengrep "$url"; \
+    base="https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}"; \
+    wget -q -O /usr/local/bin/opengrep "${base}/${asset}"; \
+    wget -q -O /tmp/opengrep.sig  "${base}/${asset}.sig"; \
+    wget -q -O /tmp/opengrep.cert "${base}/${asset}.cert"; \
     echo "${sha}  /usr/local/bin/opengrep" | sha256sum -c -; \
+    wget -q -O /tmp/cosign "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${carch}"; \
+    echo "${csha}  /tmp/cosign" | sha256sum -c -; \
+    chmod 0555 /tmp/cosign; \
+    /tmp/cosign verify-blob \
+        --certificate /tmp/opengrep.cert --signature /tmp/opengrep.sig \
+        --certificate-identity-regexp 'https://github.com/opengrep/opengrep/.*' \
+        --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+        /usr/local/bin/opengrep; \
+    rm -f /tmp/cosign /tmp/opengrep.sig /tmp/opengrep.cert; \
     chmod 0555 /usr/local/bin/opengrep; \
     opengrep --version
 

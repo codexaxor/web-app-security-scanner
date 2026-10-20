@@ -23,11 +23,15 @@ final class ScannerContainerConfig {
     static final String TOKEN_MOUNT = "/run/secrets/gitlab-token";
     static final String SOURCE_MOUNT = "/src";
     /**
-     * A small EXEC-able tmpfs for the SAST engine's own runtime: Opengrep (M6) unpacks its trusted core binary
-     * to HOME/TMPDIR and execs it, which the {@code noexec} {@code /work} forbids. run-scan.sh points only
-     * Opengrep's HOME/TMPDIR/XDG_CACHE_HOME here. It is isolated from {@code /work}, so the cloned repository is
-     * NEVER placed on an exec-able mount — the "never execute scanned code" guarantee (D-004) is unchanged; only
-     * our own pinned tool runs here.
+     * A small EXEC-able tmpfs for the SAST engine's own runtime (D-056). Opengrep (M6) is a PyInstaller
+     * single-file binary that, at every run, unpacks its own interpreter + {@code opengrep-core} under
+     * {@code $HOME} and execs the core; the {@code noexec} {@code /work} forbids that, and pre-unpacking onto the
+     * read-only image layer does not work (it re-unpacks + execs at runtime). No pip/standalone-musl-core path
+     * exists for the pinned release, so a dedicated writable+exec mount is genuinely required. run-scan.sh points
+     * ONLY Opengrep's HOME/TMPDIR/XDG_CACHE_HOME here; it holds Opengrep's own unpacked runtime + copies of OUR
+     * rule configs + Opengrep's run log. The scanned repository stays on {@code noexec} {@code /work}: no repo
+     * file is copied onto this mount or executed from it, and the scanned repo cannot write to it (only Opengrep
+     * does) — so "never execute scanned code" (D-004) is unchanged.
      */
     static final String TOOL_EXEC_MOUNT = "/opt/sast-exec";
 
@@ -47,10 +51,11 @@ final class ScannerContainerConfig {
         }
         // /work is tmpfs: writable scratch that dies with the container, mounted noexec/nosuid/nodev so nothing
         // in the cloned repo can be executed (we never run repository code). /opt/sast-exec is a separate, small
-        // EXEC-able tmpfs ONLY for the SAST engine's own core (Opengrep execs its unpacked core; D-053). The repo
-        // is never placed there, so "never execute scanned code" (D-004) holds; it is nosuid/nodev and capped.
+        // EXEC-able tmpfs ONLY for the SAST engine's own unpacked runtime (Opengrep PyInstaller self-extract +
+        // core exec; D-056). The repo is never placed there, so "never execute scanned code" (D-004) holds; it
+        // is nosuid/nodev and size-capped (512m — Opengrep's unpacked runtime is ~240 MiB).
         String workOpts = "rw,noexec,nosuid,nodev,mode=1777,size=" + s.tmpfsSize();
-        String toolExecOpts = "rw,exec,nosuid,nodev,mode=1777,size=256m";
+        String toolExecOpts = "rw,exec,nosuid,nodev,mode=1777,size=512m";
         return HostConfig.newHostConfig()
                 .withReadonlyRootfs(true)
                 .withCapDrop(Capability.ALL)

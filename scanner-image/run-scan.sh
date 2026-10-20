@@ -319,10 +319,13 @@ export CKV_SKIP_PACKAGE_UPDATE_CHECK=True
 # EVEN when we pass our own --config-file (verified), so a repo could silently hide its own findings. Our
 # --config-file cannot override that, so we REMOVE every in-repo Checkov config from the EPHEMERAL in-container
 # clone (never the real repo — the clone dies with the container; D-030 is about the real repository) before
-# scanning. Inline `#checkov:skip=` comments cannot be disabled this way, but Checkov still lists them in
-# skipped_checks[], which the parser recovers and promotes back to findings. Together these ensure a scanned
-# repo cannot weaken its own IaC scan.
-find "$CHECKOUT" -type f \( -name '.checkov.yaml' -o -name '.checkov.yml' \) -delete 2>/dev/null || true
+# scanning. The removal is CLONE-SCOPED (rooted at $CHECKOUT), covers BOTH .checkov.yaml and .checkov.yml at ANY
+# depth, and is SYMLINK-SAFE: find runs in -P mode (never follows a symlink), and we delete symlink ENTRIES too
+# (-type l) so Checkov can never follow a symlinked .checkov.yaml out of the clone; a symlink's target (outside
+# the clone) is never touched. Inline `#checkov:skip=` comments cannot be disabled this way, but Checkov still
+# lists them in skipped_checks[], which the parser recovers and promotes back to findings. Together these ensure
+# a scanned repo cannot weaken its own IaC scan.
+find "$CHECKOUT" \( -type f -o -type l \) \( -name '.checkov.yaml' -o -name '.checkov.yml' \) -delete 2>/dev/null || true
 START="$(date +%s)"
 set +e
 # `checkov -o json` writes the JSON report to stdout (the banner/chatter goes to stderr); capture each separately.
@@ -347,6 +350,14 @@ fi
 if find "$CHECKOUT" -type f -name Chart.yaml 2>/dev/null | head -1 | grep -q .; then
     add_warning IAC_HELM_NOT_RENDERED \
         "Helm charts are not rendered or scanned (chart rendering requires executing helm, which is disallowed; D-004/D-054)." \
+        ""
+fi
+# D-030 honest gap: Checkov 3.3.29 has no docker_compose framework, so compose files are not scanned. Flag any
+# docker-compose/compose file so the coverage gap is shown, not hidden (D-054).
+if find "$CHECKOUT" -type f \( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \
+        -o -name 'compose.yml' -o -name 'compose.yaml' \) 2>/dev/null | head -1 | grep -q .; then
+    add_warning IAC_DOCKER_COMPOSE_UNSUPPORTED \
+        "Docker Compose files are not scanned (Checkov 3.3.29 has no docker_compose framework; D-054)." \
         ""
 fi
 

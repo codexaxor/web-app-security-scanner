@@ -14,6 +14,34 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-056 Opengrep needs a dedicated exec-able tmpfs — a bounded hardening carve-out (2026-10-20, accepted)
+Context: Opengrep 1.31.0 (musllinux) is a PyInstaller single-file binary that, on every run, unpacks its own
+interpreter + `opengrep-core` under `$HOME` and execs the core. The scanner's `/work` tmpfs is `noexec` (so no
+cloned repo code can run, D-004), which blocks that unpack+exec. This is a change to scanner hardening and must
+be justified, not silent (hard rule #7).
+Avoidance investigated and ruled out: (a) pre-unpacking the runtime onto the read-only image layer does NOT
+work — Opengrep re-unpacks and re-execs into a writable+exec dir at runtime even with a pre-warmed read-only
+`$HOME` (verified: it fails with "couldn't launch child (exec): Permission denied" when the writable dir is
+`noexec`); (b) the release ships no standalone musl `opengrep-core`, only glibc `opengrep-core_linux_*` which
+does not run on Alpine; (c) there is no `opengrep` pip package to install onto the read-only layer. So a
+dedicated writable+exec directory at runtime is genuinely required for the pinned release.
+Decision: add ONE dedicated EXEC-able tmpfs at **`/opt/sast-exec`** (`ScannerContainerConfig.TOOL_EXEC_MOUNT`),
+mounted `rw,exec,nosuid,nodev,mode=1777,size=512m`, SEPARATE from `/work` and `/out`. `run-scan.sh` points ONLY
+Opengrep's `HOME`/`TMPDIR`/`XDG_CACHE_HOME` there. Properties (the carve-out is minimal and does not weaken the
+repo-code guarantee):
+- `/work` (the clone) and `/out` remain **`noexec`**; only `/opt/sast-exec` is exec-able.
+- It holds ONLY Opengrep's own unpacked PyInstaller runtime, copies of OUR rule configs, and Opengrep's run log.
+  **No scanned-repo file is ever copied onto it or executed from it**, and the scanned repo cannot write to it
+  (only Opengrep does). The one repo-derived artefact is Opengrep's own debug log (it may name scanned paths /
+  matched lines); it never leaves the throwaway container (only `/out` leaves).
+- The scanned repository stays on `noexec` `/work` and is never executed — "never execute scanned code" (D-004)
+  is unchanged.
+- All other container controls are unchanged: `--cap-drop=ALL`, `--no-new-privileges`, read-only root
+  filesystem, 2 CPU / 4 GB / 512 PID limits, 30-min hard timeout, and NO Docker socket mount.
+Consequences: one bounded, auditable writable+exec mount for one trusted pinned tool. Revisit at an Opengrep
+release that ships a standalone musl core or a pip distribution — then run the core from the read-only image
+layer and drop this mount.
+
 ## D-055 EOL via a static detector + endoflife.date API v1, with a never-false-solve guard (2026-10-20, accepted)
 Context: M6 adds end-of-life detection for runtimes/frameworks. The SPEC uses our own detector + endoflife.date
 data; we must never run a build (D-004) and never false-solve a finding.
@@ -54,7 +82,14 @@ Alpine (musl), so we bake the **musllinux** per-arch binaries — the `manylinux
 Alpine (they fail with exit 127, confirmed). Checksums verified before use:
 `opengrep_musllinux_x86 = 02c9fba481611aa0664bc79ccf7ce59e9e334b76af8921c80b2f738d17fabf9b`,
 `opengrep_musllinux_aarch64 = b7cbedab0b6c9953ea27ce3baa006ad8b6fa1c50ee7433638b63f7fc731519d9`. Version recorded
-in `scan.tool_versions.opengrep`.
+in `scan.tool_versions.opengrep`. (The glibc `manylinux` checksums from the plan are NOT pinned — those builds
+fail on Alpine.)
+- **Provenance (Cosign, SHOULD-FIX 3):** the Dockerfile ALSO verifies the release's keyless Sigstore signature
+  before pinning — it downloads the asset's `.sig` + `.cert` and runs `cosign verify-blob` with
+  `--certificate-identity-regexp 'https://github.com/opengrep/opengrep/.*'` and
+  `--certificate-oidc-issuer 'https://token.actions.githubusercontent.com'`, so the binary must have been signed
+  by Opengrep's own GitHub Actions identity. Cosign itself is pinned (v3.1.3, per-arch SHA-256) and is build-time
+  only (removed, never in the runtime image). Verified OK against v1.31.0's musllinux assets.
 - **Offline:** `--disable-version-check`. Opengrep has **no `--metrics` flag** (Semgrep's telemetry was removed),
   so there is nothing else to disable; the container also runs with the network disabled for fixture ITs.
 - **In-repo suppressors ignored (D-037):** rules come ONLY via `--config` (no in-repo rule auto-load);
@@ -101,16 +136,24 @@ GitHub-Action supply-chain incident).
   shown, not hidden (D-030): run-scan.sh raises an `IAC_HELM_NOT_RENDERED` warning when a `Chart.yaml` is
   present. **Checkov 3.3.29 has NO `docker_compose` framework** (the planned framework list named it, but the
   tool does not offer it — valid values are dockerfile/kubernetes/terraform/cloudformation/helm/kustomize/…),
-  so docker-compose misconfig coverage is a recorded gap too (deferred register).
+  so docker-compose misconfig coverage is a recorded gap too: run-scan.sh raises an
+  `IAC_DOCKER_COMPOSE_UNSUPPORTED` warning when a `docker-compose.{yml,yaml}`/`compose.{yml,yaml}` is present
+  (D-030 — gap shown, not hidden; deferred register).
 - **Offline (SHOULD-FIX 3):** `--skip-download` (baked in `checkov.yaml`) + env `CKV_SKIP_PACKAGE_UPDATE_CHECK=True`
   suppress every network call; the config-injection ITs run the container with the network disabled to prove it.
 - **In-repo config ignored (D-037):** passing our `--config-file` does NOT stop Checkov reading and honoring an
   in-repo `.checkov.yaml`/`.checkov.yml` (verified: its `skip-check` silently suppresses findings even with our
   `--config-file`). So run-scan.sh **deletes** every in-repo Checkov config from the EPHEMERAL in-container clone
-  before scanning (the clone dies with the container; the real repo is untouched, D-030). Inline `#checkov:skip=`
-  CANNOT be disabled by a flag, but a skipped check is still reported in `results.skipped_checks[]` — the parser
-  **recovers** those and promotes them back to findings. (`quiet` is NOT set in `checkov.yaml`: it would strip
-  `skipped_checks` and defeat the recovery.) Both paths proven by `CheckovConfigInjectionIT`.
+  before scanning (the clone dies with the container; the real repo is untouched, D-030). The deletion is
+  CLONE-SCOPED (rooted at `$CHECKOUT`), covers BOTH `.checkov.yaml` and `.checkov.yml` at ANY depth (nested
+  modules), and is SYMLINK-SAFE: `find` runs in `-P` mode (never follows a symlink) and deletes the symlink
+  ENTRY too (`-type l`), so Checkov can never follow a symlinked `.checkov.yaml` out of the clone and a symlink
+  target outside the clone is never touched. Inline `#checkov:skip=` CANNOT be disabled by a flag, but a skipped
+  check is still reported in `results.skipped_checks[]` — the parser **recovers** those and promotes them back
+  to findings. (`quiet` is NOT set in `checkov.yaml`: it would strip `skipped_checks` and defeat the recovery.)
+  Proven by `CheckovConfigInjectionIT` — `inlineSkipIsRecoveredAndInRepoCheckovConfigIsIgnored` (root inline +
+  root config) and `nestedAndSymlinkedInRepoConfigsAreIgnored` (a nested `.checkov.yaml` and a symlinked one
+  both ignored, findings still fire).
 - **JSON shape:** multi-framework output is a JSON **array** of per-`check_type` report objects; a single
   matching framework is one object; an empty scan is a summary-only object (no `results`). The parser handles
   all three. Fields used: `check_id` (→ rule_id), `file_path` (leading `/` stripped → repo-relative), `resource`
@@ -757,9 +800,10 @@ Decision: `workspace_id` on every business table from day one.
     re-fingerprint) before bumping Opengrep.
   - **IaC severity override table** (D-054, NIT 7): all IaC findings score base 50 in M6 (OSS Checkov has no
     severity). A maintained per-`check_id` severity override is deferred.
-  - **Checkov Helm + docker-compose coverage** (D-054): Helm charts are not rendered (needs the helm binary,
-    D-004 — an `IAC_HELM_NOT_RENDERED` warning is raised); Checkov 3.3.29 has no `docker_compose` framework.
-    Revisit if/when a safe static path exists.
+  - **Checkov Helm + docker-compose coverage** (D-054, D-030): Helm charts are not rendered (needs the helm
+    binary, D-004 — an `IAC_HELM_NOT_RENDERED` warning is raised when a `Chart.yaml` is present); Checkov 3.3.29
+    has no `docker_compose` framework (an `IAC_DOCKER_COMPOSE_UNSUPPORTED` warning is raised when a compose file
+    is present). Both gaps are shown as scan-health warnings, not hidden. Revisit if/when a safe static path exists.
   - **By design (NIT 11):** two identical SAST snippets in the same file share one fingerprint
     (`rule_id | file_path | normalized_snippet_hash`) and collapse to a single sub-issue (first-wins dedup);
     EOL findings require the `eol_cycle` cache to be populated at scan time (an unsynced product makes the EOL

@@ -43,7 +43,7 @@ class ScannerContainerConfigTest {
         // nosuid/nodev and size-capped (D-053 / D-004).
         assertThat(hc.getTmpFs().get("/opt/sast-exec"))
                 .contains("rw,exec,").doesNotContain("noexec")
-                .contains("nosuid").contains("nodev").contains("size=256m");
+                .contains("nosuid").contains("nodev").contains("size=512m");
     }
 
     @Test
