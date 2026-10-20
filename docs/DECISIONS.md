@@ -170,8 +170,16 @@ GitHub-Action supply-chain incident).
 - **JSON shape:** multi-framework output is a JSON **array** of per-`check_type` report objects; a single
   matching framework is one object; an empty scan is a summary-only object (no `results`). The parser handles
   all three. Fields used: `check_id` (→ rule_id), `file_path` (leading `/` stripped → repo-relative), `resource`
-  (→ the IaC resource name, stored in the `package` column), `file_line_range` (display only, never a
-  fingerprint input).
+  (→ the IaC resource name, stored in the `package` column, **normalized** — see below), `file_line_range`
+  (display only, never a fingerprint input).
+- **Resource normalization (frozen fingerprint input):** Checkov reports file-based frameworks (Dockerfile) as
+  `"<leading-slash path>.<stage>"` — a stageless Dockerfile yields e.g. `"/iac/docker/Dockerfile."` (leading
+  `/`, trailing `.` for the empty stage), unlike the already-clean Terraform resources (`aws_s3_bucket.foo`).
+  Since `resource` is a FROZEN fingerprint input, `ScannerOutputParser.normalizeIacResource` makes it stable and
+  repo-relative: collapse `//`, strip a leading `/`, strip a single trailing `.`. A stageless Dockerfile's
+  resource therefore becomes its repo-relative path (the chosen stable synthetic resource; a named stage keeps
+  `.<stage>`), while Terraform / Kubernetes / CloudFormation resources are unchanged. Deterministic, so a clean
+  rescan is 0-triage.
 - **Base score (NIT 7):** OSS Checkov checks carry no `severity` (null), so **all IaC findings score base 50
   (MEDIUM)** in M6 (`base_iac`). A maintained per-`check_id` severity-override table is deferred (deferred
   register).

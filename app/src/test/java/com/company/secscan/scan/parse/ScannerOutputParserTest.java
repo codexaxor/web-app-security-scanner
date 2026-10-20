@@ -529,7 +529,25 @@ class ScannerOutputParserTest {
 
         RawFinding docker = findings.stream().filter(f -> f.ruleId().equals("CKV_DOCKER_2")).findFirst()
                 .orElseThrow();
-        assertThat(docker.filePath()).isEqualTo("Dockerfile");
+        assertThat(docker.filePath()).isEqualTo("iac/docker/Dockerfile");
+        // The Dockerfile resource "/iac//docker/Dockerfile." is normalized (no leading slash, no trailing dot,
+        // no double slash) to the repo-relative path — the stable synthetic resource (review bug).
+        assertThat(docker.packageName()).isEqualTo("iac/docker/Dockerfile");
+        assertThat(docker.packageName()).doesNotStartWith("/").doesNotEndWith(".").doesNotContain("//");
+        // A Terraform resource is already clean and is left untouched.
+        assertThat(failed.packageName()).isEqualTo("aws_security_group.open");
+    }
+
+    @org.junit.jupiter.api.Test
+    void normalizeIacResourceStripsSlashDotAndCollapsesButLeavesCleanResources() {
+        assertThat(ScannerOutputParser.normalizeIacResource("/iac//docker/Dockerfile."))
+                .isEqualTo("iac/docker/Dockerfile");
+        assertThat(ScannerOutputParser.normalizeIacResource("/app/Dockerfile.builder"))
+                .isEqualTo("app/Dockerfile.builder"); // a named stage is kept
+        assertThat(ScannerOutputParser.normalizeIacResource("aws_s3_bucket.public_fixture"))
+                .isEqualTo("aws_s3_bucket.public_fixture"); // Terraform unchanged
+        assertThat(ScannerOutputParser.normalizeIacResource("Pod.default.demo"))
+                .isEqualTo("Pod.default.demo"); // Kubernetes unchanged
     }
 
     @org.junit.jupiter.api.Test

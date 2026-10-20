@@ -89,10 +89,14 @@ class CheckovFrameworkIT extends AbstractScanWorkerIT {
                 .filter(f -> ScanFinding.TYPE_IAC.equals(f.getType()))
                 .toList();
 
-        // dockerfile
+        // dockerfile — and the resource is normalized to the clean repo-relative path (no leading slash,
+        // trailing dot or double slash), matching file_path, unlike Checkov's raw "/dockerfile/Dockerfile."
+        // (review bug: the resource is a frozen IaC fingerprint input).
         assertThat(iac).as("dockerfile").anySatisfy(f -> {
             assertThat(f.getRuleId()).startsWith("CKV_DOCKER_");
-            assertThat(f.getFilePath()).endsWith("Dockerfile");
+            assertThat(f.getFilePath()).isEqualTo("dockerfile/Dockerfile");
+            assertThat(f.getPackageName()).isEqualTo("dockerfile/Dockerfile");
+            assertThat(f.getPackageName()).doesNotStartWith("/").doesNotEndWith(".").doesNotContain("//");
         });
         // kubernetes
         assertThat(iac).as("kubernetes").anySatisfy(f -> {

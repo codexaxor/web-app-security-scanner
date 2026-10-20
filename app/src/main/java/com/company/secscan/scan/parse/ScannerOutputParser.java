@@ -365,7 +365,7 @@ public class ScannerOutputParser {
             if (checkId == null) {
                 continue;
             }
-            String resource = text(c, "resource");
+            String resource = normalizeIacResource(text(c, "resource"));
             String filePath = stripLeadingSlash(text(c, "file_path"));
             Integer line = null;
             com.fasterxml.jackson.databind.JsonNode range = c.get("file_line_range");
@@ -388,6 +388,33 @@ public class ScannerOutputParser {
             return null;
         }
         return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /**
+     * Normalizes a Checkov {@code resource} to a STABLE, repo-relative IaC fingerprint input (review bug;
+     * D-054). Checkov reports file-based frameworks (Dockerfile) as {@code "<leading-slash path>.<stage>"} — a
+     * stageless Dockerfile yields e.g. {@code "/iac/docker/Dockerfile."} (leading {@code /}, trailing {@code .}
+     * for the empty stage), unlike the already-clean Terraform resources ({@code aws_s3_bucket.foo}). We collapse
+     * {@code //}, strip a leading {@code /}, and strip a single trailing {@code .}, so a stageless Dockerfile's
+     * resource becomes its repo-relative path (the chosen stable synthetic resource — a named stage keeps its
+     * {@code .<stage>}), while Terraform/Kubernetes/CloudFormation resources (no leading slash, no trailing dot)
+     * are unchanged. Deterministic — the IaC fingerprint {@code rule_id | file_path | resource_name} is frozen.
+     */
+    static String normalizeIacResource(String resource) {
+        if (resource == null) {
+            return null;
+        }
+        String r = resource.replace('\\', '/');
+        while (r.contains("//")) {
+            r = r.replace("//", "/");
+        }
+        if (r.startsWith("/")) {
+            r = r.substring(1);
+        }
+        if (r.endsWith(".")) {
+            r = r.substring(0, r.length() - 1);
+        }
+        return r;
     }
 
     /**
