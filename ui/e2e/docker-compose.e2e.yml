@@ -1,0 +1,60 @@
+# Isolated E2E stack (project `secscan-e2e`, set via `-p` in run-e2e.mjs). Own volume, own loopback ports,
+# NO worker, NO scanner. SECSCAN_GITLAB_ALLOWED_HOSTS is empty so any GitLab call fails safe — e2e never
+# reaches real GitLab. All secrets come from ui/e2e/.auth/e2e.env (generated per run, gitignored) via
+# --env-file. NEVER run `down -v` against the default project; teardown is `-p secscan-e2e ... down -v`.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: secscan
+      POSTGRES_USER: secscan
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - e2e-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secscan -d secscan"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../..
+      dockerfile: app/Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: api
+      SECSCAN_DB_URL: jdbc:postgresql://postgres:5432/secscan
+      SECSCAN_DB_USER: secscan
+      SECSCAN_DB_PASSWORD: ${E2E_POSTGRES_PASSWORD}
+      SECSCAN_ENCRYPTION_KEY: ${E2E_ENCRYPTION_KEY}
+      SECSCAN_FINGERPRINT_KEY: ${E2E_FINGERPRINT_KEY}
+      SECSCAN_BOOTSTRAP_ADMIN_EMAIL: ${E2E_ADMIN_EMAIL}
+      SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${E2E_ADMIN_PASSWORD}
+      # Empty on purpose: no GitLab egress is allowed from the e2e api.
+      SECSCAN_GITLAB_ALLOWED_HOSTS: ""
+    ports:
+      - "127.0.0.1:8091:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  ui:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:5274:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  e2e-postgres-data:
