@@ -17,7 +17,8 @@ public enum ReasonCode {
     /** A default-excluded or `.secscan.yml`-excluded path, or a minified file (D-059). */
     EXCLUDED_PATH,
 
-    /** A secret in a placeholder file/value (changeme / example / *.example) (D-059). */
+    /** A secret in a placeholder PATH — a {@code *.example}/{@code *.sample}/{@code *.template} file or an
+     * {@code example/}/{@code examples/} directory (D-059; path-only, review B1). */
     SECRET_PLACEHOLDER,
 
     /** The losing rule of a curated duplicate-SAST-rule pair (D-061). */

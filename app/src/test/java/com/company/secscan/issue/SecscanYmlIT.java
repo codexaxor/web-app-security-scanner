@@ -1,6 +1,7 @@
 package com.company.secscan.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
@@ -38,6 +39,7 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
     private static final AtomicLong SEQ = new AtomicLong();
 
     @Autowired ReconcileService reconcile;
+    @Autowired TriageService triage;
     @Autowired ScanRepository scans;
     @Autowired ScanTaskRepository tasks;
     @Autowired ScanFindingRepository scanFindings;
@@ -160,6 +162,22 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
 
         // 0 new triage_event from the frozen config source.
         assertThat(events.count()).as("a frozen config writes no new triage_event").isEqualTo(eventsAfterScan1);
+    }
+
+    @Test
+    void removingASecscanYmlRuleThroughTheApiIsRejectedWith409() {
+        UUID repo = seedRepository();
+        UUID scan = seedScan(repo);
+        seedSca(scan, repo, IGNORED_CVE, "org.apache.commons:commons-text", "pom.xml");
+        SecscanConfig cfg = new SecscanConfig(true, List.of(), Map.of(IGNORED_CVE, REASON), false);
+        reconcile.reconcile(scan, WORKSPACE, new TriageContext(cfg, java.util.List.of(), false));
+
+        IgnoreRule secscanRule = ignoreRules.findByWorkspaceIdAndRepositoryIdAndCreatedBy(
+                WORKSPACE, repo, IgnoreRule.CREATED_BY_SECSCAN_YML).get(0);
+        assertThatThrownBy(() -> triage.removeRule(secscanRule.getId()))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(e -> assertThat(((org.springframework.web.server.ResponseStatusException) e)
+                        .getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT));
     }
 
     private void assertIgnoredEvent(SubIssue sub, String reasonCode) {

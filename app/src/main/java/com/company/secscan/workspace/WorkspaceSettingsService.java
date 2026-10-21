@@ -99,7 +99,7 @@ public class WorkspaceSettingsService {
     private Set<UUID> autoIgnoreLowEpss(UUID workspaceId) {
         List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
         List<SubIssue> open = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN);
-        Map<UUID, String> groupKeys = groupKeys(open);
+        Map<UUID, String> groupKeys = groupKeys(workspaceId, open);
         TriageResolver.AutoContext api = TriageResolver.AutoContext.api(true);
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : open) {
@@ -125,7 +125,7 @@ public class WorkspaceSettingsService {
         List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
         List<SubIssue> lowEpss = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_IGNORED)
                 .stream().filter(s -> ReasonCode.LOW_EPSS.code().equals(s.getIgnoreReason())).toList();
-        Map<UUID, String> groupKeys = groupKeys(lowEpss);
+        Map<UUID, String> groupKeys = groupKeys(workspaceId, lowEpss);
         TriageResolver.AutoContext api = TriageResolver.AutoContext.api(false);
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : lowEpss) {
@@ -146,13 +146,18 @@ public class WorkspaceSettingsService {
         return touched;
     }
 
-    private Map<UUID, String> groupKeys(List<SubIssue> subs) {
+    private Map<UUID, String> groupKeys(UUID workspaceId, List<SubIssue> subs) {
         Set<UUID> ids = new HashSet<>();
         for (SubIssue s : subs) {
             ids.add(s.getGroupId());
         }
         Map<UUID, String> out = new HashMap<>();
-        groups.findAllById(ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        // Workspace-scoped (domain rule 1): never let a cross-tenant group key leak into a resolution.
+        groups.findAllById(ids).forEach(g -> {
+            if (workspaceId.equals(g.getWorkspaceId())) {
+                out.put(g.getId(), g.getGroupKey());
+            }
+        });
         return out;
     }
 

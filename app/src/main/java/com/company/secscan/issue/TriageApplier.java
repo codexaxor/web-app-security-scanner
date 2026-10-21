@@ -15,25 +15,28 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Triage step 9 of reconcile (M7, D-057/D-058/D-059): applies ignores and clears them, always through reconcile
- * and always with a {@code triage_event} (domain rules 2-4). It is the SINGLE place that moves a finding to/from
- * {@code ignored}; both the scan-time path (here) and the API path ({@code TriageService}, S5) use the same
- * matcher so behaviour is identical.
+ * Triage step 9 of reconcile (M7, D-057/D-058/D-059/D-063): applies ignores and clears them, always through
+ * reconcile and always with a {@code triage_event} (domain rules 2-4). It is the SINGLE place the scan-time path
+ * moves a finding to/from {@code ignored}; the desired state itself is computed by {@link TriageResolver}, the one
+ * resolver shared with the API, so behaviour is identical however a finding is reached.
  *
- * <p>For each sub-issue the DESIRED ignore state is recomputed fresh:
- * <ol>
- *   <li>a matching active {@code ignore_rule} (manual or {@code .secscan.yml}-materialized) → {@code IGNORE_RULE}
- *       (ignored_by_rule_id set);</li>
- *   <li>else a cause-based auto reason — currently {@link ReasonCode#EXCLUDED_PATH} (SPEC default globs +
- *       {@code .secscan.yml exclude.paths}). Other auto reasons (DEV_DEPENDENCY/TEST_SCOPE, SECRET_PLACEHOLDER,
- *       LOW_EPSS, DUPLICATE_RULE) are added in later slices via {@link #autoReason}.</li>
- * </ol>
- * Transitions: not-ignored → ignored (event); ignored whose cause/rule is gone → unignore to the reconcile-computed
- * status (event, {@link TriageEvent#REASON_UNIGNORED}); already-ignored-and-still-desired → unchanged (hard rule 6,
- * no event). An ignored finding is never solved.
+ * <p>For each non-solved sub-issue (N4): the resolver returns the highest-precedence desired reason/rule — a
+ * matching {@code ignore_rule} ({@code IGNORE_RULE}) outranks every cause-based auto reason (EXCLUDED_PATH,
+ * SECRET_PLACEHOLDER, DUPLICATE_RULE, DEV_DEPENDENCY, TEST_SCOPE, LOW_EPSS). Transitions: not-ignored → ignored
+ * (event); ignored whose cause/rule is gone → unignore to the reconcile-computed status (event,
+ * {@link TriageEvent#REASON_UNIGNORED}); already-ignored-and-still-desired → unchanged, or a quiet reason/rule
+ * refresh with no event (hard rule 6). An ignored finding is never solved.
  *
- * <p>{@code .secscan.yml} CVE ignores are reconciled to the CURRENT file each scan (D-057 revoke lifecycle): new
- * ones are created, revoked ones deleted (the FK is {@code ON DELETE SET NULL}), and the step then re-evaluates.
+ * <p>Separately, every reconcile writes {@code sub.auto_ignore_reason} = the highest AUTO cause (SF1), even when
+ * an IGNORE_RULE holds the finding and never as a status change, so the API can keep a finding ignored under a
+ * scan-time-only cause it cannot recompute.
+ *
+ * <p>Freeze (S3/SF2/SF3): a present-but-unusable {@code .secscan.yml}, a failed scope inventory, or a specific
+ * unreadable manifest leaves that source's prior ignores untouched (no revoke, no unignore, no new ignore, prior
+ * {@code auto_ignore_reason} kept); every other source still runs.
+ *
+ * <p>{@code .secscan.yml} CVE ignores are reconciled to the CURRENT file each scan (D-057 revoke lifecycle, unless
+ * the config is frozen): new ones are created, revoked ones deleted (the FK is {@code ON DELETE SET NULL}).
  */
 @Service
 public class TriageApplier {

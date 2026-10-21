@@ -111,6 +111,12 @@ public class TriageService {
     public void removeRule(UUID ruleId) {
         IgnoreRule rule = ignoreRules.findByWorkspaceIdAndId(WORKSPACE, ruleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such ignore rule."));
+        // A .secscan.yml-materialized rule is owned by the repo's in-repo config and reconciled by its revoke
+        // lifecycle (D-057) — it cannot be deleted through the API (that would resurrect it on the next scan).
+        if (rule.isFromSecscanYml()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This ignore is defined in the repository's .secscan.yml; edit .secscan.yml to change it.");
+        }
         List<IgnoreRule> others = ignoreRules.findByWorkspaceId(WORKSPACE).stream()
                 .filter(r -> !r.getId().equals(ruleId)).toList();
         TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled());

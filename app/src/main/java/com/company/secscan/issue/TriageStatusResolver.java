@@ -39,7 +39,7 @@ public class TriageStatusResolver {
         if (scan.getId().equals(sub.getLastSeenScanId())) {
             return SubIssue.STATUS_OPEN;
         }
-        boolean scannerSolvable = tasks.findByScanId(scan.getId()).stream()
+        boolean scannerSolvable = tasks.findByWorkspaceIdAndScanId(sub.getWorkspaceId(), scan.getId()).stream()
                 .anyMatch(t -> t.getScanner().equals(sub.getScanner()) && t.succeeded() && t.closesFindings());
         return scannerSolvable ? SubIssue.STATUS_SOLVED : SubIssue.STATUS_OPEN;
     }

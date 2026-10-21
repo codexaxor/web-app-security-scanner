@@ -8,4 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ScanTaskRepository extends JpaRepository<ScanTask, UUID> {
 
     List<ScanTask> findByScanId(UUID scanId);
+
+    /** Workspace-scoped task lookup (domain rule 1) — used by the unignore status resolver. */
+    List<ScanTask> findByWorkspaceIdAndScanId(UUID workspaceId, UUID scanId);
 }
