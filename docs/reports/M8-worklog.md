@@ -93,3 +93,17 @@ adds the Vite client types. Page bodies are stubs filled in S4–S8.
 
 - Tests: `e2e onboarding.spec` (shell nav, Connect screen reachable, wrong-password, sign-out clears data +
   route restore). Gate: typecheck/build/vitest/guard green; e2e below.
+
+### S4 — Repositories screen ✓
+Full table: per-repo open-by-severity badges, ignored count, last-scan status + relative time, a warnings chip
+(opens a drawer), an Inactive badge, and a visible "N inactive repos, M open findings (not scanned)" line from
+the dashboard read model. Settings dialog (sensitivity / include-dev-deps / active) with Save and "Save and
+rescan"; the scan button posts and then polls GET /scans/{id} to a terminal status before refetching counts.
+Reusable SeverityBadges + ScanButton + RepoSettingsDialog + WarningsDrawer; lib/format for time/bands.
+
+- Tests: `e2e repositories.spec` — rollups UI = API = SQL (via helpers/oracle), inactive line + badge + disabled
+  scan, Start Scan enqueues (SQL scan count +1), polling-to-terminal returns the button to idle (status
+  intercepted running→completed), warnings drawer lists a scan's warnings.
+- Problems hit: (a) a new "Select repositories" link made `name: "Repositories"` ambiguous → `exact: true` on
+  the nav-link selectors; (b) the Start-Scan test mutated a repo's last-scan (newest → 0 warnings), which the
+  warnings test depended on → enqueue on web-portal so core-keycloak's warning row is untouched.
