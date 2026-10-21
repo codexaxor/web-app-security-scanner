@@ -19,7 +19,7 @@ G3 `npm run e2e` (S0, S3–S9; S1/S2 run the existing-screens smoke); G4 clean g
 | 7 | workspace-2 complete seed dataset | S0/S2 | S2 | `e2e/fixtures/seed.sql` (complete ws2 + ws1; oracle in S4+) |
 | 8 | path-scope ignore matches IgnoreMatcher format | S6 | _pending_ | _pending_ |
 | 9 | error handler: no stack traces; 401 entrypoint unchanged | S1 | S1 | `ApiErrorBodyIT` (400/404/409 shape, no trace; 401 no WWW-Authenticate) |
-| 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | S0,S1 | `ScanCreatedAtIT` (R1/R4); route restore in S3 |
+| 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | S0,S1,S3 | `ScanCreatedAtIT` (R1/R4); `e2e onboarding.spec` (route restored after re-auth) |
 
 ## Slices
 
@@ -79,3 +79,17 @@ health, inactive line). All counts in SQL (JPQL aggregates), workspace-scoped, i
 - Tests: `FeedSearchIT`, `FeedSummaryIT`, `SubIssuePanelIT`, `DashboardSummaryIT` (all = direct SQL + workspace
   isolation), updated `IssueApiIT`. Gate: `./gradlew clean build --rerun-tasks`; e2e smoke (seed applies,
   api rebuilt).
+
+### S3 — UI shell ✓
+react-router v8 routes (/dashboard, /feed, /feed/:groupId, /repositories, /ignored, /settings, /connect,
+/select; index + wildcard → /dashboard). QueryClient with a documented query-key + invalidation map
+(`src/queryClient.ts`): any triage/settings/scan/EPSS mutation invalidates the panel, feed rows + summary,
+ignored, dashboard and repositories families. In-memory auth (`src/auth.tsx`): a 401 anywhere (QueryCache/
+MutationCache onError) clears credentials AND `queryClient.clear()` and drops to the gate in place — the URL is
+untouched so re-auth restores the route (change 10). ErrorBanner renders the server `{error,message}` body.
+api.ts extended with every M8 endpoint + types; the feed query string is built from a validated params object,
+never free data (OD-13d). External CSS (`styles.css`, light/dark tokens) keeps `style-src 'self'`; `vite-env.d.ts`
+adds the Vite client types. Page bodies are stubs filled in S4–S8.
+
+- Tests: `e2e onboarding.spec` (shell nav, Connect screen reachable, wrong-password, sign-out clears data +
+  route restore). Gate: typecheck/build/vitest/guard green; e2e below.
