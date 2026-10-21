@@ -11,10 +11,22 @@ import java.util.Map;
  */
 public record ParsedScan(boolean cloneFailed, String commit, Map<String, String> toolVersions,
                          List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings,
-                         SecscanConfig config, List<DeclaredScope> declaredScopes) {
+                         SecscanConfig config, List<DeclaredScope> declaredScopes, String scopeInventoryStatus) {
+
+    /** The scope inventory ran cleanly; {@code "ok"} means dev/test scope state is authoritative this scan (S3). */
+    public static final String SCOPE_STATUS_OK = "ok";
+
+    public ParsedScan {
+        scopeInventoryStatus = scopeInventoryStatus == null ? SCOPE_STATUS_OK : scopeInventoryStatus;
+    }
+
+    /** True when the dev/test scope inventory failed → the worker freezes prior scope-derived triage (S3). */
+    public boolean scopeInventoryFailed() {
+        return !SCOPE_STATUS_OK.equals(scopeInventoryStatus);
+    }
 
     public static ParsedScan cloneFailure() {
         return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of(), SecscanConfig.absent(),
-                List.of());
+                List.of(), SCOPE_STATUS_OK);
     }
 }

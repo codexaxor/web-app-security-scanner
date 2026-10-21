@@ -79,17 +79,23 @@ def _parse(root):
     result["present"] = True
 
     # Symlink-safe: never follow a symlinked config (it could point at a mounted token or any host file).
+    # A config that is PRESENT but could not be safely read/parsed sets status="error" so the WORKER FREEZES the
+    # prior config-derived triage state instead of treating the config as empty (review S3): a transient refusal
+    # or typo must never silently un-suppress every .secscan.yml ignore. Absent/empty/valid stays "ok".
     if os.path.islink(config_path):
         _warn(warnings, "SECSCAN_CONFIG_SYMLINK", ".secscan.yml is a symlink and was refused (not read).")
+        result["status"] = "error"
         return result
     if not os.path.isfile(config_path):
         _warn(warnings, "SECSCAN_CONFIG_NOT_A_FILE", ".secscan.yml is not a regular file and was refused.")
+        result["status"] = "error"
         return result
     # realpath confinement: the resolved file must stay inside the checkout.
     real = os.path.realpath(config_path)
     if real != root_real and not real.startswith(root_real + os.sep):
         _warn(warnings, "SECSCAN_CONFIG_OUTSIDE_CLONE",
               ".secscan.yml resolves outside the clone and was refused (not read).")
+        result["status"] = "error"
         return result
 
     import yaml  # lazy (see module note); pinned py3-yaml in the image.
@@ -102,12 +108,14 @@ def _parse(root):
         # Never echo raw bytes; only the exception class name (yaml messages can quote file content).
         _warn(warnings, "SECSCAN_CONFIG_PARSE_ERROR",
               ".secscan.yml could not be parsed (%s); ignored." % type(exc).__name__)
+        result["status"] = "error"
         return result
 
     if doc is None:
-        return result  # empty file
+        return result  # empty file — a valid, intentionally-empty config (status stays ok)
     if not isinstance(doc, dict):
         _warn(warnings, "SECSCAN_CONFIG_NOT_A_MAP", ".secscan.yml top level is not a mapping; ignored.")
+        result["status"] = "error"
         return result
 
     _known_top = {"exclude", "ignore", "include_dev_dependencies"}

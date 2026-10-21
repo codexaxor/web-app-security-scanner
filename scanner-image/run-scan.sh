@@ -488,6 +488,7 @@ jq -nc \
       syntheticPoms: ($synth[0] // []),
       config: ($cfg[0] // null),
       declaredScopes: (($scopes[0] // {}).scopes // []),
+      scopeInventoryStatus: (($scopes[0] // {}).status // "error"),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

@@ -114,6 +114,49 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         assertThat(byFile(after, "build/generated/App.java").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
     }
 
+    @Test
+    void anInvalidConfigFreezesPriorIgnoresAndWritesNoTriageEventFromThatSource() {
+        UUID repo = seedRepository();
+
+        // Scan 1: a VALID config ignores one CVE (with reason) and excludes src/legacy.
+        UUID scan1 = seedScan(repo);
+        seedSca(scan1, repo, IGNORED_CVE, "org.apache.commons:commons-text", "pom.xml");
+        seedSast(scan1, repo, "opengrep-rules.custom.y", "src/legacy/Old.java");
+        SecscanConfig good = new SecscanConfig(true, List.of("src/legacy"), Map.of(IGNORED_CVE, REASON), false);
+        reconcile.reconcile(scan1, WORKSPACE, new TriageContext(good, java.util.List.of(), false));
+
+        SubIssue cve1 = byFile(subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo), "pom.xml");
+        UUID ruleId = cve1.getIgnoredByRuleId();
+        assertThat(ruleId).isNotNull();
+        long eventsAfterScan1 = events.count();
+
+        // Scan 2: the SAME findings, but the config is now PRESENT-BUT-INVALID (a YAML typo → status error).
+        UUID scan2 = seedScan(repo);
+        seedSca(scan2, repo, IGNORED_CVE, "org.apache.commons:commons-text", "pom.xml");
+        seedSast(scan2, repo, "opengrep-rules.custom.y", "src/legacy/Old.java");
+        SecscanConfig invalid = new SecscanConfig(true, List.of(), Map.of(), false, "error");
+        assertThat(invalid.frozen()).isTrue();
+        reconcile.reconcile(scan2, WORKSPACE, new TriageContext(invalid, java.util.List.of(), false));
+
+        // The materialized .secscan.yml CVE rule is NOT revoked (same id); both findings stay ignored unchanged.
+        List<IgnoreRule> secscanRules = ignoreRules.findByWorkspaceIdAndRepositoryIdAndCreatedBy(
+                WORKSPACE, repo, IgnoreRule.CREATED_BY_SECSCAN_YML);
+        assertThat(secscanRules).hasSize(1);
+        assertThat(secscanRules.get(0).getId()).isEqualTo(ruleId);
+
+        List<SubIssue> after = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
+        SubIssue cve2 = byFile(after, "pom.xml");
+        assertThat(cve2.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+        assertThat(cve2.getIgnoreReason()).isEqualTo(ReasonCode.IGNORE_RULE.code());
+        assertThat(cve2.getIgnoredByRuleId()).isEqualTo(ruleId);
+        SubIssue legacy2 = byFile(after, "src/legacy/Old.java");
+        assertThat(legacy2.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+        assertThat(legacy2.getIgnoreReason()).isEqualTo(ReasonCode.EXCLUDED_PATH.code());
+
+        // 0 new triage_event from the frozen config source.
+        assertThat(events.count()).as("a frozen config writes no new triage_event").isEqualTo(eventsAfterScan1);
+    }
+
     private void assertIgnoredEvent(SubIssue sub, String reasonCode) {
         assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, sub.getId()))
                 .anySatisfy(e -> {

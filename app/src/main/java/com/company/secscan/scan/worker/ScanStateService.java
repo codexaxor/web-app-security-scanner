@@ -122,6 +122,19 @@ public class ScanStateService {
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, w.code(), w.message(),
                     w.filePath()));
         }
+        // Review S3: a present-but-unusable .secscan.yml or a failed scope inventory FREEZES prior config-/scope-
+        // derived triage (no revoke, no unignore). Surface each as a visible scan_warning so the operator sees
+        // that those sources were skipped this scan — every other triage source still runs.
+        if (parsed.config() != null && parsed.config().frozen()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SECSCAN_CONFIG_INVALID",
+                    ".secscan.yml was present but could not be read or parsed; its prior ignores were frozen "
+                            + "(not revoked) this scan.", null));
+        }
+        if (parsed.scopeInventoryFailed()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SCOPE_INVENTORY_FAILED",
+                    "The dev/test scope inventory failed; prior dev/test auto-ignores were frozen this scan.",
+                    null));
+        }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
         }
@@ -142,7 +155,8 @@ public class ScanStateService {
         boolean epssAutoIgnore = workspaces.findById(workspaceId)
                 .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
         com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
-                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore);
+                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore,
+                parsed.scopeInventoryFailed());
         reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {

@@ -51,6 +51,7 @@ class ConfinementTest(unittest.TestCase):
             self.assertTrue(r["present"])
             self.assertIn("SECSCAN_CONFIG_SYMLINK", _codes(r))
             self.assertEqual(r["excludePaths"], [])  # never read
+            self.assertEqual(r["status"], "error")  # review S3: a refused config freezes, never un-suppresses
 
     def test_config_resolving_outside_clone_is_refused(self):
         # A regular (non-symlink) .secscan.yml cannot resolve outside; this proves the realpath guard via a
@@ -125,6 +126,15 @@ class YamlParseTest(unittest.TestCase):
             self.assertEqual(r["ignoreCves"], {"CVE-2025-22869": "Only used in an offline build tool"})
             self.assertFalse(r["includeDevDependencies"])
             self.assertEqual(r["warnings"], [])
+            self.assertEqual(r["status"], "ok")  # review S3: a valid config is not frozen
+
+    def test_parse_error_sets_status_error_for_freeze(self):
+        # review S3: a present-but-unparseable config signals status=error so the worker FREEZES prior state.
+        with tempfile.TemporaryDirectory() as root:
+            _write_config(root, "exclude: !!python/object/apply:os.system ['x']\n")
+            r = secscan_config._parse(root)
+            self.assertTrue(r["present"])
+            self.assertEqual(r["status"], "error")
 
     def test_malicious_python_tag_does_not_execute(self):
         # safe_load must refuse a !!python/object tag (YAMLError), never instantiate it. Proves D-057.

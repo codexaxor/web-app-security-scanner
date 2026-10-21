@@ -21,20 +21,26 @@ import java.util.Map;
  * <p>None of these are fingerprint inputs; they are triage attributes recomputed every scan.
  */
 public record TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
-                            boolean epssAutoIgnoreEnabled) {
+                            boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed) {
 
     private static final String SEP = "\u0000";
     private static final TriageContext EMPTY =
-            new TriageContext(SecscanConfig.absent(), List.of(), false, false);
+            new TriageContext(SecscanConfig.absent(), List.of(), false, false, false);
 
     public TriageContext {
         config = config == null ? SecscanConfig.absent() : config;
         declaredScopes = declaredScopes == null ? List.of() : List.copyOf(declaredScopes);
     }
 
+    /** 4-arg (scope inventory OK) for the common case. */
+    public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
+                         boolean epssAutoIgnoreEnabled) {
+        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, false);
+    }
+
     /** Back-compatible 3-arg (EPSS toggle off) for callers predating the LOW_EPSS wiring. */
     public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev) {
-        this(config, declaredScopes, effectiveIncludeDev, false);
+        this(config, declaredScopes, effectiveIncludeDev, false, false);
     }
 
     /** No config, no declared scopes, dev deps not included (existing callers/tests). */

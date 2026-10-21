@@ -1,6 +1,7 @@
 package com.company.secscan.issue;
 
 import com.company.secscan.scan.parse.SecscanConfig;
+import com.company.secscan.triage.ReasonCode;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,7 +59,16 @@ public class TriageApplier {
     public Set<UUID> applyAtReconcile(UUID workspaceId, UUID repositoryId, UUID scanId, TriageContext triage,
                                       Set<String> incomingFps, Set<String> solvableScanners,
                                       Map<String, Set<String>> sastRuleIdsByFile) {
-        materializeSecscanCveRules(workspaceId, repositoryId, triage.config());
+        // Review S3 freeze: a present-but-unusable .secscan.yml or a failed scope inventory must not revoke or
+        // unignore anything it governed. A frozen config SKIPS the CVE revoke lifecycle (its materialized rules
+        // persist, so their findings stay IGNORE_RULE) and the exclude.paths are dropped from the auto-context so
+        // no NEW config-path ignore is created; the unignore guard below then also leaves prior config-/scope-
+        // derived ignores untouched. Every other triage source still runs.
+        boolean configFrozen = triage.config().frozen();
+        boolean scopeFrozen = triage.scopeInventoryFailed();
+        if (!configFrozen) {
+            materializeSecscanCveRules(workspaceId, repositoryId, triage.config());
+        }
 
         List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
         Map<UUID, String> groupKeyById = new HashMap<>();
@@ -66,7 +76,7 @@ public class TriageApplier {
             groupKeyById.put(g.getId(), g.getGroupKey());
         }
 
-        TriageResolver.AutoContext ctx = autoContext(triage, sastRuleIdsByFile);
+        TriageResolver.AutoContext ctx = autoContext(triage, sastRuleIdsByFile, configFrozen);
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId)) {
             if (SubIssue.STATUS_SOLVED.equals(sub.getStatus())) {
@@ -89,6 +99,9 @@ public class TriageApplier {
                     subIssues.save(sub);
                 }
             } else if (ignored) {
+                if (isFrozenReason(sub, configFrozen, scopeFrozen)) {
+                    continue; // S3: the source that ignored it is unusable this scan — leave it ignored
+                }
                 String newStatus = reconcileStatus(sub, incomingFps, solvableScanners);
                 sub.unignore(newStatus);
                 subIssues.save(sub);
@@ -136,11 +149,28 @@ public class TriageApplier {
      * rule-ids-per-file (duplicate-rule), and the workspace EPSS toggle.
      */
     private static TriageResolver.AutoContext autoContext(TriageContext triage,
-                                                          Map<String, Set<String>> sastRuleIdsByFile) {
+                                                          Map<String, Set<String>> sastRuleIdsByFile,
+                                                          boolean configFrozen) {
         SecscanConfig config = triage.config();
-        List<String> extraPaths = config.present() ? config.excludePaths() : List.of();
+        // A frozen config contributes no exclude.paths (S3) — no NEW config-path ignore while it is unusable.
+        List<String> extraPaths = (config.present() && !configFrozen) ? config.excludePaths() : List.of();
         return new TriageResolver.AutoContext(extraPaths, triage.effectiveIncludeDev(), triage::scopeOf,
                 sastRuleIdsByFile, triage.epssAutoIgnoreEnabled());
+    }
+
+    /**
+     * True when a currently-ignored finding's reason came from a source frozen this scan (S3), so it must be left
+     * ignored rather than unignored: a config-derived {@code EXCLUDED_PATH} while the config is frozen, or a
+     * scope-derived {@code DEV_DEPENDENCY}/{@code TEST_SCOPE} while the scope inventory failed. (A default-glob
+     * EXCLUDED_PATH still resolves to a desired, so it never reaches the unignore branch anyway.)
+     */
+    private static boolean isFrozenReason(SubIssue sub, boolean configFrozen, boolean scopeFrozen) {
+        String reason = sub.getIgnoreReason();
+        if (configFrozen && ReasonCode.EXCLUDED_PATH.code().equals(reason)) {
+            return true;
+        }
+        return scopeFrozen && (ReasonCode.DEV_DEPENDENCY.code().equals(reason)
+                || ReasonCode.TEST_SCOPE.code().equals(reason));
     }
 
     /** True when the sub is ignored under a different reason/rule than now desired (refresh, no status change). */
