@@ -14,6 +14,103 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-062 SAST ignores match on (rule_id, file_path), snippet-independent (2026-10-21, accepted)
+Context: an M7 manual ignore of a SAST finding must survive a snippet re-fingerprint (D-053: a substantive edit
+to the matched lines yields a new fingerprint, so the old sub-issue solves and a new one opens). Keying the
+ignore on the full fingerprint would lose the ignore across such a churn.
+Decision: a SAST ignore (`scope=subissue` or `scope=rule` resolving to a SAST finding) matches on
+`(rule_id, file_path)`, NOT on the fingerprint — snippet-independent. So a re-fingerprinted finding for the same
+rule+file stays ignored. The SAST fingerprint itself is UNCHANGED (`rule_id | file_path | normalized_snippet_hash`,
+D-053 intact); the match key is a triage concern only, never a fingerprint input. Implemented in
+`core.triage.IgnoreMatcher`; proven by `SastIgnoreChurnIT`.
+Consequences: SAST ignores are stable across cosmetic/substantive snippet edits; no fingerprint change.
+
+## D-061 Duplicate SAST rule auto-triage via a curated winner map (2026-10-21, accepted)
+Context: a custom Spring/.NET rule and a stock opengrep-rules rule can both flag the same weakness (the M6 CSRF
+case), yielding two sub-issues for one finding. We will not merge across rules or change any fingerprint.
+Decision: both rules keep firing. A CURATED map `{stock rule id -> winning custom rule id}`
+(`core.triage.DuplicateRuleMap`, seeded with the CSRF pair) auto-ignores the LOSER as `DUPLICATE_RULE` when the
+winner is present for the same `file_path` in the SAME scan. No cross-rule merge, no fingerprint change. The
+stock rule id is seeded from REAL Opengrep output (the M6 `sast-custom` fixture / manual check), never guessed;
+if it cannot be confirmed from existing output it is captured in the manual check before seeding. Cleared via its
+cause at reconcile (winner no longer present → the loser is unignored with a triage_event). Proven by
+`DuplicateRuleIT`.
+Consequences: one sub-issue surfaces per duplicated weakness; the map is maintained as rules evolve.
+
+## D-060 EPSS toggle: a LOW_EPSS status path plus scoring-only tiers (2026-10-21, accepted)
+Context: SPEC makes EPSS adjustments opt-in (off by default); M5 stored EPSS but applied nothing (D-047).
+Decision: an `epssAutoIgnoreEnabled` flag lives in `workspace.settings` (jsonb), default OFF. When ON:
+- `EPSS < 1% AND not on KEV` → auto-ignore `LOW_EPSS` — a real STATUS change at reconcile / on-toggle, with a
+  `triage_event` (NOT the score-only re-score path);
+- `EPSS < 5%` → −10 and `5–10%` → −5 are SCORING-ONLY (the normal `Scoring` + `ReScoreService`, no status change,
+  no `triage_event`). The two tiers never double-apply (strict bands: <1% is LOW_EPSS, [1%,5%) is −10, [5%,10%)
+  is −5, ≥10% no adjustment).
+Re-evaluated on the next scan and on toggle (toggle OFF clears LOW_EPSS via its cause + re-scores). A KEV-listed
+low-EPSS CVE is never auto-ignored. EPSS stays a descriptive, NON-fingerprint input (D-051). `core.triage.EpssPolicy`
+holds the boundaries; `core.scoring.Scoring`/`ScoreInput` gain `epss` + `epssAdjustmentsEnabled` (additive).
+Proven by `EpssPolicyTest`, `ScoringTest`, `EpssToggleIT`.
+Consequences: EPSS noise reduction is available and audited; scoring tiers and the status path are kept separate.
+
+## D-059 Auto-triage reason codes; dev/test scope read from DECLARED scope (2026-10-21, accepted)
+Context: M4 (D-035 Q2) left npm devDependencies / Gradle test configs / Maven test scope un-excluded because OSV
+exposes no dependency-group marker. M7 adds the auto-triage layer and finally wires `repository.include_dev_deps`
+(a no-op until now).
+Decision: reason codes — `EXCLUDED_PATH` (SPEC default globs `node_modules/ vendor/ dist/ build/ target/ bin/
+obj/` + minified files, plus `.secscan.yml` paths); `SECRET_PLACEHOLDER` (`changeme` / `example` / `*.example`);
+`DEV_DEPENDENCY` / `TEST_SCOPE` from the DECLARED scope read by our OWN inventory/resolver (Maven test scope,
+Gradle test configurations, npm devDependencies); `IGNORE_RULE` (manual + `.secscan.yml` CVE); `LOW_EPSS` (D-060);
+`DUPLICATE_RULE` (D-061). The scope marker is a TRIAGE ATTRIBUTE ONLY — never a fingerprint input.
+- **Precedence (review change #3):** `effective_include_dev = repository.include_dev_deps OR .secscan.yml
+  include_dev_dependencies`. The file may only INCREASE visibility (turn inclusion ON), never force-hide a dep
+  below the SecScan repository setting. Dev/test auto-ignore applies ONLY when `effective_include_dev == false`.
+- Where scope CANNOT be determined (e.g. an OSV transitive with no declared scope) the finding STAYS VISIBLE —
+  we mark only what is confidently dev/test.
+Every auto-ignore writes a `triage_event` (actor=system). This extends CLAUDE.md hard rule 5's list with
+`DUPLICATE_RULE`. Pure logic in `core.triage` (`PathExclusion`, `SecretPlaceholder`, `ReasonAssignment`).
+Consequences: dev/test noise is suppressed only on a declared, auditable basis; `repository.include_dev_deps` is
+finally functional; unclassifiable findings are never silently hidden.
+
+## D-058 Manual ignore model: ignore_rule (V17) applied through reconcile (2026-10-21, accepted)
+Context: SPEC "Manual ignore scopes" (sub-issue, group, path prefix per repo, CVE global/per-repo, rule id
+global/per-repo), each with a reason; D-029 noted bulk/manual ignore arrives in M7.
+Decision: V17 (additive) creates `ignore_rule` (`id, workspace_id, scope in {subissue,group,path,cve,rule},
+repository_id NULL=global, match_value, reason NOT NULL, created_by, created_at`) plus nullable
+`sub_issue.ignored_by_rule_id` and `sub_issue.ignored_at`. `ignored_by_rule_id` is `ON DELETE SET NULL` (review
+change #2) so deleting a rule never deletes the finding. Apply/remove runs through reconcile: a match →
+`ignored` + `triage_event`; unignore → the finding returns to the RECONCILE-COMPUTED status (open/solved) +
+`triage_event`. An active rule keeps a finding ignored when seen again (hard rule 6). `sub_issue.ignore_reason`
+stores the reason CODE; the human reason comes from `ignore_rule.reason` via `ignored_by_rule_id`. `workspace_id`
+on the table and every query. Unignore status is computed by `TriageStatusResolver` keyed on the latest scan
+where the finding's SCANNER SUCCEEDED (a failed/absent scanner closes nothing → returns to OPEN, review
+change #4). Manual unignore applies to MANUAL ignores; auto-ignores clear via their cause (review change #10).
+Consequences: full manual triage with an audit trail; one new table + two nullable columns.
+
+## D-057 `.secscan.yml` honored but AUDITED, parsed in-container, with a revoke lifecycle (2026-10-21, accepted)
+Context: a carve-out of D-037 (in-repo suppressors ignored). The SPEC `.secscan.yml` lets a repo owner exclude
+paths, ignore specific CVEs (with a reason) and opt into dev dependencies — but for a security product every
+suppression must be surfaced and audited, never a silent drop.
+Decision: `.secscan.yml` is optional, owner-authored, needs no repo change (D-030). It is read IN THE SCANNER
+CONTAINER (review change #9 — never copied to `/out`, which would reintroduce the M6 symlink-exfil risk), parsed
+to a bounded JSON that leaves via `/out`, and the WORKER applies it at triage step 9:
+- `exclude.paths` → `EXCLUDED_PATH`; `ignore.cves{reason}` → `IGNORE_RULE` (repo reason shown, materialized as an
+  idempotent system `ignore_rule` row, `created_by='secscan.yml'`, `scope=cve`, repo-scoped);
+  `include_dev_dependencies` feeds the D-059 precedence. Every suppression sets `ignored` + writes a
+  `triage_event` (actor=system) and is visible in the Ignored view.
+- **Parser hardening (review change #1 — the M6 symlink→token-leak class):** `scanner-image/secscan_config.py`,
+  `python3 -I`, stdlib + **PyYAML `yaml.safe_load` ONLY** (never `yaml.load`/full loader), no network, data-only
+  (no import/exec of repo content). Symlink-safe + realpath-confined to the checkout (a symlinked `.secscan.yml`,
+  or one resolving outside the clone, is refused with a warning). WHITELIST + BOUND what leaves via `/out`: only
+  `exclude.paths`, `ignore.cves{reason}`, `include_dev_dependencies`, with caps on count and string length;
+  unknown/oversized keys dropped with a warning; raw file bytes never echoed to `/out`.
+- **Revoke lifecycle (review change #2):** each scan reconciles the `.secscan.yml` system rules to the CURRENT
+  file — add new, REVOKE any whose cve/path is gone (clear-then-delete in the same tx, or `ON DELETE SET NULL`),
+  and re-evaluate (unignore) the affected findings with a `triage_event`.
+- **PyYAML** is pinned reproducibly in the scanner image (recorded here); `safe_load`-only is a guarded invariant.
+Proven by `SecscanYmlIT` (honored + surfaced-not-dropped, and removal re-evaluates) and `SecscanConfigParseTest`
+(host, python: safe_load, symlink refusal, whitelist/caps).
+Consequences: one audited carve-out of D-037; one new pinned image dependency (PyYAML); the config can only add
+visibility or add an audited, revocable suppression — never weaken a scan silently.
+
 ## D-056 Opengrep needs a dedicated exec-able tmpfs — a bounded hardening carve-out (2026-10-20, accepted)
 Context: Opengrep 1.31.0 (musllinux) is a PyInstaller single-file binary that, on every run, unpacks its own
 interpreter + `opengrep-core` under `$HOME` and execs the core. The scanner's `/work` tmpfs is `noexec` (so no
