@@ -107,3 +107,16 @@ Reusable SeverityBadges + ScanButton + RepoSettingsDialog + WarningsDrawer; lib/
 - Problems hit: (a) a new "Select repositories" link made `name: "Repositories"` ambiguous → `exact: true` on
   the nav-link selectors; (b) the Start-Scan test mutated a repo's last-scan (newest → 0 warnings), which the
   warnings test depended on → enqueue on web-portal so core-keycloak's warning row is untouched.
+
+### S5 — Feed ✓
+Feed page: summary bar (Grouped issues with a segmented severity bar + band counts; New / Solved / Auto-ignored
+in the last 7 days), a Focus/All toggle, and type / severity / repository / include-inactive filters — all bound
+to URL query params (shareable, back-button friendly). Server-side pagination (next/prev), default sort from the
+server (severity desc NULLS LAST). Rows show type, title + subtitle, severity, repository path, fix time, and the
+New(<7d)/To Do/Ignored status derived from the group's first_seen_at. A row opens /feed/:groupId (a minimal side
+panel for now; S6 completes it).
+
+- Tests: `e2e feed.spec` — summary counts UI = API = SQL (totalGroups, bands, 7-day New/Solved/Auto-ignored),
+  Focus vs All (ignored groups appear only in All), >50 server-side pagination for core-keycloak (64 groups →
+  50 + 14), default severity-desc sort, type filter, New/To-Do at the 7-day boundary (fresh bulk group = New,
+  30-day inactive group = To Do under Include inactive).
