@@ -14,6 +14,34 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-064 Default-dir/minified path exclusion does not apply to secret findings (2026-10-21, accepted)
+Context: M7 review. The SPEC default exclusions (`node_modules/ vendor/ dist/ build/ target/ bin/ obj/` and
+`*.min.js`/`*.min.css`) are noise-reduction for SCA/SAST/IaC, but a leaked CREDENTIAL in one of those paths (a key
+checked into `dist/`, a token in a minified bundle) is still a real exposure that must not be auto-hidden.
+Decision: the SPEC default dirs + minified-file rules are NOT applied to `type=secret` findings. An EXPLICIT
+`.secscan.yml exclude.paths` entry still applies to every type (the repo owner's audited, revocable choice).
+Implemented via `PathExclusion.isExcluded(path, extraPrefixes, applyDefaults)` with `applyDefaults=!secret` in
+`TriageApplier`. Proven by `PathExclusionTest` + `SecretPathExclusionIT` (a key in `dist/app.js` stays OPEN; the
+same key under an excluded path is ignored EXCLUDED_PATH).
+Consequences: secrets in build/vendor/minified output are never silently suppressed by defaults; a repo can still
+exclude a path explicitly, and that stays audited.
+
+## D-063 One desired-ignore-state resolver with a fixed precedence (2026-10-21, accepted)
+Context: M7 review. Ignore state was computed in two places (reconcile and the API) with the precedence expressed
+both as a hand-ordered if/else chain and as the `ReasonCode` enum order — two sources of truth that could drift,
+and the API path could not keep a finding ignored when another cause still applied.
+Decision: a SINGLE resolver (`TriageResolver`) computes `(status, reason_code, rule_id)` from ALL causes with ONE
+precedence — `ReasonCode` declaration order, applied once via `ReasonAssignment.highest` (no duplicate ordering
+logic). It is used by reconcile (`TriageApplier`), the API (`TriageService`) and the EPSS sweep
+(`WorkspaceSettingsService`). A manual/`.secscan.yml` `IGNORE_RULE` outranks every auto cause; among matching
+rules the earliest `(created_at, id)` is the holder. A new rule over an auto-ignored finding quietly re-points
+`ignored_by_rule_id` (no event); `removeRule` re-resolves and keeps a finding ignored when another rule or an
+API-visible auto cause (path exclusion, secret placeholder, LOW_EPSS) still applies (quiet, no event), else
+unignores to the last-succeeded-scan status (never solves on API evidence). Scan-time-only auto causes (config
+paths, dev/test scope, duplicate rule) are re-applied by the next reconcile. CLAUDE.md domain rule 3 references
+this. Proven by `IgnoreScopeIT`, `UnignoreIT`, `TriagePrecedenceIT`, `TriageStabilityIT`.
+Consequences: identical ignore state however reached; one precedence authority (`ReasonCode` + `ReasonAssignment`).
+
 ## D-062 SAST ignores match on (rule_id, file_path), snippet-independent (2026-10-21, accepted)
 Context: an M7 manual ignore of a SAST finding must survive a snippet re-fingerprint (D-053: a substantive edit
 to the matched lines yields a new fingerprint, so the old sub-issue solves and a new one opens). Keying the
@@ -50,6 +78,12 @@ low-EPSS CVE is never auto-ignored. EPSS stays a descriptive, NON-fingerprint in
 holds the boundaries; `core.scoring.Scoring`/`ScoreInput` gain `epss` + `epssAdjustmentsEnabled` (additive).
 Proven by `EpssPolicyTest`, `ScoringTest`, `EpssToggleIT`.
 Consequences: EPSS noise reduction is available and audited; scoring tiers and the status path are kept separate.
+Amendment (review S1, 2026-10-22): the scoring tiers are STRICT bands that defer to the status path —
+`scoreDelta(epss, onKev)` returns 0 for a non-KEV finding below 1% (the LOW_EPSS status auto-ignore owns it, so
+the score is not also docked), while a KEV finding below 1% (never status-ignored) keeps the −10 tier. Bands:
+non-KEV <1% → 0; `[1%,5%)` and KEV `<5%` → −10; `[5%,10%)` → −5; ≥10% → 0 (`0.0099→0`, `0.01→−10`, `0.05→−5`,
+`0.10→0`). The SPEC "no PoC" clause on the LOW_EPSS auto-ignore is DEFERRED until a PoC feed exists (open item
+N5). Proven by `EpssPolicyTest` + `ScoringTest`.
 
 ## D-059 Auto-triage reason codes; dev/test scope read from DECLARED scope (2026-10-21, accepted)
 Context: M4 (D-035 Q2) left npm devDependencies / Gradle test configs / Maven test scope un-excluded because OSV
@@ -69,6 +103,17 @@ Every auto-ignore writes a `triage_event` (actor=system). This extends CLAUDE.md
 `DUPLICATE_RULE`. Pure logic in `core.triage` (`PathExclusion`, `SecretPlaceholder`, `ReasonAssignment`).
 Consequences: dev/test noise is suppressed only on a declared, auditable basis; `repository.include_dev_deps` is
 finally functional; unclassifiable findings are never silently hidden.
+Amendment (review B1, 2026-10-22): `SECRET_PLACEHOLDER` is decided on the FILE PATH ONLY — never the masked
+preview (`****` is the D-027 mask for any short/real secret, and a real token can begin chan/exam/plac, so a
+preview can never mark a placeholder). Placeholder paths are narrowed to `*.example`/`*.sample`/`*.template`
+suffixes and `example/`/`examples/` dirs. VALUE-based detection (e.g. the literal `changeme`) is DEFERRED; if ever
+added it MUST be computed IN-CONTAINER with only its boolean verdict leaving — the raw secret must never reach the
+app. Proven by `SecretPlaceholderTest` + `SecretPlaceholderRegressionIT`.
+Amendment (review S4, 2026-10-22): declared scope is keyed by (manifest path, coordinate), NOT a flat coordinate
+map — a finding is auto-ignored dev/test only when ITS OWN manifest declares it so. The in-container inventory
+drops any coordinate declared PRODUCTION in any manifest of the repo (repo-wide prod set), and for npm reads
+`package-lock.json` per-package `"dev"` flags (transitives); a package that is `dev:false` anywhere stays visible.
+Proven by `scope_inventory_test.py` + `DevTestScopeIT.scopeIsKeyedPerManifestNotFlat`.
 
 ## D-058 Manual ignore model: ignore_rule (V17) applied through reconcile (2026-10-21, accepted)
 Context: SPEC "Manual ignore scopes" (sub-issue, group, path prefix per repo, CVE global/per-repo, rule id
@@ -110,6 +155,13 @@ Proven by `SecscanYmlIT` (honored + surfaced-not-dropped, and removal re-evaluat
 (host, python: safe_load, symlink refusal, whitelist/caps).
 Consequences: one audited carve-out of D-037; one new pinned image dependency (PyYAML); the config can only add
 visibility or add an audited, revocable suppression — never weaken a scan silently.
+Amendment (review S3, 2026-10-22): a config that is PRESENT but could not be safely read/parsed (symlink,
+resolves-outside-clone, YAML parse error, non-map) now reports `status="error"` (`secscan_config.py`), distinct
+from a genuinely absent config. On a frozen config the worker FREEZES the prior config-derived triage — it does
+NOT revoke the materialized CVE rules and does NOT unignore the config-derived `EXCLUDED_PATH` findings — and
+raises a visible `SECSCAN_CONFIG_INVALID` scan warning; every other triage source still runs. So a transient
+refusal or a typo never silently un-suppresses every `.secscan.yml` ignore. Proven by `SecscanYmlIT`
+(`anInvalidConfigFreezesPriorIgnoresAndWritesNoTriageEventFromThatSource`).
 
 ## D-056 Opengrep needs a dedicated exec-able tmpfs — a bounded hardening carve-out (2026-10-20, accepted)
 Context: Opengrep 1.31.0 (musllinux) is a PyInstaller single-file binary that, on every run, unpacks its own

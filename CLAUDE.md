@@ -96,7 +96,9 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
    - IaC: rule id + file path + resource name
    - EOL: product + detected cycle + file path
 3. Status changes only through reconcile after a scan. Seen → open (reopen if solved). Missing from a scan where
-   its scanner succeeded → solved. Scanner failed/timed out → its findings untouched. Ignored stays ignored.
+   its scanner succeeded → solved. Scanner failed/timed out → its findings untouched. Ignored stays ignored. The
+   ignore state (status, reason code, holding rule) is computed by the single desired-state resolver with one
+   fixed precedence, used by reconcile and the API alike (D-063).
 4. Every status change writes a `triage_event` (actor, reason code, scan id).
 5. Every auto-ignore has a reason code: `DEV_DEPENDENCY`, `TEST_SCOPE`, `EXCLUDED_PATH`, `SECRET_PLACEHOLDER`,
    `LOW_EPSS`, `IGNORE_RULE`, `DUPLICATE_RULE` (D-061, M7).
