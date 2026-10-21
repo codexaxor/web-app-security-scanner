@@ -11,12 +11,12 @@ G3 `npm run e2e` (S0, S3–S9; S1/S2 run the existing-screens smoke); G4 clean g
 | # | Change | Slice | Commit | Closed by (named test) |
 |---|---|---|---|---|
 | 1 | Repo activation rules + 409s | S1 | S1 | `RepositorySettingsIT` (round trip; detached→409 unchanged; scan-on-inactive→409 no scan) |
-| 2 | includeInactive default false (feed/summary/dashboard) | S2 | _pending_ | _pending_ |
-| 3 | 7-day counts: type+repo filters only, New=created_at<7d | S2 | _pending_ | _pending_ |
+| 2 | includeInactive default false (feed/summary/dashboard) | S2 | S2 | `FeedSearchIT`, `DashboardSummaryIT` (inactive excluded + line) |
+| 3 | 7-day counts: type+repo filters only, New=created_at<7d | S2 | S2 | `FeedSummaryIT` (window boundary; view-independent) |
 | 4 | nginx headers `always` + all locations | S0 | S0 | `e2e security.spec.ts` (5 cases: /, deep link, asset, 404, /api) |
 | 5 | rescoreRepository same lock/guard + concurrency test | S1 | S1 | `SensitivityRescoreIT`, `SensitivityRescoreConcurrencyIT` |
 | 6 | pin node + playwright by digest; pw non-root, no socket | S0 | S0 | `ui/Dockerfile` digest; `e2e/run-e2e.mjs` (pwuser, no socket, ro mount) |
-| 7 | workspace-2 complete seed dataset | S0/S2 | S0 (scaffold) | `e2e/fixtures/seed.sql` (full set in S2) |
+| 7 | workspace-2 complete seed dataset | S0/S2 | S2 | `e2e/fixtures/seed.sql` (complete ws2 + ws1; oracle in S4+) |
 | 8 | path-scope ignore matches IgnoreMatcher format | S6 | _pending_ | _pending_ |
 | 9 | error handler: no stack traces; 401 entrypoint unchanged | S1 | S1 | `ApiErrorBodyIT` (400/404/409 shape, no trace; 401 no WWW-Authenticate) |
 | 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | S0,S1 | `ScanCreatedAtIT` (R1/R4); route restore in S3 |
@@ -58,3 +58,24 @@ entrypoint is unchanged.
   `ScanCreatedAtIT`, `RepositorySummaryIT` (= direct SQL + workspace isolation), `ApiErrorBodyIT`.
 - Problem: `createRule` returned a null createdAt (plain `save` defers the INSERT so `@Generated(INSERT)` had
   nothing to read) — fixed to `saveAndFlush` (the proven `ScanEnqueuer` pattern).
+
+### S2 — Backend reads part 2 (feed, summary, events, panel rule fields, dashboard) ✓
+OD-14 item 3: `GET /issue-groups` gains `view=focus|all`, severity `band`, `repositoryPath` per row, the
+documented sort (`severity_score desc NULLS LAST, first_seen_at desc, id desc`) and `includeInactive`
+(default false, change 2). Item 4: `GET /issue-groups/summary` — band group counts + last-7-day
+New/Solved/Auto-ignored as distinct findings, honouring type+repo only, not band/view (change 3). Item 5:
+`GET /sub-issues/{id}/events`. Item 6: `SubIssueView` gains `ignoreRuleId/ruleScope/ruleReason/ruleCreatedBy`
+(null for auto causes/open). Item 7: `GET /dashboard/summary` (group + finding bands, type breakdown, scan
+health, inactive line). All counts in SQL (JPQL aggregates), workspace-scoped, inactive excluded by default.
+
+- The old M3 `IssueService.listGroups(repo,type,status,…)` raw-status filter is replaced by the feed
+  semantics (solved never shown); `IssueApiIT` updated to the new contract (not weakened — a documented
+  behaviour change, OD-14).
+- change 7: `ui/e2e/fixtures/seed.sql` now carries the complete fixture set — 64 bulk groups (forces
+  pagination > 50), every type/band, every reason code, KEV+EPSS/secret(4-char)/XSS-probe rows, manual+global+
+  secscan.yml rules, scans completed/partial/failed with warnings, triage_events in/out of 7 days, an inactive
+  repo with an open finding, and a COMPLETE workspace 2 that must never leak. The UI oracle asserts against it
+  from S4.
+- Tests: `FeedSearchIT`, `FeedSummaryIT`, `SubIssuePanelIT`, `DashboardSummaryIT` (all = direct SQL + workspace
+  isolation), updated `IssueApiIT`. Gate: `./gradlew clean build --rerun-tasks`; e2e smoke (seed applies,
+  api rebuilt).

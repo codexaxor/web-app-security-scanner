@@ -60,23 +60,25 @@ class IssueApiIT extends AbstractGitLabIT {
     }
 
     @Test
-    void listGroupsFiltersByRepositoryTypeAndStatus() {
+    void listGroupsFiltersByRepositoryTypeAndViewExcludingSolved() {
         Repository repoA = seedRepository(401L, "svc/a");
         Repository repoB = seedRepository(402L, "svc/b");
-        seedGroup(repoA.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token");
+        seedGroup(repoA.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token"); // open
         IssueGroup solvedGroup = seedGroup(repoA.getId(), "sast", "sast|rule-x", "Rule X");
         solvedGroup.setStatus(IssueGroup.STATUS_SOLVED);
         groups.save(solvedGroup);
-        seedGroup(repoB.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token");
+        seedGroup(repoB.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token"); // open
 
-        // Filter by repository.
-        assertThat(service.listGroups(repoA.getId(), null, null, 0, 50).content()).hasSize(2);
+        // Focus view: solved is never shown, so repoA has just its one open secret group.
+        assertThat(service.listGroups(repoA.getId(), null, "focus", null, false, 0, 50).content()).hasSize(1);
         // Filter by type.
-        assertThat(service.listGroups(repoA.getId(), "secret", null, 0, 50).content()).hasSize(1);
-        // Filter by status.
-        assertThat(service.listGroups(repoA.getId(), null, "solved", 0, 50).content()).hasSize(1);
-        // No filter: both repos' groups (3 total).
-        assertThat(service.listGroups(null, null, null, 0, 50).totalElements()).isEqualTo(3);
+        assertThat(service.listGroups(repoA.getId(), "secret", "focus", null, false, 0, 50).content()).hasSize(1);
+        assertThat(service.listGroups(repoA.getId(), "sast", "focus", null, false, 0, 50).content()).isEmpty();
+        // No repo filter: both repos' OPEN groups (solved excluded) = 2.
+        assertThat(service.listGroups(null, null, "focus", null, false, 0, 50).totalElements()).isEqualTo(2);
+        // repositoryPath is populated on each row (OD-14 item 3).
+        assertThat(service.listGroups(repoA.getId(), null, "focus", null, false, 0, 50).content().get(0)
+                .repositoryPath()).isEqualTo("svc/a");
     }
 
     @Test
@@ -85,7 +87,7 @@ class IssueApiIT extends AbstractGitLabIT {
         for (int i = 0; i < 5; i++) {
             seedGroup(repo.getId(), "secret", "secret|rule-" + i, "Exposed rule-" + i);
         }
-        var firstPage = service.listGroups(repo.getId(), null, null, 0, 2);
+        var firstPage = service.listGroups(repo.getId(), null, "focus", null, false, 0, 2);
         assertThat(firstPage.content()).hasSize(2);
         assertThat(firstPage.totalElements()).isEqualTo(5);
         assertThat(firstPage.totalPages()).isEqualTo(3);

@@ -29,6 +29,59 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** One sub-issue by id, workspace-scoped — the side panel / events endpoints (OD-14 items 5/6). */
     java.util.Optional<SubIssue> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
+    /**
+     * Feed-summary "New in last 7 days" (OD-14 item 4, change 3): distinct sub-issues first seen (row created)
+     * since {@code since}, honouring type + repository filters only (not band, not view) and excluding inactive
+     * repositories' findings unless {@code includeInactive}. A reopened finding keeps its original created_at, so
+     * it is not counted as New.
+     */
+    @Query("""
+            select count(distinct s.id)
+            from SubIssue s, com.company.secscan.repository.Repository r
+            where s.workspaceId = :ws and r.id = s.repositoryId and s.createdAt >= :since
+              and (:repositoryId is null or s.repositoryId = :repositoryId)
+              and (:type is null or s.type = :type)
+              and (:includeInactive = true or r.active = true)
+            """)
+    long countNewSince(@Param("ws") UUID ws, @Param("repositoryId") UUID repositoryId,
+                       @Param("type") String type, @Param("includeInactive") boolean includeInactive,
+                       @Param("since") java.time.Instant since);
+
+    /** Dashboard (OD-14 item 7): OPEN sub-issue counts by severity band. Returns [critical, high, medium, low,
+     *  total]. Excludes inactive repositories' findings unless {@code includeInactive} (change 2). */
+    @Query("""
+            select
+              sum(case when s.score >= 90 then 1 else 0 end),
+              sum(case when s.score >= 70 and s.score < 90 then 1 else 0 end),
+              sum(case when s.score >= 40 and s.score < 70 then 1 else 0 end),
+              sum(case when s.score >= 1  and s.score < 40 then 1 else 0 end),
+              count(s)
+            from SubIssue s, com.company.secscan.repository.Repository r
+            where s.workspaceId = :ws and r.id = s.repositoryId and s.status = 'open'
+              and (:includeInactive = true or r.active = true)
+            """)
+    java.util.List<Object[]> openBandCounts(@Param("ws") UUID ws,
+                                            @Param("includeInactive") boolean includeInactive);
+
+    /** Dashboard: OPEN sub-issue counts grouped by type. Returns rows of [type, count]. */
+    @Query("""
+            select s.type, count(s)
+            from SubIssue s, com.company.secscan.repository.Repository r
+            where s.workspaceId = :ws and r.id = s.repositoryId and s.status = 'open'
+              and (:includeInactive = true or r.active = true)
+            group by s.type
+            """)
+    java.util.List<Object[]> openCountsByType(@Param("ws") UUID ws,
+                                              @Param("includeInactive") boolean includeInactive);
+
+    /** Dashboard inactive line: OPEN findings that sit in inactive repositories (not scanned, excluded by default). */
+    @Query("""
+            select count(s)
+            from SubIssue s, com.company.secscan.repository.Repository r
+            where s.workspaceId = :ws and r.id = s.repositoryId and s.status = 'open' and r.active = false
+            """)
+    long countOpenInInactiveRepos(@Param("ws") UUID ws);
+
     /** Every sub-issue in a workspace — a manual ignore rule with no repository scope applies across all repos. */
     List<SubIssue> findByWorkspaceId(UUID workspaceId);
 

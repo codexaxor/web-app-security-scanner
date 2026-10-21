@@ -28,6 +28,9 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
 
     List<Repository> findByWorkspaceIdAndConnectionId(UUID workspaceId, UUID connectionId);
 
+    /** Count of inactive repositories — the dashboard inactive line (OD-14 item 7). */
+    long countByWorkspaceIdAndActive(UUID workspaceId, boolean active);
+
     // --- Repositories-screen rollups (OD-14 item 1). All counts computed in SQL, workspace-scoped. Rows are
     // Object[]: [repository_id (UUID), ...]. The service assembles them into a per-repo summary. ---
 
