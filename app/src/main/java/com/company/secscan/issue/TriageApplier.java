@@ -1,13 +1,6 @@
 package com.company.secscan.issue;
 
-import com.company.secscan.finding.RawFinding;
 import com.company.secscan.scan.parse.SecscanConfig;
-import com.company.secscan.triage.DuplicateRuleMap;
-import com.company.secscan.triage.EpssPolicy;
-import com.company.secscan.triage.IgnoreMatcher;
-import com.company.secscan.triage.PathExclusion;
-import com.company.secscan.triage.ReasonCode;
-import com.company.secscan.triage.SecretPlaceholder;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -48,7 +41,6 @@ public class TriageApplier {
     private final SubIssueRepository subIssues;
     private final IssueGroupRepository groups;
     private final TriageEventRepository events;
-    private final DuplicateRuleMap duplicateRules = DuplicateRuleMap.defaults();
 
     public TriageApplier(IgnoreRuleRepository ignoreRules, SubIssueRepository subIssues,
                          IssueGroupRepository groups, TriageEventRepository events) {
@@ -56,10 +48,6 @@ public class TriageApplier {
         this.subIssues = subIssues;
         this.groups = groups;
         this.events = events;
-    }
-
-    /** A desired ignore for one sub-issue: the reason code plus the holding rule id (null for a cause-based auto). */
-    private record Desired(String reasonCode, UUID ruleId) {
     }
 
     /**
@@ -78,10 +66,14 @@ public class TriageApplier {
             groupKeyById.put(g.getId(), g.getGroupKey());
         }
 
+        TriageResolver.AutoContext ctx = autoContext(triage, sastRuleIdsByFile);
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId)) {
-            Desired desired = resolveDesired(sub, rules, triage, groupKeyById.get(sub.getGroupId()),
-                    sastRuleIdsByFile);
+            if (SubIssue.STATUS_SOLVED.equals(sub.getStatus())) {
+                continue; // N4: auto-ignore evaluates only non-solved findings — a solved finding stays solved
+            }
+            TriageResolver.Desired desired =
+                    TriageResolver.resolve(sub, groupKeyById.get(sub.getGroupId()), rules, ctx);
             boolean ignored = SubIssue.STATUS_IGNORED.equals(sub.getStatus());
             if (desired != null) {
                 if (!ignored) {
@@ -138,72 +130,21 @@ public class TriageApplier {
         }
     }
 
-    private Desired resolveDesired(SubIssue sub, List<IgnoreRule> rules, TriageContext triage, String groupKey,
-                                   Map<String, Set<String>> sastRuleIdsByFile) {
-        IgnoreMatcher.Finding f = new IgnoreMatcher.Finding(sub.getType(), sub.getRepositoryId(),
-                sub.getFingerprint(), groupKey, sub.getFilePath(), sub.getRuleId(), sub.getVulnId(),
-                sub.getCveAliases());
-        // A matching ignore_rule (manual or .secscan.yml) wins — IGNORE_RULE (highest precedence).
-        for (IgnoreRule r : rules) {
-            if (IgnoreMatcher.matches(new IgnoreMatcher.Rule(r.getScope(), r.getRepositoryId(), r.getMatchValue()),
-                    f)) {
-                return new Desired(ReasonCode.IGNORE_RULE.code(), r.getId());
-            }
-        }
-        ReasonCode auto = autoReason(sub, triage, sastRuleIdsByFile);
-        return auto == null ? null : new Desired(auto.code(), null);
-    }
-
     /**
-     * The cause-based auto-ignore reason for a sub-issue, or null, in {@link ReasonCode} precedence order (D-059):
-     * EXCLUDED_PATH (defaults + {@code .secscan.yml} paths) → SECRET_PLACEHOLDER → DUPLICATE_RULE (a stock SAST
-     * rule whose curated winner fired for the same file this scan, D-061) → DEV_DEPENDENCY/TEST_SCOPE (only when
-     * effective include-dev-deps is false, and only for a declared scope — unclassifiable deps stay visible) →
-     * LOW_EPSS (EPSS &lt; 1% and not KEV, only when the workspace EPSS toggle is on, D-060).
+     * The scan-time auto-cause context (D-063): all causes are available at reconcile — {@code .secscan.yml}
+     * exclude paths, the effective include-dev-deps, the per-(manifest,coordinate) scope lookup, this scan's SAST
+     * rule-ids-per-file (duplicate-rule), and the workspace EPSS toggle.
      */
-    private ReasonCode autoReason(SubIssue sub, TriageContext triage, Map<String, Set<String>> sastRuleIdsByFile) {
+    private static TriageResolver.AutoContext autoContext(TriageContext triage,
+                                                          Map<String, Set<String>> sastRuleIdsByFile) {
         SecscanConfig config = triage.config();
         List<String> extraPaths = config.present() ? config.excludePaths() : List.of();
-        // D-064: the SPEC default dirs + minified-file rules do NOT apply to secrets (a leaked credential in
-        // dist/ or a *.min.js is still a real exposure); an explicit .secscan.yml exclude.paths entry still does.
-        boolean applyDefaults = !RawFinding.TYPE_SECRET.equals(sub.getType());
-        if (PathExclusion.isExcluded(sub.getFilePath(), extraPaths, applyDefaults)) {
-            return ReasonCode.EXCLUDED_PATH;
-        }
-        if (RawFinding.TYPE_SECRET.equals(sub.getType())
-                && SecretPlaceholder.isPlaceholder(sub.getFilePath())) {
-            return ReasonCode.SECRET_PLACEHOLDER;
-        }
-        if (RawFinding.TYPE_SAST.equals(sub.getType())
-                && duplicateRules.shouldIgnore(sub.getRuleId(),
-                        sastRuleIdsByFile.getOrDefault(PathExclusion.normalize(sub.getFilePath()), Set.of()))) {
-            return ReasonCode.DUPLICATE_RULE;
-        }
-        if (RawFinding.TYPE_SCA.equals(sub.getType()) && !triage.effectiveIncludeDev()) {
-            // Keyed by (manifest path, coordinate), review S4: a dep is dev/test only when ITS OWN manifest
-            // declares it so. The in-container inventory already dropped any coordinate that is production in any
-            // manifest of the repo.
-            String scope = triage.scopeOf(sub.getFilePath(), sub.getPackageName());
-            if ("test".equals(scope)) {
-                return ReasonCode.TEST_SCOPE;
-            }
-            if ("dev".equals(scope)) {
-                return ReasonCode.DEV_DEPENDENCY;
-            }
-        }
-        if (triage.epssAutoIgnoreEnabled()
-                && EpssPolicy.isLowEpssAutoIgnore(epssValue(sub.getEpss()), sub.isInKev())) {
-            return ReasonCode.LOW_EPSS;
-        }
-        return null;
-    }
-
-    private static Double epssValue(java.math.BigDecimal epss) {
-        return epss == null ? null : epss.doubleValue();
+        return new TriageResolver.AutoContext(extraPaths, triage.effectiveIncludeDev(), triage::scopeOf,
+                sastRuleIdsByFile, triage.epssAutoIgnoreEnabled());
     }
 
     /** True when the sub is ignored under a different reason/rule than now desired (refresh, no status change). */
-    private boolean hasIgnoreChanged(SubIssue sub, Desired desired) {
+    private boolean hasIgnoreChanged(SubIssue sub, TriageResolver.Desired desired) {
         boolean sameReason = desired.reasonCode().equals(sub.getIgnoreReason());
         boolean sameRule = java.util.Objects.equals(desired.ruleId(), sub.getIgnoredByRuleId());
         return !(sameReason && sameRule);

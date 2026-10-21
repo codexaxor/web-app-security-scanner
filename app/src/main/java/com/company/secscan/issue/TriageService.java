@@ -4,7 +4,9 @@ import com.company.secscan.api.PagedResponse;
 import com.company.secscan.issue.api.IgnoreRuleView;
 import com.company.secscan.issue.api.IgnoredItemView;
 import com.company.secscan.triage.IgnoreMatcher;
+import com.company.secscan.triage.ReasonCode;
 import com.company.secscan.workspace.Workspace;
+import com.company.secscan.workspace.WorkspaceRepository;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -39,16 +41,18 @@ public class TriageService {
     private final TriageEventRepository events;
     private final GroupRollupService rollup;
     private final TriageStatusResolver statusResolver;
+    private final WorkspaceRepository workspaces;
 
     public TriageService(IgnoreRuleRepository ignoreRules, SubIssueRepository subIssues,
                          IssueGroupRepository groups, TriageEventRepository events, GroupRollupService rollup,
-                         TriageStatusResolver statusResolver) {
+                         TriageStatusResolver statusResolver, WorkspaceRepository workspaces) {
         this.ignoreRules = ignoreRules;
         this.subIssues = subIssues;
         this.groups = groups;
         this.events = events;
         this.rollup = rollup;
         this.statusResolver = statusResolver;
+        this.workspaces = workspaces;
     }
 
     /** Create a generic rule (path / cve / rule, global or per-repo; also subissue/group given an explicit value). */
@@ -87,19 +91,37 @@ public class TriageService {
         return IgnoreRuleView.of(rule);
     }
 
-    /** Remove a rule and unignore the findings it held (each returns to the reconcile-computed status). */
+    /**
+     * Remove a rule and RE-RESOLVE each finding it held (D-063, review S5). If another active rule or an auto
+     * cause (a path exclusion, a secret placeholder, or LOW_EPSS when the toggle is on — the causes derivable
+     * without a scan) still applies, the finding STAYS ignored, quietly re-pointed/re-reasoned with no event;
+     * otherwise it unignores to the status from the last scan where its scanner succeeded (never solves on API
+     * evidence). Scan-time-only auto causes (config paths, dev/test scope, duplicate rule) are re-applied by the
+     * next reconcile.
+     */
     @Transactional
     public void removeRule(UUID ruleId) {
         IgnoreRule rule = ignoreRules.findByWorkspaceIdAndId(WORKSPACE, ruleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such ignore rule."));
+        List<IgnoreRule> others = ignoreRules.findByWorkspaceId(WORKSPACE).stream()
+                .filter(r -> !r.getId().equals(ruleId)).toList();
+        TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled());
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : subIssues.findByWorkspaceIdAndIgnoredByRuleId(WORKSPACE, ruleId)) {
-            String newStatus = statusResolver.resolve(sub);
-            sub.unignore(newStatus);
-            subIssues.save(sub);
-            events.save(TriageEvent.user(WORKSPACE, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
-                    TriageEvent.REASON_UNIGNORED));
-            touched.add(sub.getGroupId());
+            TriageResolver.Desired desired =
+                    TriageResolver.resolve(sub, groupKeyOf(sub.getGroupId()), others, api);
+            if (desired != null) {
+                // still ignored under another rule or auto cause → quiet re-point/re-reason, no event
+                sub.ignore(desired.reasonCode(), desired.ruleId());
+                subIssues.save(sub);
+            } else {
+                String newStatus = statusResolver.resolve(sub);
+                sub.unignore(newStatus);
+                subIssues.save(sub);
+                events.save(TriageEvent.user(WORKSPACE, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
+                        TriageEvent.REASON_UNIGNORED));
+                touched.add(sub.getGroupId());
+            }
         }
         ignoreRules.delete(rule);
         recomputeGroups(touched);
@@ -131,17 +153,28 @@ public class TriageService {
                 rule.getMatchValue());
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : candidates) {
+            if (SubIssue.STATUS_SOLVED.equals(sub.getStatus())) {
+                continue; // N4: never auto/manually re-ignore a solved finding
+            }
+            if (!IgnoreMatcher.matches(ruleRef, toFinding(sub, groupKeys.get(sub.getGroupId())))) {
+                continue;
+            }
             if (SubIssue.STATUS_IGNORED.equals(sub.getStatus())) {
-                continue; // already ignored (hard rule 6) — leave it and its holding rule as they are
+                // D-063: a NEW rule over a finding already ignored under an AUTO cause quietly re-points it to
+                // this IGNORE_RULE (no event — it stays ignored). A finding already held by another IGNORE_RULE
+                // keeps its earlier holder (created_at ordering), so leave it untouched.
+                if (!ReasonCode.IGNORE_RULE.code().equals(sub.getIgnoreReason())) {
+                    sub.ignore(ReasonCode.IGNORE_RULE.code(), rule.getId());
+                    subIssues.save(sub);
+                }
+                continue;
             }
-            if (IgnoreMatcher.matches(ruleRef, toFinding(sub, groupKeys.get(sub.getGroupId())))) {
-                String from = sub.getStatus();
-                sub.ignore(com.company.secscan.triage.ReasonCode.IGNORE_RULE.code(), rule.getId());
-                subIssues.save(sub);
-                events.save(TriageEvent.user(WORKSPACE, sub.getId(), from, SubIssue.STATUS_IGNORED,
-                        com.company.secscan.triage.ReasonCode.IGNORE_RULE.code()));
-                touched.add(sub.getGroupId());
-            }
+            String from = sub.getStatus();
+            sub.ignore(ReasonCode.IGNORE_RULE.code(), rule.getId());
+            subIssues.save(sub);
+            events.save(TriageEvent.user(WORKSPACE, sub.getId(), from, SubIssue.STATUS_IGNORED,
+                    ReasonCode.IGNORE_RULE.code()));
+            touched.add(sub.getGroupId());
         }
         recomputeGroups(touched);
     }
@@ -173,6 +206,11 @@ public class TriageService {
 
     private String groupKeyOf(UUID groupId) {
         return groups.findById(groupId).map(IssueGroup::getGroupKey).orElse(null);
+    }
+
+    /** The workspace EPSS auto-ignore toggle — the one auto cause the API can re-evaluate (D-060/D-063). */
+    private boolean epssAutoIgnoreEnabled() {
+        return workspaces.findById(WORKSPACE).map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
     }
 
     private IgnoreRule ruleFor(SubIssue sub) {

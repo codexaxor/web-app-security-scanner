@@ -1,15 +1,18 @@
 package com.company.secscan.workspace;
 
 import com.company.secscan.issue.GroupRollupService;
+import com.company.secscan.issue.IgnoreRule;
+import com.company.secscan.issue.IgnoreRuleRepository;
+import com.company.secscan.issue.IssueGroupRepository;
 import com.company.secscan.issue.ReScoreService;
 import com.company.secscan.issue.SubIssue;
 import com.company.secscan.issue.SubIssueRepository;
 import com.company.secscan.issue.TriageEvent;
 import com.company.secscan.issue.TriageEventRepository;
+import com.company.secscan.issue.TriageResolver;
 import com.company.secscan.issue.TriageStatusResolver;
-import com.company.secscan.triage.EpssPolicy;
 import com.company.secscan.triage.ReasonCode;
-import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,16 +45,21 @@ public class WorkspaceSettingsService {
     private final GroupRollupService rollup;
     private final TriageStatusResolver statusResolver;
     private final ReScoreService reScore;
+    private final IgnoreRuleRepository ignoreRules;
+    private final IssueGroupRepository groups;
 
     public WorkspaceSettingsService(WorkspaceRepository workspaces, SubIssueRepository subIssues,
                                     TriageEventRepository events, GroupRollupService rollup,
-                                    TriageStatusResolver statusResolver, ReScoreService reScore) {
+                                    TriageStatusResolver statusResolver, ReScoreService reScore,
+                                    IgnoreRuleRepository ignoreRules, IssueGroupRepository groups) {
         this.workspaces = workspaces;
         this.subIssues = subIssues;
         this.events = events;
         this.rollup = rollup;
         this.statusResolver = statusResolver;
         this.reScore = reScore;
+        this.ignoreRules = ignoreRules;
+        this.groups = groups;
     }
 
     @Transactional(readOnly = true)
@@ -82,25 +90,50 @@ public class WorkspaceSettingsService {
         return settings;
     }
 
+    /**
+     * Enable sweep: auto-ignore every OPEN finding the resolver now wants ignored because of the EPSS toggle
+     * (D-063 — the single resolver, with the API auto-context: path causes + LOW_EPSS, no scan-time causes). In
+     * steady state an OPEN finding resolves to LOW_EPSS (any higher cause would already hold it ignored).
+     */
     private Set<UUID> autoIgnoreLowEpss(UUID workspaceId) {
+        List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
+        List<SubIssue> open = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN);
+        Map<UUID, String> groupKeys = groupKeys(open);
+        TriageResolver.AutoContext api = TriageResolver.AutoContext.api(true);
         Set<UUID> touched = new HashSet<>();
-        for (SubIssue sub : subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN)) {
-            if (EpssPolicy.isLowEpssAutoIgnore(toDouble(sub.getEpss()), sub.isInKev())) {
-                sub.ignore(ReasonCode.LOW_EPSS.code(), null);
+        for (SubIssue sub : open) {
+            TriageResolver.Desired desired =
+                    TriageResolver.resolve(sub, groupKeys.get(sub.getGroupId()), rules, api);
+            if (desired != null) {
+                sub.ignore(desired.reasonCode(), desired.ruleId());
                 subIssues.save(sub);
                 events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_OPEN,
-                        SubIssue.STATUS_IGNORED, ReasonCode.LOW_EPSS.code(), null));
+                        SubIssue.STATUS_IGNORED, desired.reasonCode(), null));
                 touched.add(sub.getGroupId());
             }
         }
         return touched;
     }
 
+    /**
+     * Disable sweep: re-resolve each LOW_EPSS-ignored finding with the toggle now off (D-063). If another rule or
+     * auto cause still applies it stays ignored (quiet re-point/re-reason, no event); otherwise it unignores to
+     * the reconcile-computed status with an event.
+     */
     private Set<UUID> clearLowEpss(UUID workspaceId) {
+        List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
+        List<SubIssue> lowEpss = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_IGNORED)
+                .stream().filter(s -> ReasonCode.LOW_EPSS.code().equals(s.getIgnoreReason())).toList();
+        Map<UUID, String> groupKeys = groupKeys(lowEpss);
+        TriageResolver.AutoContext api = TriageResolver.AutoContext.api(false);
         Set<UUID> touched = new HashSet<>();
-        List<SubIssue> ignored = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_IGNORED);
-        for (SubIssue sub : ignored) {
-            if (ReasonCode.LOW_EPSS.code().equals(sub.getIgnoreReason())) {
+        for (SubIssue sub : lowEpss) {
+            TriageResolver.Desired desired =
+                    TriageResolver.resolve(sub, groupKeys.get(sub.getGroupId()), rules, api);
+            if (desired != null) {
+                sub.ignore(desired.reasonCode(), desired.ruleId()); // still ignored under another cause, no event
+                subIssues.save(sub);
+            } else {
                 String newStatus = statusResolver.resolve(sub);
                 sub.unignore(newStatus);
                 subIssues.save(sub);
@@ -112,12 +145,18 @@ public class WorkspaceSettingsService {
         return touched;
     }
 
+    private Map<UUID, String> groupKeys(List<SubIssue> subs) {
+        Set<UUID> ids = new HashSet<>();
+        for (SubIssue s : subs) {
+            ids.add(s.getGroupId());
+        }
+        Map<UUID, String> out = new HashMap<>();
+        groups.findAllById(ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        return out;
+    }
+
     private Workspace load(UUID workspaceId) {
         return workspaces.findById(workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such workspace."));
-    }
-
-    private static Double toDouble(BigDecimal v) {
-        return v == null ? null : v.doubleValue();
     }
 }
