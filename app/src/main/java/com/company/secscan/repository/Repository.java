@@ -140,6 +140,11 @@ public class Repository {
         this.sensitivity = sensitivity;
     }
 
+    /** Whether dev/test-scoped dependency findings are included (not auto-ignored). Wired by M7 triage (D-059). */
+    public void setIncludeDevDeps(boolean includeDevDeps) {
+        this.includeDevDeps = includeDevDeps;
+    }
+
     public void refreshFromGitlab(String pathWithNamespace, String defaultBranch, List<String> languages) {
         this.pathWithNamespace = pathWithNamespace;
         this.defaultBranch = defaultBranch;

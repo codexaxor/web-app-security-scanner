@@ -1,6 +1,7 @@
 package com.company.secscan.scoring;
 
 import com.company.secscan.finding.RawFinding;
+import com.company.secscan.triage.EpssPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -100,6 +101,18 @@ public final class Scoring {
         if (RawFinding.TYPE_SAST.equals(in.type()) && in.testPath()) {
             breakdown.add(new ScoreLine("test_path", "SAST finding in a test path", TEST_PATH_DELTA));
             raw += TEST_PATH_DELTA;
+        }
+
+        // EPSS scoring tier (SPEC adjustment, Default Off; D-060): [0,5%) −10, [5%,10%) −5, else 0. Scoring-only
+        // (no status change, no triage_event — the LOW_EPSS auto-ignore is a separate reconcile/on-toggle path),
+        // and the two tiers are mutually exclusive so they never double-apply. Applied only when the workspace
+        // EPSS toggle is on. EPSS is a descriptive, NON-fingerprint input (D-051).
+        if (in.epssAdjustmentsEnabled()) {
+            int epssDelta = EpssPolicy.scoreDelta(in.epss(), in.onKev());
+            if (epssDelta != 0) {
+                breakdown.add(new ScoreLine("epss_tier", EpssPolicy.tierLabel(in.epss(), in.onKev()), epssDelta));
+                raw += epssDelta;
+            }
         }
 
         int clamped = Math.max(MIN_SCORE, Math.min(MAX_SCORE, raw));

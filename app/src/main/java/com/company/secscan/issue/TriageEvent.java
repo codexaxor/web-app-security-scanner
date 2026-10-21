@@ -26,6 +26,11 @@ public class TriageEvent {
     public static final String REASON_REOPENED = "REOPENED";
     public static final String REASON_SOLVED_NOT_DETECTED = "SOLVED_NOT_DETECTED";
 
+    // M7: the reason written when a finding leaves `ignored` because its ignore was removed or its cause cleared
+    // (manual unignore, a revoked .secscan.yml rule, or an auto-ignore whose cause is gone). Distinct from the
+    // auto-ignore reason codes in core.triage.ReasonCode, which name WHY a finding was ignored.
+    public static final String REASON_UNIGNORED = "UNIGNORED";
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -76,6 +81,15 @@ public class TriageEvent {
     public static TriageEvent system(UUID workspaceId, UUID subIssueId, String fromStatus, String toStatus,
                                      String reasonCode, UUID scanId) {
         return new TriageEvent(workspaceId, subIssueId, fromStatus, toStatus, ACTOR_SYSTEM, reasonCode, scanId);
+    }
+
+    /**
+     * A user-initiated triage event for a sub-issue (manual ignore or unignore via the API). Not tied to a scan,
+     * so {@code scanId} is null. A scan-time auto-ignore uses {@link #system} instead.
+     */
+    public static TriageEvent user(UUID workspaceId, UUID subIssueId, String fromStatus, String toStatus,
+                                   String reasonCode) {
+        return new TriageEvent(workspaceId, subIssueId, fromStatus, toStatus, ACTOR_USER, reasonCode, null);
     }
 
     public UUID getId() {

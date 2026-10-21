@@ -75,6 +75,8 @@ public abstract class AbstractScanWorkerIT {
     @Autowired
     private SubIssueRepository subIssuesForCleanup;
     @Autowired
+    private com.company.secscan.issue.IgnoreRuleRepository ignoreRulesForCleanup;
+    @Autowired
     private IssueGroupRepository issueGroupsForCleanup;
     @Autowired
     private RepositoryEventRepository repositoryEventsForCleanup;
@@ -83,6 +85,7 @@ public abstract class AbstractScanWorkerIT {
     void cleanDatabase() {
         triageEventsForCleanup.deleteAllInBatch();
         subIssuesForCleanup.deleteAllInBatch();
+        ignoreRulesForCleanup.deleteAllInBatch(); // M7: after sub_issue (its FK is ON DELETE SET NULL), before repository
         issueGroupsForCleanup.deleteAllInBatch();
         repositoryEventsForCleanup.deleteAllInBatch();
         scanFindingsForCleanup.deleteAllInBatch();

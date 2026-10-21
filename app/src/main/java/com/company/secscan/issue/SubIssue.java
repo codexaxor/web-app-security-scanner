@@ -133,8 +133,26 @@ public class SubIssue {
     @Column(name = "status", nullable = false)
     private String status = STATUS_OPEN;
 
+    /** The reason CODE while ignored (EXCLUDED_PATH / IGNORE_RULE / DEV_DEPENDENCY / ...); null when not ignored. */
     @Column(name = "ignore_reason")
     private String ignoreReason;
+
+    /** The manual/ .secscan.yml rule currently holding this ignored (D-058); null for a cause-based auto-ignore. */
+    @Column(name = "ignored_by_rule_id")
+    private UUID ignoredByRuleId;
+
+    @Column(name = "ignored_at")
+    private Instant ignoredAt;
+
+    /**
+     * The highest-precedence AUTO cause currently detected for this finding (EXCLUDED_PATH / SECRET_PLACEHOLDER /
+     * DEV_DEPENDENCY / TEST_SCOPE / LOW_EPSS / DUPLICATE_RULE), or null when no auto cause applies (SF1, V18).
+     * Written every reconcile INDEPENDENTLY of {@link #ignoreReason} — even when an {@code IGNORE_RULE} holds the
+     * finding — so the API (removeRule / EPSS sweep) can keep a finding ignored under a scan-time-only cause it
+     * cannot itself recompute. Writing it is never a status change and never writes a triage_event.
+     */
+    @Column(name = "auto_ignore_reason")
+    private String autoIgnoreReason;
 
     @Column(name = "first_seen_scan_id")
     private UUID firstSeenScanId;
@@ -181,6 +199,33 @@ public class SubIssue {
     public void solve() {
         this.status = STATUS_SOLVED;
         this.solvedAt = Instant.now();
+    }
+
+    /**
+     * Moves the finding to {@code ignored} (M7, domain rule 2: status changes only through reconcile, each with a
+     * triage_event written by the caller). {@code reasonCode} is one of the triage reason codes; {@code ruleId}
+     * is the manual/.secscan.yml rule holding it, or null for a cause-based auto-ignore (EXCLUDED_PATH, LOW_EPSS,
+     * DEV_DEPENDENCY, SECRET_PLACEHOLDER, DUPLICATE_RULE). Clears {@code solvedAt} — an ignored finding is not solved.
+     */
+    public void ignore(String reasonCode, UUID ruleId) {
+        this.status = STATUS_IGNORED;
+        this.ignoreReason = reasonCode;
+        this.ignoredByRuleId = ruleId;
+        this.ignoredAt = Instant.now();
+        this.solvedAt = null;
+    }
+
+    /**
+     * Returns the finding to its reconcile-computed status (unignore). {@code newStatus} is {@link #STATUS_OPEN}
+     * or {@link #STATUS_SOLVED} as computed from the latest scan where its scanner succeeded (D-058). Clears the
+     * ignore markers; sets/clears {@code solvedAt} to match the new status.
+     */
+    public void unignore(String newStatus) {
+        this.status = newStatus;
+        this.ignoreReason = null;
+        this.ignoredByRuleId = null;
+        this.ignoredAt = null;
+        this.solvedAt = STATUS_SOLVED.equals(newStatus) ? Instant.now() : null;
     }
 
     // --- mutable descriptive fields, refreshed from the latest finding ---
@@ -387,8 +432,25 @@ public class SubIssue {
         return status;
     }
 
+    public String getAutoIgnoreReason() {
+        return autoIgnoreReason;
+    }
+
+    /** Sets the detected auto cause (SF1). Never a status change; the caller writes no triage_event. */
+    public void setAutoIgnoreReason(String autoIgnoreReason) {
+        this.autoIgnoreReason = autoIgnoreReason;
+    }
+
     public String getIgnoreReason() {
         return ignoreReason;
+    }
+
+    public UUID getIgnoredByRuleId() {
+        return ignoredByRuleId;
+    }
+
+    public Instant getIgnoredAt() {
+        return ignoredAt;
     }
 
     public UUID getFirstSeenScanId() {

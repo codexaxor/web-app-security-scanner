@@ -22,6 +22,15 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** All sub-issues in a workspace with the given status — the re-score job loads the OPEN ones (D-049). */
     List<SubIssue> findByWorkspaceIdAndStatus(UUID workspaceId, String status);
 
+    /** Every sub-issue in a workspace — a manual ignore rule with no repository scope applies across all repos. */
+    List<SubIssue> findByWorkspaceId(UUID workspaceId);
+
+    /** Paginated view by status — the Ignored view loads the {@code ignored} ones. */
+    Page<SubIssue> findByWorkspaceIdAndStatus(UUID workspaceId, String status, Pageable pageable);
+
+    /** The sub-issues currently held ignored by one rule — unignore when the rule is removed (D-058). */
+    List<SubIssue> findByWorkspaceIdAndIgnoredByRuleId(UUID workspaceId, UUID ignoredByRuleId);
+
     Page<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId, Pageable pageable);
 
     /**

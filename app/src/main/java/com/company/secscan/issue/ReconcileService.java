@@ -51,13 +51,14 @@ public class ReconcileService {
     private final RepositoryRepository repositories;
     private final GroupRollupService rollup;
     private final EolCycleRepository eolCycles;
+    private final TriageApplier triageApplier;
     private final Reconciler reconciler = new Reconciler();
 
     public ReconcileService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                             IssueGroupRepository groups, SubIssueRepository subIssues, TriageEventRepository events,
                             SecretFingerprinterHolder fingerprinter, SubIssueScorer scorer,
                             RepositoryRepository repositories, GroupRollupService rollup,
-                            EolCycleRepository eolCycles) {
+                            EolCycleRepository eolCycles, TriageApplier triageApplier) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
@@ -69,6 +70,7 @@ public class ReconcileService {
         this.repositories = repositories;
         this.rollup = rollup;
         this.eolCycles = eolCycles;
+        this.triageApplier = triageApplier;
     }
 
     /**
@@ -76,8 +78,13 @@ public class ReconcileService {
      * no-op) and guarded against stale, out-of-order scans. Always stamps {@code scan.reconciled_at}. The scan
      * is loaded scoped to {@code workspaceId} (domain rule 1); every other query is already workspace-scoped.
      */
-    @Transactional
+    /** Reconcile with no triage context (existing callers/tests). */
     public void reconcile(UUID scanId, UUID workspaceId) {
+        reconcile(scanId, workspaceId, TriageContext.empty());
+    }
+
+    @Transactional
+    public void reconcile(UUID scanId, UUID workspaceId, TriageContext triage) {
         Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         if (scan.getReconciledAt() != null) {
             return; // already reconciled (idempotent)
@@ -151,7 +158,7 @@ public class ReconcileService {
             SubIssue sub = new SubIssue(workspaceId, group.getId(), repositoryId, f.getType(), f.getScanner(),
                     fp, scanId);
             copyDescriptive(f, sub);
-            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
+            collectUnmapped(scorer.score(sub, sensitivity, triage.epssAutoIgnoreEnabled()), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), null, SubIssue.STATUS_OPEN,
                     TriageEvent.REASON_SEEN, scanId));
@@ -161,7 +168,7 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.reopen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
-            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
+            collectUnmapped(scorer.score(sub, sensitivity, triage.epssAutoIgnoreEnabled()), unmappedSecretRules);
             subIssues.save(sub);
             events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_SOLVED,
                     SubIssue.STATUS_OPEN, TriageEvent.REASON_REOPENED, scanId));
@@ -171,7 +178,7 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.recordSeen(scanId);
             copyDescriptive(findByFp(findingByFp, fp), sub);
-            collectUnmapped(scorer.score(sub, sensitivity), unmappedSecretRules);
+            collectUnmapped(scorer.score(sub, sensitivity, triage.epssAutoIgnoreEnabled()), unmappedSecretRules);
             subIssues.save(sub); // no status change, no event
         }
         for (String ruleId : unmappedSecretRules) { // once per rule per scan, not per sub-issue (N2)
@@ -186,6 +193,22 @@ public class ReconcileService {
                     SubIssue.STATUS_SOLVED, TriageEvent.REASON_SOLVED_NOT_DETECTED, scanId));
             touchedGroups.add(sub.getGroupId());
         }
+
+        // Triage step 9 (M7): apply .secscan.yml + manual ignore rules + auto-ignore, and clear ignores whose
+        // cause/rule is gone — all through reconcile, each with a triage_event. Runs AFTER plan application and
+        // BEFORE the rollup so the group's derived status reflects newly-(un)ignored sub-issues this scan.
+        // The SAST rule-ids-per-file of THIS scan drive duplicate-rule auto-triage (D-061).
+        Map<String, Set<String>> sastRuleIdsByFile = new HashMap<>();
+        for (ScanFinding f : scanFindings) {
+            if (com.company.secscan.finding.RawFinding.TYPE_SAST.equals(f.getType())
+                    && f.getFilePath() != null && f.getRuleId() != null) {
+                sastRuleIdsByFile.computeIfAbsent(
+                        com.company.secscan.triage.PathExclusion.normalize(f.getFilePath()),
+                        k -> new HashSet<>()).add(f.getRuleId());
+            }
+        }
+        touchedGroups.addAll(triageApplier.applyAtReconcile(workspaceId, repositoryId, scanId, triage,
+                findingByFp.keySet(), solvableScanners, sastRuleIdsByFile));
 
         for (UUID groupId : touchedGroups) {
             rollup.recompute(workspaceId, groupId, fixConfig);

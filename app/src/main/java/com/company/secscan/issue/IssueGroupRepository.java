@@ -14,6 +14,9 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
     Optional<IssueGroup> findByWorkspaceIdAndRepositoryIdAndGroupKey(UUID workspaceId, UUID repositoryId,
                                                                      String groupKey);
 
+    /** All groups in a repository — the triage step maps a sub-issue's group id to its stable group_key. */
+    java.util.List<IssueGroup> findByWorkspaceIdAndRepositoryId(UUID workspaceId, UUID repositoryId);
+
     /**
      * Server-side paginated, workspace-scoped feed with optional repository/type/status filters (a {@code null}
      * filter matches all). Ordered newest-first by first-seen (severity-ordered feed lands with M5 scoring).

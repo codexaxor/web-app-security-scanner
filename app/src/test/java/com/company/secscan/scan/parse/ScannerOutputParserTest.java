@@ -20,6 +20,26 @@ class ScannerOutputParserTest {
     private final ScannerOutputParser parser = new ScannerOutputParser();
 
     @Test
+    void carriesConfigAndScopeInventoryStatusThrough(@TempDir Path outDir) throws Exception {
+        // review SF3: a manifest reporting config.status=error and scopeInventoryStatus=error must surface as a
+        // frozen config and a failed scope inventory (so the worker freezes those sources), with the unreadable
+        // manifest list carried too.
+        Files.writeString(outDir.resolve("result.json"),
+                "{\"schemaVersion\":1,\"cloneFailed\":false,\"commit\":\"c1\",\"checkoutPath\":\"/work/checkout\","
+                        + "\"toolVersions\":{},\"scanners\":[],"
+                        + "\"config\":{\"present\":true,\"excludePaths\":[],\"ignoreCves\":{},"
+                        + "\"includeDevDependencies\":null,\"status\":\"error\"},"
+                        + "\"declaredScopes\":[],\"scopeInventoryStatus\":\"error\","
+                        + "\"unreadableScopeManifests\":[\"moduleA/pom.xml\"]}");
+
+        ParsedScan parsed = parser.parse(outDir);
+
+        assertThat(parsed.config().frozen()).as("config.status=error → frozen").isTrue();
+        assertThat(parsed.scopeInventoryFailed()).as("scopeInventoryStatus=error → failed").isTrue();
+        assertThat(parsed.unreadableScopeManifests()).containsExactly("moduleA/pom.xml");
+    }
+
+    @Test
     void parsesSecretFindingFromSamples(@TempDir Path outDir) throws Exception {
         copyResource("/samples/scanner/result.json", outDir.resolve("result.json"));
         copyResource("/samples/betterleaks/secrets.json", outDir.resolve("secrets.json"));
