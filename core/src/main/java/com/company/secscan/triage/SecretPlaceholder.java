@@ -5,38 +5,34 @@ import java.util.Set;
 
 /**
  * Decides whether a secret finding is a placeholder, not a real credential — the
- * {@link ReasonCode#SECRET_PLACEHOLDER} auto triage (SPEC: {@code changeme}, {@code example}, {@code *.example}
- * files; D-059). Pure, no I/O.
+ * {@link ReasonCode#SECRET_PLACEHOLDER} auto triage (SPEC: {@code *.example} files; D-059). Pure, no I/O.
  *
- * <p>The raw secret never leaves the scanner container (D-027), so detection uses only what the finding carries:
- * the file path and the masked preview (the first 4 characters, or {@code ****} for a short value). Deliberately
- * conservative — a false placeholder match would hide a real secret — so only well-known placeholder file shapes
- * and preview prefixes are matched.
+ * <p><b>FILE PATH ONLY</b> (review B1). The decision is made solely from the finding's path shape; the masked
+ * preview (the first 4 chars, or {@code ****} for a short value, D-027) is NEVER consulted. A preview is far too
+ * weak a signal — {@code ****} is the mask for ANY short/real secret, and a real token can legitimately begin
+ * {@code chan}/{@code exam}/{@code plac} — so deciding on it would false-ignore real secrets.
+ *
+ * <p>Deliberately narrow (review S7): only a {@code *.example} / {@code *.sample} / {@code *.template} file, or a
+ * file inside an {@code example/} or {@code examples/} directory, is a placeholder. A real secret in, say,
+ * {@code src/main/resources/templates/x.html} is NOT a placeholder.
+ *
+ * <p>Value-based detection (e.g. the literal {@code changeme}) is DEFERRED (review B1 / D-059 amendment): the raw
+ * secret never leaves the scanner container (D-027), so if it is ever added it must be computed IN-CONTAINER and
+ * only its boolean verdict may leave — the value must never reach the app.
  */
 public final class SecretPlaceholder {
 
-    /** Path segments that mark an example/sample/template location. */
-    private static final Set<String> PLACEHOLDER_SEGMENTS =
-            Set.of("example", "examples", "sample", "samples", "template", "templates");
-
-    /**
-     * Masked-preview prefixes (first 4 chars, lower-cased) of common placeholder VALUES. Note {@code ****} is
-     * deliberately NOT here: it is the mask for any short/real secret (D-027), not a placeholder marker — matching
-     * it would false-ignore a real short secret.
-     */
-    private static final Set<String> PLACEHOLDER_PREVIEWS =
-            Set.of("chan" /* changeme */, "exam" /* example */, "plac" /* placeholder */);
+    /** Directory segments that mark an example location (narrowed to example/examples only, review S7). */
+    private static final Set<String> PLACEHOLDER_SEGMENTS = Set.of("example", "examples");
 
     private SecretPlaceholder() {
     }
 
-    /** True when the file path OR the masked preview marks this secret as a placeholder. */
-    public static boolean isPlaceholder(String filePath, String preview) {
-        return isPlaceholderFile(filePath) || isPlaceholderPreview(preview);
-    }
-
-    /** True when the file is an {@code *.example} file or sits in an example/sample/template location. */
-    public static boolean isPlaceholderFile(String filePath) {
+    /**
+     * True when the file path marks this secret as a placeholder: a {@code *.example} / {@code *.sample} /
+     * {@code *.template} file, or a file under an {@code example/}/{@code examples/} directory. Path only (B1).
+     */
+    public static boolean isPlaceholder(String filePath) {
         String path = PathExclusion.normalize(filePath);
         if (path.isEmpty()) {
             return false;
@@ -52,13 +48,5 @@ public final class SecretPlaceholder {
             }
         }
         return false;
-    }
-
-    /** True when the masked preview is a known placeholder prefix. */
-    public static boolean isPlaceholderPreview(String preview) {
-        if (preview == null || preview.isBlank()) {
-            return false;
-        }
-        return PLACEHOLDER_PREVIEWS.contains(preview.toLowerCase(Locale.ROOT));
     }
 }

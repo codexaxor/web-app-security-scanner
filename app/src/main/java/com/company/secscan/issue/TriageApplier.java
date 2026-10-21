@@ -168,7 +168,7 @@ public class TriageApplier {
             return ReasonCode.EXCLUDED_PATH;
         }
         if (RawFinding.TYPE_SECRET.equals(sub.getType())
-                && SecretPlaceholder.isPlaceholder(sub.getFilePath(), sub.getSecretPreview())) {
+                && SecretPlaceholder.isPlaceholder(sub.getFilePath())) {
             return ReasonCode.SECRET_PLACEHOLDER;
         }
         if (RawFinding.TYPE_SAST.equals(sub.getType())
