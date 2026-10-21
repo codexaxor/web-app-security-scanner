@@ -13,6 +13,8 @@ package com.company.secscan.scoring;
  * @param repoSensitivity the repository sensitivity ({@code high} +5 / {@code low} −10 / else 0)
  * @param eolStatus       for EOL findings, {@link com.company.secscan.eol.EolStatus} — the EOL base (D-055, M6)
  * @param testPath        true when a SAST finding is in a test path (the −15 adjustment, M6)
+ * @param epss            the FIRST EPSS probability in [0,1], or null when unknown — the scoring-only tier (D-060)
+ * @param epssAdjustmentsEnabled true when the workspace EPSS toggle is on; the EPSS tier applies only then (D-060)
  */
 public record ScoreInput(
         String type,
@@ -22,11 +24,20 @@ public record ScoreInput(
         boolean onKev,
         String repoSensitivity,
         String eolStatus,
-        boolean testPath) {
+        boolean testPath,
+        Double epss,
+        boolean epssAdjustmentsEnabled) {
 
     /** Backward-compatible convenience: no EOL status and not a test path (SCA/secret/KEV callers). */
     public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
                       boolean onKev, String repoSensitivity) {
-        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, null, false);
+        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, null, false, null, false);
+    }
+
+    /** Convenience preserving the M6 arity (EOL status + test path), with EPSS adjustments off. */
+    public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
+                      boolean onKev, String repoSensitivity, String eolStatus, boolean testPath) {
+        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, eolStatus, testPath,
+                null, false);
     }
 }

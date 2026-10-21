@@ -68,7 +68,7 @@ public class ReScoreService {
         Set<String> unmappedSecretRules = new TreeSet<>();
         int count = 0;
         for (Workspace ws : workspaces.findAll()) {
-            count += rescoreWorkspace(ws.getId(), fixConfig, unmappedSecretRules);
+            count += rescoreWorkspace(ws.getId(), ws.isEpssAutoIgnoreEnabled(), fixConfig, unmappedSecretRules);
         }
         for (String ruleId : unmappedSecretRules) { // once per rule per run, not per sub-issue (N2)
             log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
@@ -78,7 +78,27 @@ public class ReScoreService {
         return count;
     }
 
-    private int rescoreWorkspace(UUID workspaceId, Map<String, Integer> fixConfig, Set<String> unmappedSink) {
+    /**
+     * Re-scores every open sub-issue in ONE workspace (N2: the EPSS toggle must touch only its own workspace,
+     * not every tenant). Returns the number recomputed.
+     */
+    @Transactional
+    public int rescoreWorkspace(UUID workspaceId) {
+        boolean epssEnabled = workspaces.findById(workspaceId)
+                .map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
+        Set<String> unmapped = new TreeSet<>();
+        int count = rescoreWorkspace(workspaceId, epssEnabled, fixConfig, unmapped);
+        for (String ruleId : unmapped) {
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    ruleId);
+        }
+        log.info("Re-score recomputed {} open sub-issue(s) for workspace {}", count, workspaceId);
+        return count;
+    }
+
+    private int rescoreWorkspace(UUID workspaceId, boolean epssAdjustmentsEnabled, Map<String, Integer> fixConfig,
+                                 Set<String> unmappedSink) {
         List<SubIssue> open = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN);
         Map<UUID, String> sensitivityByRepo = new HashMap<>();
         Set<UUID> touchedGroups = new HashSet<>();
@@ -86,7 +106,8 @@ public class ReScoreService {
             String sensitivity = sensitivityByRepo.computeIfAbsent(sub.getRepositoryId(),
                     id -> repositories.findByIdAndWorkspaceId(id, workspaceId)
                             .map(Repository::getSensitivity).orElse("normal"));
-            Computation c = scorer.compute(sub, sensitivity); // read-only: does not mutate the managed entity
+            // read-only: does not mutate the managed entity. EPSS scoring tiers apply only when the toggle is on.
+            Computation c = scorer.compute(sub, sensitivity, epssAdjustmentsEnabled);
             if (c.unmappedSecretRule() != null) {
                 unmappedSink.add(c.unmappedSecretRule());
             }

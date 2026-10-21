@@ -424,6 +424,34 @@ if [ "$EOL_STATUS" = "failed" ] && [ -s "$WORK/eol.log" ]; then
     tail -c 2000 "$WORK/eol.log" >&2 || true
 fi
 
+# --- .secscan.yml (M7, D-057): read the OPTIONAL in-repo config as DATA ONLY and emit a bounded, whitelisted
+# JSON the worker applies at triage step 9. This is the ONLY carve-out of D-037, and only because the worker
+# surfaces + audits every suppression it yields. `python3 -I` keeps the scanned tree off sys.path; the reader is
+# symlink-safe, realpath-confined to the clone, and NEVER echoes raw file bytes. A failure here never fails the
+# scan — the config is simply treated as absent. ---
+SECSCAN_CONFIG_JSON="$WORK/secscan_config.json"
+set +e
+python3 -I /usr/local/bin/secscan_config.py "$CHECKOUT" > "$SECSCAN_CONFIG_JSON" 2>"$WORK/secscan_config.log"
+set -e
+if [ ! -s "$SECSCAN_CONFIG_JSON" ] || ! jq -e 'has("present")' "$SECSCAN_CONFIG_JSON" >/dev/null 2>&1; then
+    printf '{"present":false,"excludePaths":[],"ignoreCves":{},"includeDevDependencies":null,"warnings":[],"status":"error"}' \
+        > "$SECSCAN_CONFIG_JSON"
+fi
+# Surface the reader's own warnings (symlink refused, unknown/oversized keys dropped, …) into the scan warnings.
+jq -c '.warnings[]?' "$SECSCAN_CONFIG_JSON" >> "$WORK/warnings.ndjson" 2>/dev/null || true
+
+# --- Declared dev/test scope inventory (M7, D-059): read the repo's OWN manifests (pom test scope, npm
+# devDependencies, Gradle test configs) as DATA ONLY so the worker can auto-triage DEV_DEPENDENCY/TEST_SCOPE.
+# OSV exposes no scope marker, and this never guesses — unclassifiable deps are omitted and stay visible. A
+# failure here never fails the scan (the inventory is simply empty). ---
+SCOPES_JSON="$WORK/scopes.json"
+set +e
+python3 -I /usr/local/bin/scope_inventory.py "$CHECKOUT" > "$SCOPES_JSON" 2>"$WORK/scopes.log"
+set -e
+if [ ! -s "$SCOPES_JSON" ] || ! jq -e 'has("scopes")' "$SCOPES_JSON" >/dev/null 2>&1; then
+    printf '{"scopes":[],"warnings":[],"status":"error"}' > "$SCOPES_JSON"
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -452,10 +480,16 @@ jq -nc \
     --argjson eoldur "$EOL_DUR_MS" \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
+    --slurpfile cfg "$SECSCAN_CONFIG_JSON" \
+    --slurpfile scopes "$SCOPES_JSON" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
       toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv, opengrep:$opengrep, checkov:$checkov},
       warnings: ($warnings[0] // []),
       syntheticPoms: ($synth[0] // []),
+      config: ($cfg[0] // null),
+      declaredScopes: (($scopes[0] // {}).scopes // []),
+      scopeInventoryStatus: (($scopes[0] // {}).status // "error"),
+      unreadableScopeManifests: (($scopes[0] // {}).unreadableManifests // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

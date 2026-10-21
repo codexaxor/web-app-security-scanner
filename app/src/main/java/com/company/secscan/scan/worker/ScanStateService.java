@@ -46,11 +46,13 @@ public class ScanStateService {
     private final SecretFingerprinterHolder fingerprinter;
     private final ReconcileService reconcile;
     private final EolEnricher eolEnricher;
+    private final com.company.secscan.workspace.WorkspaceRepository workspaces;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
                             ScanFindingRepository findings, ScanWarningRepository warnings,
                             RepositoryRepository repositories, SecretFingerprinterHolder fingerprinter,
-                            ReconcileService reconcile, EolEnricher eolEnricher) {
+                            ReconcileService reconcile, EolEnricher eolEnricher,
+                            com.company.secscan.workspace.WorkspaceRepository workspaces) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
@@ -60,6 +62,7 @@ public class ScanStateService {
         this.fingerprinter = fingerprinter;
         this.reconcile = reconcile;
         this.eolEnricher = eolEnricher;
+        this.workspaces = workspaces;
     }
 
     @Transactional
@@ -119,6 +122,19 @@ public class ScanStateService {
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, w.code(), w.message(),
                     w.filePath()));
         }
+        // Review S3: a present-but-unusable .secscan.yml or a failed scope inventory FREEZES prior config-/scope-
+        // derived triage (no revoke, no unignore). Surface each as a visible scan_warning so the operator sees
+        // that those sources were skipped this scan — every other triage source still runs.
+        if (parsed.config() != null && parsed.config().frozen()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SECSCAN_CONFIG_INVALID",
+                    ".secscan.yml was present but could not be read or parsed; its prior ignores were frozen "
+                            + "(not revoked) this scan.", null));
+        }
+        if (parsed.scopeInventoryFailed()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SCOPE_INVENTORY_FAILED",
+                    "The dev/test scope inventory failed; prior dev/test auto-ignores were frozen this scan.",
+                    null));
+        }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
         }
@@ -130,7 +146,18 @@ public class ScanStateService {
 
         // Reconcile in the SAME transaction (M3 plan addition 1): findings and their issue-model state commit
         // atomically, so a worker crash never leaves findings unreconciled. No network I/O inside reconcile.
-        reconcile.reconcile(scanId, workspaceId);
+        // Effective include-dev-deps (D-059, review change #3): repository setting OR .secscan.yml — the file
+        // may only INCREASE visibility, never force-hide a dep below the SecScan repo setting.
+        boolean repoIncludeDev = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
+                .map(com.company.secscan.repository.Repository::isIncludeDevDeps).orElse(false);
+        boolean effectiveIncludeDev = repoIncludeDev
+                || (parsed.config().present() && Boolean.TRUE.equals(parsed.config().includeDevDependencies()));
+        boolean epssAutoIgnore = workspaces.findById(workspaceId)
+                .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
+                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore,
+                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests());
+        reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {
             job.markDone();

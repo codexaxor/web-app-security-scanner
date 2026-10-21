@@ -19,7 +19,9 @@ FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f
 # only (tomllib needs >= 3.11). It is PINNED to the exact Alpine 3.21 package version (3.12.15-r0, which ships
 # tomllib) -- the one apk we pin by version, per D-039; the others still follow the pinned Alpine branch (Known
 # gap until we snapshot a mirror). py3-pip is the Checkov installer (M6, D-054) and follows the pinned branch.
-RUN apk add --no-cache git jq ca-certificates libxml2-utils python3=3.12.15-r0 py3-pip
+# py3-yaml (PyYAML 6.0.2) is the .secscan.yml reader's parser (M7, D-057), PINNED to the exact Alpine 3.21
+# package version (6.0.2-r0); secscan_config.py uses yaml.safe_load ONLY.
+RUN apk add --no-cache git jq ca-certificates libxml2-utils python3=3.12.15-r0 py3-pip py3-yaml=6.0.2-r0
 
 # --- Betterleaks (pinned version + checksum, verified against the release checksums.txt before use; D-036).
 # Betterleaks (betterleaks/betterleaks, MIT, by the original Gitleaks author) replaces Gitleaks 8.21.2 as the
@@ -171,6 +173,18 @@ RUN chmod 0444 /usr/local/bin/gradle_resolver.py
 # are NOT shipped -- they run on the host under ./gradlew build (eolDetectTest).
 COPY eol_detect.py /usr/local/bin/eol_detect.py
 RUN chmod 0444 /usr/local/bin/eol_detect.py
+
+# The .secscan.yml reader (M7, D-057): same posture -- run `python3 -I secscan_config.py` so the scanned tree is
+# never on sys.path; reads the config as data only (yaml.safe_load), symlink-safe + realpath-confined, and emits
+# a bounded whitelisted JSON. Its unit tests (secscan_config_test.py) are NOT shipped (host-run, secscanConfigTest).
+COPY secscan_config.py /usr/local/bin/secscan_config.py
+RUN chmod 0444 /usr/local/bin/secscan_config.py
+
+# The declared dev/test scope inventory (M7, D-059): run `python3 -I scope_inventory.py` so the scanned tree is
+# never on sys.path; reads pom.xml / package.json / build.gradle(.kts) as data only, no network. Its unit tests
+# (scope_inventory_test.py) are NOT shipped (host-run, scopeInventoryTest).
+COPY scope_inventory.py /usr/local/bin/scope_inventory.py
+RUN chmod 0444 /usr/local/bin/scope_inventory.py
 
 COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh

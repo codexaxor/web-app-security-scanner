@@ -104,7 +104,47 @@ public class ScannerOutputParser {
         }
 
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
-        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings);
+        String scopeStatus = m.scopeInventoryStatus == null ? ParsedScan.SCOPE_STATUS_OK : m.scopeInventoryStatus;
+        List<String> unreadable = m.unreadableScopeManifests == null ? List.of()
+                : List.copyOf(m.unreadableScopeManifests);
+        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable);
+    }
+
+    /**
+     * Carries the manifest's declared-scope entries (D-059) through as typed {@link DeclaredScope}s keyed by
+     * (manifest path, coordinate) — NOT a flat {@code coordinate -> scope} map (review S4), so a coordinate that
+     * is test-scoped in one module but production in another is kept distinct per manifest. The in-container
+     * inventory already suppresses any coordinate declared production anywhere in the repo.
+     */
+    private List<DeclaredScope> toDeclaredScopes(List<ManifestScope> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        List<DeclaredScope> out = new ArrayList<>();
+        for (ManifestScope s : entries) {
+            if (s.coordinate != null && s.scope != null && s.filePath != null) {
+                out.add(new DeclaredScope(s.filePath, s.coordinate, s.scope));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /** Maps the manifest's bounded {@code .secscan.yml} block (D-057) to the typed {@link SecscanConfig}. */
+    private SecscanConfig toSecscanConfig(ManifestConfig c) {
+        if (c == null) {
+            return SecscanConfig.absent();
+        }
+        String status = c.status == null ? SecscanConfig.STATUS_OK : c.status;
+        // Genuinely absent (no config, read cleanly) → absent/ok, so the revoke lifecycle runs normally. But a
+        // status != ok (reader refused/crashed, even with present=false) must carry through so the worker FREEZES
+        // prior config-derived triage rather than treating it as "config removed" (review S3).
+        if (!c.present && SecscanConfig.STATUS_OK.equals(status)) {
+            return SecscanConfig.absent();
+        }
+        List<String> paths = c.excludePaths == null ? List.of() : c.excludePaths;
+        Map<String, String> cves = c.ignoreCves == null ? Map.of() : c.ignoreCves;
+        return new SecscanConfig(c.present, paths, cves, c.includeDevDependencies, status);
     }
 
     private List<RawFinding> readSecretFindings(Path findingsFile) {
@@ -745,6 +785,32 @@ public class ScannerOutputParser {
         public List<ManifestScanner> scanners;
         public List<ManifestWarning> warnings;
         public List<ManifestSyntheticPom> syntheticPoms;
+        public ManifestConfig config;
+        public List<ManifestScope> declaredScopes;
+        /** The scope inventory's own status ("ok"/"error"); "error" freezes dev/test triage (review S3). */
+        public String scopeInventoryStatus;
+        /** Manifests the inventory could not parse; the worker freezes each one's scope state (review SF3). */
+        public List<String> unreadableScopeManifests;
+    }
+
+    /** A declared dev/test dependency scope read by our own inventory (M7, D-059). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestScope {
+        public String coordinate;
+        public String scope;
+        public String ecosystem;
+        public String filePath;
+    }
+
+    /** The bounded, whitelisted {@code .secscan.yml} the scanner read as data (M7, D-057). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestConfig {
+        public boolean present;
+        public List<String> excludePaths;
+        public Map<String, String> ignoreCves;
+        public Boolean includeDevDependencies;
+        /** "ok" for an absent/valid config; any other value freezes prior config-derived triage (review S3). */
+        public String status;
     }
 
     /** Maps a synthetic Gradle pom's container path to its originating {@code build.gradle} (repo-relative). */

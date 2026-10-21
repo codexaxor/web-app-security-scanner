@@ -67,6 +67,8 @@ public abstract class AbstractGitLabIT {
     @Autowired
     private SubIssueRepository subIssuesForCleanup;
     @Autowired
+    private com.company.secscan.issue.IgnoreRuleRepository ignoreRulesForCleanup;
+    @Autowired
     private IssueGroupRepository issueGroupsForCleanup;
     @Autowired
     private RepositoryEventRepository repositoryEventsForCleanup;
@@ -80,6 +82,7 @@ public abstract class AbstractGitLabIT {
     void cleanDatabase() {
         triageEventsForCleanup.deleteAllInBatch();
         subIssuesForCleanup.deleteAllInBatch();
+        ignoreRulesForCleanup.deleteAllInBatch(); // M7: after sub_issue (FK ON DELETE SET NULL)
         issueGroupsForCleanup.deleteAllInBatch();
         repositoryEventsForCleanup.deleteAllInBatch();
         scanFindingsForCleanup.deleteAllInBatch();

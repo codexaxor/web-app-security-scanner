@@ -66,8 +66,9 @@ class ReconcileAtomicityIT extends AbstractScanWorkerIT {
             ScanLaunchStub.writeSecretFinding(spec.outDir(), "deadbeefcommit", CONTAINER_SHA, "AKIA");
             return new ScannerLauncher.LaunchResult(2, false, "stub log");
         });
+        // ScanStateService calls the 3-arg reconcile(scanId, workspaceId, config) (M7); stub that overload.
         Mockito.doThrow(new IllegalStateException("boom during reconcile"))
-                .when(reconcile).reconcile(any(), any());
+                .when(reconcile).reconcile(any(), any(), any());
 
         GitlabConnection conn = connections.save(GitlabConnection.forProject(
                 WORKSPACE, "file:///tmp/secscan-fixture", "svc/app", 101L, "ct", "read_api,read_repository",

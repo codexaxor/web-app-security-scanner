@@ -10,9 +10,26 @@ import java.util.Map;
  * was scanned) — the worker treats that as "no access", distinct from a scanner that ran and failed.
  */
 public record ParsedScan(boolean cloneFailed, String commit, Map<String, String> toolVersions,
-                         List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings) {
+                         List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings,
+                         SecscanConfig config, List<DeclaredScope> declaredScopes, String scopeInventoryStatus,
+                         List<String> unreadableScopeManifests) {
+
+    /** The scope inventory ran cleanly; {@code "ok"} means dev/test scope state is authoritative this scan (S3). */
+    public static final String SCOPE_STATUS_OK = "ok";
+
+    public ParsedScan {
+        scopeInventoryStatus = scopeInventoryStatus == null ? SCOPE_STATUS_OK : scopeInventoryStatus;
+        unreadableScopeManifests = unreadableScopeManifests == null ? List.of()
+                : List.copyOf(unreadableScopeManifests);
+    }
+
+    /** True when the dev/test scope inventory failed GLOBALLY → the worker freezes all scope-derived triage (S3). */
+    public boolean scopeInventoryFailed() {
+        return !SCOPE_STATUS_OK.equals(scopeInventoryStatus);
+    }
 
     public static ParsedScan cloneFailure() {
-        return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of());
+        return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of(), SecscanConfig.absent(),
+                List.of(), SCOPE_STATUS_OK, List.of());
     }
 }

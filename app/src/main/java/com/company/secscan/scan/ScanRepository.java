@@ -25,4 +25,8 @@ public interface ScanRepository extends JpaRepository<Scan, UUID> {
      */
     boolean existsByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullAndCreatedAtGreaterThan(
             UUID workspaceId, UUID repositoryId, java.time.Instant createdAt);
+
+    /** The most recently reconciled scan of a repository — the basis for an API-time unignore's status (D-058). */
+    Optional<Scan> findFirstByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullOrderByReconciledAtDesc(
+            UUID workspaceId, UUID repositoryId);
 }

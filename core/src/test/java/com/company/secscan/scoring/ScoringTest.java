@@ -192,4 +192,69 @@ class ScoringTest {
         assertThat(has(r, "test_path")).isFalse();
         assertThat(r.score()).isEqualTo(75);
     }
+
+    // --- EPSS scoring tiers (D-060): scoring-only, off by default, strict bands, no double-apply ---
+
+    private static ScoreInput scaEpss(String maxSeverity, String label, Double epss, boolean enabled) {
+        return scaEpss(maxSeverity, label, epss, enabled, false);
+    }
+
+    private static ScoreInput scaEpss(String maxSeverity, String label, Double epss, boolean enabled,
+                                      boolean onKev) {
+        return new ScoreInput("sca", maxSeverity, label, null, onKev, "normal", null, false, epss, enabled);
+    }
+
+    @Test
+    void epssTierIsNotAppliedWhenTheToggleIsOff() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.001, false));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void epssBelowFivePercentSubtractsTenWhenEnabled() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.02, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+        assertThat(r.score()).isEqualTo(40); // 50 − 10
+    }
+
+    @Test
+    void epssBetweenFiveAndTenPercentSubtractsFiveWhenEnabled() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.07, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-5);
+        assertThat(r.score()).isEqualTo(45); // 50 − 5
+    }
+
+    @Test
+    void epssAtOrAboveTenPercentHasNoTier() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.10, true));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void theTwoTiersNeverBothApply() {
+        // A single finding gets AT MOST one epss_tier line (−10 OR −5), never two. At 2% the −10 tier applies.
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.02, true));
+        long epssLines = r.breakdown().stream().filter(l -> l.code().equals("epss_tier")).count();
+        assertThat(epssLines).isEqualTo(1);
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+    }
+
+    @Test
+    void nonKevBelowOnePercentGetsNoScoreTier() {
+        // Review S1: a non-KEV finding below 1% qualifies for the LOW_EPSS STATUS auto-ignore, so its score is
+        // NOT also docked — no epss_tier line (strict bands; the status path owns it).
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.0099, true));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void kevBelowOnePercentStillGetsTheMinusTenTier() {
+        // Review S1: KEV is never status-auto-ignored, so a KEV finding below 1% keeps the −10 score tier.
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.0099, true, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+        assertThat(r.score()).isEqualTo(45); // base 50 + KEV 5 − EPSS 10
+    }
 }
