@@ -33,19 +33,33 @@ public final class PathExclusion {
      * prefixes from {@code .secscan.yml}). A null/blank path is never excluded.
      */
     public static boolean isExcluded(String filePath, List<String> extraPrefixes) {
+        return isExcluded(filePath, extraPrefixes, true);
+    }
+
+    /**
+     * True when {@code filePath} is excluded. {@code extraPrefixes} ({@code .secscan.yml exclude.paths}) ALWAYS
+     * apply, to every finding type. When {@code applyDefaults} is false the SPEC default dirs and minified-file
+     * rules are skipped — used for {@code secret} findings (D-064): a build/vendor/minified artifact is noise for
+     * SCA/SAST/IaC, but a leaked credential in {@code dist/} or a {@code *.min.js} is still a real exposure, so
+     * the defaults must not silently hide it. Only an explicit repo-authored {@code exclude.paths} entry may.
+     * A null/blank path is never excluded.
+     */
+    public static boolean isExcluded(String filePath, List<String> extraPrefixes, boolean applyDefaults) {
         String path = normalize(filePath);
         if (path.isEmpty()) {
             return false;
         }
         String[] segments = path.split("/");
-        for (String seg : segments) {
-            if (DEFAULT_DIRS.contains(seg)) {
+        if (applyDefaults) {
+            for (String seg : segments) {
+                if (DEFAULT_DIRS.contains(seg)) {
+                    return true;
+                }
+            }
+            String last = segments[segments.length - 1].toLowerCase(Locale.ROOT);
+            if (last.endsWith(".min.js") || last.endsWith(".min.css")) {
                 return true;
             }
-        }
-        String last = segments[segments.length - 1].toLowerCase(Locale.ROOT);
-        if (last.endsWith(".min.js") || last.endsWith(".min.css")) {
-            return true;
         }
         if (extraPrefixes != null) {
             for (String raw : extraPrefixes) {

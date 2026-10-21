@@ -164,7 +164,10 @@ public class TriageApplier {
     private ReasonCode autoReason(SubIssue sub, TriageContext triage, Map<String, Set<String>> sastRuleIdsByFile) {
         SecscanConfig config = triage.config();
         List<String> extraPaths = config.present() ? config.excludePaths() : List.of();
-        if (PathExclusion.isExcluded(sub.getFilePath(), extraPaths)) {
+        // D-064: the SPEC default dirs + minified-file rules do NOT apply to secrets (a leaked credential in
+        // dist/ or a *.min.js is still a real exposure); an explicit .secscan.yml exclude.paths entry still does.
+        boolean applyDefaults = !RawFinding.TYPE_SECRET.equals(sub.getType());
+        if (PathExclusion.isExcluded(sub.getFilePath(), extraPaths, applyDefaults)) {
             return ReasonCode.EXCLUDED_PATH;
         }
         if (RawFinding.TYPE_SECRET.equals(sub.getType())

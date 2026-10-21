@@ -50,4 +50,16 @@ class PathExclusionTest {
         assertThat(PathExclusion.isDefaultExcluded(null)).isFalse();
         assertThat(PathExclusion.isDefaultExcluded("")).isFalse();
     }
+
+    @Test
+    void withoutDefaultsOnlyExplicitPrefixesExcludeForSecrets() {
+        // D-064: for secrets the default dirs + minified rules are skipped, but an explicit .secscan.yml
+        // exclude.paths entry still applies. A leaked key in dist/ or a *.min.js is a real exposure.
+        assertThat(PathExclusion.isExcluded("dist/app.js", List.of(), false)).as("default dir skipped").isFalse();
+        assertThat(PathExclusion.isExcluded("web/app.min.js", List.of(), false)).as("minified skipped").isFalse();
+        assertThat(PathExclusion.isExcluded("dist/app.js", List.of("dist"), false))
+                .as("explicit prefix still applies").isTrue();
+        // Defaults still fire for non-secret findings (applyDefaults = true).
+        assertThat(PathExclusion.isExcluded("dist/app.js", List.of(), true)).isTrue();
+    }
 }
