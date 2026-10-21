@@ -90,14 +90,17 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         SubIssue control = byFile(subs, "src/main/App.java");
         assertThat(control.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
 
-        // --- Scan 2: config no longer lists the CVE or src/legacy → those re-evaluate (unignore) ---
+        // --- Scan 2: config STILL PRESENT but with the CVE and src/legacy removed → those re-evaluate
+        // (unignore), each with a triage_event (review S8). The config is valid (not frozen), so the revoke
+        // lifecycle runs. ---
         UUID scan2 = seedScan(repo);
         seedSca(scan2, repo, IGNORED_CVE, "org.apache.commons:commons-text", "pom.xml");
         seedSast(scan2, repo, "opengrep-rules.custom.x", "build/generated/App.java");
         seedSast(scan2, repo, "opengrep-rules.custom.y", "src/legacy/Old.java");
         seedSast(scan2, repo, "opengrep-rules.custom.z", "src/main/App.java");
 
-        reconcile.reconcile(scan2, WORKSPACE, TriageContext.empty());
+        SecscanConfig reduced = new SecscanConfig(true, List.of(), Map.of(), false); // present, CVE+path removed
+        reconcile.reconcile(scan2, WORKSPACE, new TriageContext(reduced, java.util.List.of(), false));
 
         List<SubIssue> after = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
         // The revoked .secscan.yml CVE rule is gone; the CVE finding returns to open (seen this scan).
@@ -108,8 +111,10 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         assertThat(cve2.getIgnoreReason()).isNull();
         assertUnignoredEvent(cve2);
 
-        // The .secscan.yml path is no longer excluded → that finding reopens too.
-        assertThat(byFile(after, "src/legacy/Old.java").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        // The .secscan.yml path is no longer excluded → that finding reopens too, WITH its own unignored event.
+        SubIssue legacy2 = byFile(after, "src/legacy/Old.java");
+        assertThat(legacy2.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        assertUnignoredEvent(legacy2);
         // The default-glob exclusion is independent of the config → stays ignored.
         assertThat(byFile(after, "build/generated/App.java").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
     }
