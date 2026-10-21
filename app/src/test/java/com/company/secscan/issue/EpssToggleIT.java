@@ -26,7 +26,7 @@ class EpssToggleIT extends TriageSeedSupport {
     @Autowired TriageEventRepository events;
 
     private static TriageContext epss(boolean enabled) {
-        return new TriageContext(SecscanConfig.absent(), Map.of(), false, enabled);
+        return new TriageContext(SecscanConfig.absent(), java.util.List.of(), false, enabled);
     }
 
     @Test

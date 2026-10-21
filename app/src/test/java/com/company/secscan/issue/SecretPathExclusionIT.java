@@ -51,7 +51,7 @@ class SecretPathExclusionIT extends AbstractScanWorkerIT {
 
         // .secscan.yml excludes only "legacy".
         SecscanConfig cfg = new SecscanConfig(true, List.of("legacy"), Map.of(), false);
-        reconcile.reconcile(scan, WORKSPACE, new TriageContext(cfg, Map.of(), false));
+        reconcile.reconcile(scan, WORKSPACE, new TriageContext(cfg, java.util.List.of(), false));
 
         List<SubIssue> subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
         assertThat(byFile(subs, "dist/app.js").getStatus()).as("secret in dist/ is a real exposure")

@@ -12,6 +12,7 @@ import com.company.secscan.scan.ScanFindingRepository;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
+import com.company.secscan.scan.parse.DeclaredScope;
 import com.company.secscan.scan.parse.SecscanConfig;
 import com.company.secscan.support.AbstractScanWorkerIT;
 import com.company.secscan.triage.ReasonCode;
@@ -41,10 +42,10 @@ class DevTestScopeIT extends AbstractScanWorkerIT {
     @Autowired GitlabConnectionRepository connections;
     @Autowired RepositoryRepository repositories;
 
-    // coordinate -> declared scope, as our inventory would emit
-    private static final Map<String, String> SCOPES = Map.of(
-            "junit:junit", "test",           // Maven test scope
-            "mocha", "dev");                 // npm devDependency
+    // (manifest, coordinate) -> declared scope, as our inventory would emit (review S4: keyed per manifest).
+    private static final List<DeclaredScope> SCOPES = List.of(
+            new DeclaredScope("pom.xml", "junit:junit", "test"),         // Maven test scope
+            new DeclaredScope("package.json", "mocha", "dev"));          // npm devDependency
 
     @Test
     void testScopedDepIsAutoIgnoredWhenDevDepsOff() {
@@ -92,9 +93,36 @@ class DevTestScopeIT extends AbstractScanWorkerIT {
         assertThat(byPkg(repo, "junit:junit").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
     }
 
+    @Test
+    void scopeIsKeyedPerManifestNotFlat() {
+        // Review S4: junit:junit is test-scoped only in moduleA/pom.xml. A finding for the SAME coordinate in a
+        // DIFFERENT manifest (moduleB/pom.xml, where it is a compile dep) must stay OPEN — the scope is keyed by
+        // (manifest, coordinate), never a flat coordinate map. com.x:prod in B has no scope entry -> OPEN too.
+        UUID repo = seedRepo(false);
+        UUID scan = seedScan(repo);
+        seedSca(scan, repo, "CVE-2020-1001", "junit:junit", "Maven", "moduleA/pom.xml"); // test here -> ignored
+        seedSca(scan, repo, "CVE-2020-1002", "junit:junit", "Maven", "moduleB/pom.xml"); // not declared here -> open
+        seedSca(scan, repo, "CVE-2020-1003", "com.x:prod", "Maven", "moduleB/pom.xml");  // prod -> open
+
+        List<DeclaredScope> scopes = List.of(new DeclaredScope("moduleA/pom.xml", "junit:junit", "test"));
+        reconcile.reconcile(scan, WORKSPACE, new TriageContext(SecscanConfig.absent(), scopes, false));
+
+        SubIssue inA = byVuln(repo, "CVE-2020-1001");
+        assertThat(inA.getStatus()).as("test-scoped in its own manifest").isEqualTo(SubIssue.STATUS_IGNORED);
+        assertThat(inA.getIgnoreReason()).isEqualTo(ReasonCode.TEST_SCOPE.code());
+        assertThat(byVuln(repo, "CVE-2020-1002").getStatus())
+                .as("same coordinate, a different manifest -> not auto-ignored").isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(byVuln(repo, "CVE-2020-1003").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+    }
+
     private SubIssue byPkg(UUID repo, String pkg) {
         return subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo).stream()
                 .filter(s -> pkg.equals(s.getPackageName())).findFirst().orElseThrow();
+    }
+
+    private SubIssue byVuln(UUID repo, String vulnId) {
+        return subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo).stream()
+                .filter(s -> vulnId.equals(s.getVulnId())).findFirst().orElseThrow();
     }
 
     private UUID seedRepo(boolean includeDevDeps) {

@@ -2,9 +2,9 @@ package com.company.secscan.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.company.secscan.scan.parse.DeclaredScope;
 import com.company.secscan.scan.parse.SecscanConfig;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,7 +39,7 @@ class TriageStabilityIT extends TriageSeedSupport {
     @Test
     void togglingIncludeDevDepsWritesOnlyIgnoreOrUnignoreNeverSolveOrReopen() {
         UUID repo = seedRepo();
-        Map<String, String> scopes = Map.of("junit:junit", "test");
+        List<DeclaredScope> scopes = List.of(new DeclaredScope("pom.xml", "junit:junit", "test"));
 
         // Scan 1, dev-deps OFF -> the test-scoped dep is auto-ignored TEST_SCOPE.
         UUID scan1 = seedScan(repo);

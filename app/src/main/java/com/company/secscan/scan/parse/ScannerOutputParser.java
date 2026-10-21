@@ -108,18 +108,23 @@ public class ScannerOutputParser {
                 toDeclaredScopes(m.declaredScopes));
     }
 
-    /** Reduces the manifest's declared-scope entries (D-059) to a {@code coordinate -> scope} map for the worker. */
-    private Map<String, String> toDeclaredScopes(List<ManifestScope> entries) {
+    /**
+     * Carries the manifest's declared-scope entries (D-059) through as typed {@link DeclaredScope}s keyed by
+     * (manifest path, coordinate) — NOT a flat {@code coordinate -> scope} map (review S4), so a coordinate that
+     * is test-scoped in one module but production in another is kept distinct per manifest. The in-container
+     * inventory already suppresses any coordinate declared production anywhere in the repo.
+     */
+    private List<DeclaredScope> toDeclaredScopes(List<ManifestScope> entries) {
         if (entries == null || entries.isEmpty()) {
-            return Map.of();
+            return List.of();
         }
-        Map<String, String> out = new java.util.HashMap<>();
+        List<DeclaredScope> out = new ArrayList<>();
         for (ManifestScope s : entries) {
-            if (s.coordinate != null && s.scope != null) {
-                out.put(s.coordinate, s.scope);
+            if (s.coordinate != null && s.scope != null && s.filePath != null) {
+                out.add(new DeclaredScope(s.filePath, s.coordinate, s.scope));
             }
         }
-        return out;
+        return List.copyOf(out);
     }
 
     /** Maps the manifest's bounded {@code .secscan.yml} block (D-057) to the typed {@link SecscanConfig}. */

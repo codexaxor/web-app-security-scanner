@@ -180,7 +180,10 @@ public class TriageApplier {
             return ReasonCode.DUPLICATE_RULE;
         }
         if (RawFinding.TYPE_SCA.equals(sub.getType()) && !triage.effectiveIncludeDev()) {
-            String scope = triage.scopeOf(sub.getPackageName());
+            // Keyed by (manifest path, coordinate), review S4: a dep is dev/test only when ITS OWN manifest
+            // declares it so. The in-container inventory already dropped any coordinate that is production in any
+            // manifest of the repo.
+            String scope = triage.scopeOf(sub.getFilePath(), sub.getPackageName());
             if ("test".equals(scope)) {
                 return ReasonCode.TEST_SCOPE;
             }

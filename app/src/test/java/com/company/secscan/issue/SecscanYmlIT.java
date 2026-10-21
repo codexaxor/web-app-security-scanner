@@ -59,7 +59,7 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         seedSast(scan1, repo, "opengrep-rules.custom.z", "src/main/App.java");           // control, stays open
 
         SecscanConfig cfg = new SecscanConfig(true, List.of("src/legacy"), Map.of(IGNORED_CVE, REASON), false);
-        reconcile.reconcile(scan1, WORKSPACE, new TriageContext(cfg, Map.of(), false));
+        reconcile.reconcile(scan1, WORKSPACE, new TriageContext(cfg, java.util.List.of(), false));
 
         // Nothing dropped — all four findings persist as sub-issues.
         List<SubIssue> subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);

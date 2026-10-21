@@ -21,6 +21,21 @@ def _coords(scopes, scope=None):
     return {s["coordinate"] for s in scopes if scope is None or s["scope"] == scope}
 
 
+def json_dumps_lock():
+    # npm v3 lockfile: mocha is a pure dev transitive; debug appears both as a dev path (under mocha) AND as a
+    # prod path (under express), so it must stay visible; express is prod.
+    return """{
+      "lockfileVersion": 3,
+      "packages": {
+        "": {"name": "app"},
+        "node_modules/express": {"version": "4.0.0"},
+        "node_modules/mocha": {"version": "10.0.0", "dev": true},
+        "node_modules/mocha/node_modules/debug": {"version": "4.0.0", "dev": true},
+        "node_modules/express/node_modules/debug": {"version": "4.0.0"}
+      }
+    }"""
+
+
 class ScopeInventoryTest(unittest.TestCase):
 
     def test_maven_test_scope_is_marked_prod_is_not(self):
@@ -56,6 +71,40 @@ class ScopeInventoryTest(unittest.TestCase):
         }"""
         scopes = _scan({"build.gradle": build})
         self.assertEqual(_coords(scopes), set())
+
+    def test_multi_module_prod_in_one_module_suppresses_test_in_another(self):
+        # review S4: com.x:lib is test-scoped in module A but a compile dependency in module B. Because it is
+        # production SOMEWHERE in the repo, it is NOT marked dev/test anywhere -> B's (and A's) finding stays open.
+        pom_a = ("<project><dependencies><dependency><groupId>com.x</groupId>"
+                 "<artifactId>lib</artifactId><scope>test</scope></dependency></dependencies></project>")
+        pom_b = ("<project><dependencies><dependency><groupId>com.x</groupId>"
+                 "<artifactId>lib</artifactId></dependency></dependencies></project>")
+        scopes = _scan({"moduleA/pom.xml": pom_a, "moduleB/pom.xml": pom_b})
+        self.assertEqual(_coords(scopes, "test"), set())
+
+    def test_test_scope_emitted_per_manifest_when_not_prod_anywhere(self):
+        # review S4: the emitted entry carries ITS OWN manifest path (keyed per manifest, not a flat map).
+        pom_a = ("<project><dependencies><dependency><groupId>com.x</groupId>"
+                 "<artifactId>lib</artifactId><scope>test</scope></dependency></dependencies></project>")
+        pom_b = ("<project><dependencies><dependency><groupId>com.y</groupId>"
+                 "<artifactId>other</artifactId></dependency></dependencies></project>")
+        scopes = _scan({"moduleA/pom.xml": pom_a, "moduleB/pom.xml": pom_b})
+        self.assertEqual([(s["coordinate"], s["scope"], s["filePath"]) for s in scopes],
+                         [("com.x:lib", "test", os.path.join("moduleA", "pom.xml"))])
+
+    def test_npm_lock_dev_transitive_that_is_also_prod_is_not_marked(self):
+        # review S4: a package-lock dev:true transitive (mocha) is marked, but one that is ALSO reached as a prod
+        # (dev:false) transitive (debug) stays visible. Entries are attributed to the lockfile path.
+        pkg = """{"dependencies": {"express": "4.0.0"}, "devDependencies": {"mocha": "10.0.0"}}"""
+        lock = json_dumps_lock()
+        scopes = _scan({"package.json": pkg, "package-lock.json": lock})
+        self.assertEqual(_coords(scopes, "dev"), {"mocha"})
+        self.assertNotIn("debug", _coords(scopes))
+        self.assertNotIn("express", _coords(scopes))
+        # mocha is marked both from package.json (direct devDep) and from the lockfile; the lockfile attribution
+        # is what matches an OSV npm finding (reported against the lockfile).
+        self.assertIn("package-lock.json",
+                      {s["filePath"] for s in scopes if s["coordinate"] == "mocha"})
 
     def test_symlinked_manifest_is_not_followed(self):
         with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as root:

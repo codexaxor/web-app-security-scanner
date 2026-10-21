@@ -11,10 +11,10 @@ import java.util.Map;
  */
 public record ParsedScan(boolean cloneFailed, String commit, Map<String, String> toolVersions,
                          List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings,
-                         SecscanConfig config, Map<String, String> declaredScopes) {
+                         SecscanConfig config, List<DeclaredScope> declaredScopes) {
 
     public static ParsedScan cloneFailure() {
         return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of(), SecscanConfig.absent(),
-                Map.of());
+                List.of());
     }
 }
