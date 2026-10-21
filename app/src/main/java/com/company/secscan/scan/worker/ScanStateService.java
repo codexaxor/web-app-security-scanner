@@ -156,7 +156,7 @@ public class ScanStateService {
                 .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
         com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
                 parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore,
-                parsed.scopeInventoryFailed());
+                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests());
         reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {

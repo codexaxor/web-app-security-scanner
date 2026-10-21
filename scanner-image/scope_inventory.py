@@ -55,10 +55,12 @@ def _strip_ns(tag):
 
 def scan(checkout):
     # candidates are collected per manifest; prod[ecosystem] is a REPO-WIDE set that suppresses any coordinate
-    # declared production anywhere (review S4).
+    # declared production anywhere (review S4). A manifest that cannot be parsed is named in `unreadable` so the
+    # worker can FREEZE that one manifest's prior scope state (review SF3) without affecting the others.
     candidates = []  # list of {coordinate, scope, ecosystem, filePath}
     prod = {ECO_MAVEN: set(), ECO_NPM: set()}
     warnings = []
+    unreadable = []
     root_real = os.path.realpath(checkout)
     for dirpath, dirnames, filenames in os.walk(checkout, followlinks=False):
         dirnames[:] = [d for d in dirnames if d != ".git" and not os.path.islink(os.path.join(dirpath, d))]
@@ -70,9 +72,9 @@ def scan(checkout):
                 continue
             rel = os.path.relpath(path, checkout)
             if name == "pom.xml":
-                _maven(path, rel, candidates, prod)
+                _maven(path, rel, candidates, prod, warnings, unreadable)
             elif name == "package.json":
-                _npm(path, rel, dirpath, checkout, candidates, prod)
+                _npm(path, rel, dirpath, checkout, candidates, prod, warnings, unreadable)
             elif name in ("build.gradle", "build.gradle.kts"):
                 _gradle(path, rel, candidates, prod)
 
@@ -88,13 +90,22 @@ def scan(checkout):
         seen.add(key)
         scopes.append(c)
     scopes.sort(key=lambda s: (s["filePath"], s["coordinate"]))
-    return {"scopes": scopes, "warnings": warnings, "status": "ok"}
+    return {"scopes": scopes, "warnings": warnings, "unreadableManifests": sorted(set(unreadable)),
+            "status": "ok"}
 
 
-def _maven(path, rel, candidates, prod):
+def _unreadable(warnings, unreadable, rel, kind):
+    warnings.append({"code": "SCOPE_MANIFEST_UNREADABLE",
+                     "message": "%s could not be parsed; its prior dev/test scope state is frozen." % kind,
+                     "filePath": rel})
+    unreadable.append(rel)
+
+
+def _maven(path, rel, candidates, prod, warnings, unreadable):
     try:
         tree = ET.parse(path)
     except (ET.ParseError, OSError):
+        _unreadable(warnings, unreadable, rel, "pom.xml")
         return
     for dep in tree.iter():
         if _strip_ns(dep.tag) != "dependency":
@@ -117,11 +128,12 @@ def _maven(path, rel, candidates, prod):
             prod[ECO_MAVEN].add(coord)
 
 
-def _npm(path, rel, dirpath, checkout, candidates, prod):
+def _npm(path, rel, dirpath, checkout, candidates, prod, warnings, unreadable):
     try:
         doc = json.loads(_read(path) or "{}")
     except json.JSONDecodeError:
-        doc = {}
+        _unreadable(warnings, unreadable, rel, "package.json")
+        doc = None
     if isinstance(doc, dict):
         deps = doc.get("dependencies", {})
         if isinstance(deps, dict):
@@ -135,15 +147,17 @@ def _npm(path, rel, dirpath, checkout, candidates, prod):
     lock_path = os.path.join(dirpath, "package-lock.json")
     if os.path.isfile(lock_path) and not os.path.islink(lock_path):
         lock_rel = os.path.relpath(lock_path, checkout)
-        _npm_lock(lock_path, lock_rel, candidates, prod)
+        _npm_lock(lock_path, lock_rel, candidates, prod, warnings, unreadable)
 
 
-def _npm_lock(path, rel, candidates, prod):
+def _npm_lock(path, rel, candidates, prod, warnings, unreadable):
     try:
         doc = json.loads(_read(path) or "{}")
     except json.JSONDecodeError:
+        _unreadable(warnings, unreadable, rel, "package-lock.json")
         return
     if not isinstance(doc, dict):
+        _unreadable(warnings, unreadable, rel, "package-lock.json")
         return
     # npm v2/v3 lockfile: a "packages" object keyed by "node_modules/<name>" (nested for transitives).
     packages = doc.get("packages")

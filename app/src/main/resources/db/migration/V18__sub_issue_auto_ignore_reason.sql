@@ -1,0 +1,11 @@
+-- M7 re-review (SF1): persist the highest-precedence AUTO ignore cause per sub-issue, INDEPENDENTLY of the
+-- current ignore_reason. When a manual / .secscan.yml IGNORE_RULE holds a finding, ignore_reason = IGNORE_RULE
+-- and the scan-time-only auto cause (TEST_SCOPE / EXCLUDED_PATH via a config path / DUPLICATE_RULE) was lost, so
+-- removing the rule un-suppressed a finding that a still-valid auto cause should keep ignored. This column keeps
+-- that cause so the API (removeRule / EPSS sweep) can re-reason to it with no event; the next reconcile refreshes
+-- it. It is NOT a status column and never drives a triage_event.
+--
+-- Additive only; V1-V17 untouched. Nullable, no backfill: existing rows get NULL until their next reconcile
+-- recomputes the value. Carries no workspace_id of its own — it is a column on the already-workspace-scoped
+-- sub_issue (domain rule 1).
+alter table sub_issue add column auto_ignore_reason text;

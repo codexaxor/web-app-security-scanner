@@ -106,6 +106,33 @@ class ScopeInventoryTest(unittest.TestCase):
         self.assertIn("package-lock.json",
                       {s["filePath"] for s in scopes if s["coordinate"] == "mocha"})
 
+    def test_unparseable_pom_is_named_unreadable_and_does_not_affect_other_modules(self):
+        # review SF3: a bad pom is named in unreadableManifests with a warning; module B still inventories.
+        bad = "<project><dependencies><dependency><groupId>x</artifactId></project>"  # malformed XML
+        pom_b = ("<project><dependencies><dependency><groupId>com.y</groupId>"
+                 "<artifactId>lib</artifactId><scope>test</scope></dependency></dependencies></project>")
+        with tempfile.TemporaryDirectory() as root:
+            for rel, content in {"moduleA/pom.xml": bad, "moduleB/pom.xml": pom_b}.items():
+                path = os.path.join(root, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+            result = scope_inventory.scan(root)
+        self.assertIn(os.path.join("moduleA", "pom.xml"), result["unreadableManifests"])
+        self.assertTrue(any(w["code"] == "SCOPE_MANIFEST_UNREADABLE"
+                            and w["filePath"] == os.path.join("moduleA", "pom.xml") for w in result["warnings"]))
+        self.assertEqual(_coords(result["scopes"], "test"), {"com.y:lib"})  # module B unaffected
+        self.assertEqual(result["status"], "ok")  # a per-manifest failure is NOT a global failure
+
+    def test_unparseable_package_lock_is_named_unreadable(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "package.json"), "w") as fh:
+                fh.write('{"devDependencies": {"mocha": "10.0.0"}}')
+            with open(os.path.join(root, "package-lock.json"), "w") as fh:
+                fh.write("{not json")
+            result = scope_inventory.scan(root)
+        self.assertIn("package-lock.json", result["unreadableManifests"])
+
     def test_symlinked_manifest_is_not_followed(self):
         with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as root:
             tgt = os.path.join(outside, "pom.xml")

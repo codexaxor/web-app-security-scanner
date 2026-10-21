@@ -10,6 +10,7 @@ import com.company.secscan.triage.ReasonCode;
 import com.company.secscan.triage.SecretPlaceholder;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +39,15 @@ public final class TriageResolver {
 
     private static final DuplicateRuleMap DUPLICATE_RULES = DuplicateRuleMap.defaults();
 
+    /**
+     * Auto causes the API cannot recompute from persisted state (config exclude paths, declared dev/test scope,
+     * duplicate SAST rule) — so when they hold, the stored {@code auto_ignore_reason} (SF1) carries them into an
+     * API-time resolution. LOW_EPSS and SECRET_PLACEHOLDER are NOT here: they are recomputed live (the EPSS toggle
+     * and the file path), so the EPSS sweep can still clear a toggled-off LOW_EPSS.
+     */
+    private static final Set<ReasonCode> SCAN_TIME_ONLY = EnumSet.of(
+            ReasonCode.EXCLUDED_PATH, ReasonCode.DUPLICATE_RULE, ReasonCode.DEV_DEPENDENCY, ReasonCode.TEST_SCOPE);
+
     private TriageResolver() {
     }
 
@@ -50,7 +60,8 @@ public final class TriageResolver {
      * subset derivable from persisted state via {@link #api(boolean)} (path causes + the EPSS toggle).
      */
     public record AutoContext(List<String> configExcludePaths, boolean effectiveIncludeDev, ScopeLookup scopes,
-                       Map<String, Set<String>> sastRuleIdsByFile, boolean epssEnabled) {
+                       Map<String, Set<String>> sastRuleIdsByFile, boolean epssEnabled,
+                       boolean useStoredAutoReason) {
 
         public AutoContext {
             configExcludePaths = configExcludePaths == null ? List.of() : List.copyOf(configExcludePaths);
@@ -58,9 +69,18 @@ public final class TriageResolver {
             sastRuleIdsByFile = sastRuleIdsByFile == null ? Map.of() : sastRuleIdsByFile;
         }
 
-        /** The API context: no scan-time config/scope/duplicate inputs; EPSS toggle as given. */
+        /** Reconcile context: every cause recomputed live, the stored auto reason not consulted. */
+        public AutoContext(List<String> configExcludePaths, boolean effectiveIncludeDev, ScopeLookup scopes,
+                           Map<String, Set<String>> sastRuleIdsByFile, boolean epssEnabled) {
+            this(configExcludePaths, effectiveIncludeDev, scopes, sastRuleIdsByFile, epssEnabled, false);
+        }
+
+        /**
+         * The API context (removeRule / EPSS sweep): no scan-time config/scope/duplicate inputs, EPSS toggle as
+         * given, and the stored {@code auto_ignore_reason} consulted for the scan-time-only causes (SF1).
+         */
         public static AutoContext api(boolean epssEnabled) {
-            return new AutoContext(List.of(), false, (m, c) -> null, Map.of(), epssEnabled);
+            return new AutoContext(List.of(), false, (m, c) -> null, Map.of(), epssEnabled, true);
         }
     }
 
@@ -122,7 +142,32 @@ public final class TriageResolver {
         if (ctx.epssEnabled() && EpssPolicy.isLowEpssAutoIgnore(epss(sub.getEpss()), sub.isInKev())) {
             out.add(ReasonCode.LOW_EPSS);
         }
+        // SF1: at API time the scan-time-only causes cannot be recomputed, so the stored auto_ignore_reason
+        // (written every reconcile) carries them in — a removeRule over a TEST_SCOPE / config-EXCLUDED_PATH /
+        // DUPLICATE_RULE finding keeps it ignored under that cause.
+        if (ctx.useStoredAutoReason()) {
+            ReasonCode stored = parseReason(sub.getAutoIgnoreReason());
+            if (stored != null && SCAN_TIME_ONLY.contains(stored)) {
+                out.add(stored);
+            }
+        }
         return out;
+    }
+
+    /** The highest-precedence AUTO cause (never IGNORE_RULE) for a finding, as a code string, or null (SF1). */
+    static String highestAutoReason(SubIssue sub, AutoContext ctx) {
+        return ReasonAssignment.highest(autoReasons(sub, ctx)).map(ReasonCode::code).orElse(null);
+    }
+
+    private static ReasonCode parseReason(String code) {
+        if (code == null) {
+            return null;
+        }
+        try {
+            return ReasonCode.valueOf(code);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static IgnoreMatcher.Finding finding(SubIssue sub, String groupKey) {

@@ -1,11 +1,13 @@
 package com.company.secscan.issue;
 
 import com.company.secscan.scan.parse.SecscanConfig;
+import com.company.secscan.triage.PathExclusion;
 import com.company.secscan.triage.ReasonCode;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -65,7 +67,10 @@ public class TriageApplier {
         // no NEW config-path ignore is created; the unignore guard below then also leaves prior config-/scope-
         // derived ignores untouched. Every other triage source still runs.
         boolean configFrozen = triage.config().frozen();
-        boolean scopeFrozen = triage.scopeInventoryFailed();
+        // SF2: an unreadable config also freezes dev/test for the whole scan (its include_dev_dependencies — and
+        // thus the effective-include-dev — is unknown, so we must not flip scope-derived ignores on a guess).
+        boolean globalScopeFrozen = triage.scopeInventoryFailed() || configFrozen;
+        Set<String> unreadableManifests = triage.unreadableManifestsNormalized(); // SF3: per-manifest freeze
         if (!configFrozen) {
             materializeSecscanCveRules(workspaceId, repositoryId, triage.config());
         }
@@ -76,12 +81,19 @@ public class TriageApplier {
             groupKeyById.put(g.getId(), g.getGroupKey());
         }
 
-        TriageResolver.AutoContext ctx = autoContext(triage, sastRuleIdsByFile, configFrozen);
+        TriageResolver.AutoContext ctx = autoContext(triage, sastRuleIdsByFile, configFrozen,
+                globalScopeFrozen, unreadableManifests);
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId)) {
             if (SubIssue.STATUS_SOLVED.equals(sub.getStatus())) {
                 continue; // N4: auto-ignore evaluates only non-solved findings — a solved finding stays solved
             }
+            boolean scopeFrozenForThis = globalScopeFrozen
+                    || unreadableManifests.contains(PathExclusion.normalize(sub.getFilePath()));
+            // SF1: persist the highest-precedence AUTO cause for this finding every reconcile (no event), even
+            // when an IGNORE_RULE holds it — keeping a frozen source's prior value.
+            updateAutoIgnoreReason(sub, ctx, configFrozen, scopeFrozenForThis);
+
             TriageResolver.Desired desired =
                     TriageResolver.resolve(sub, groupKeyById.get(sub.getGroupId()), rules, ctx);
             boolean ignored = SubIssue.STATUS_IGNORED.equals(sub.getStatus());
@@ -93,13 +105,16 @@ public class TriageApplier {
                     events.save(TriageEvent.system(workspaceId, sub.getId(), from, SubIssue.STATUS_IGNORED,
                             desired.reasonCode(), scanId));
                     touched.add(sub.getGroupId());
-                } else if (hasIgnoreChanged(sub, desired)) {
+                } else if (hasIgnoreChanged(sub, desired)
+                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
                     // Still ignored (hard rule 6) but the holding rule/reason changed — refresh quietly, no event.
+                    // Nit: skip the refresh when the CURRENT reason's source is frozen this scan, so an incomplete
+                    // recompute never downgrades a frozen-source reason (e.g. TEST_SCOPE → a lower live cause).
                     sub.ignore(desired.reasonCode(), desired.ruleId());
                     subIssues.save(sub);
                 }
             } else if (ignored) {
-                if (isFrozenReason(sub, configFrozen, scopeFrozen)) {
+                if (isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
                     continue; // S3: the source that ignored it is unusable this scan — leave it ignored
                 }
                 String newStatus = reconcileStatus(sub, incomingFps, solvableScanners);
@@ -111,6 +126,28 @@ public class TriageApplier {
             }
         }
         return touched;
+    }
+
+    /**
+     * Writes {@code sub.auto_ignore_reason} to the highest-precedence AUTO cause detected this reconcile (SF1).
+     * Never a status change and never a triage_event. When the current stored value came from a source frozen
+     * this scan (config → EXCLUDED_PATH, scope → DEV/TEST), it is KEPT — the freeze-adjusted context cannot
+     * recompute it, so overwriting would lose it.
+     */
+    private void updateAutoIgnoreReason(SubIssue sub, TriageResolver.AutoContext ctx, boolean configFrozen,
+                                        boolean scopeFrozen) {
+        String prior = sub.getAutoIgnoreReason();
+        boolean keepPrior = (configFrozen && ReasonCode.EXCLUDED_PATH.code().equals(prior))
+                || (scopeFrozen && (ReasonCode.DEV_DEPENDENCY.code().equals(prior)
+                        || ReasonCode.TEST_SCOPE.code().equals(prior)));
+        if (keepPrior) {
+            return;
+        }
+        String recomputed = TriageResolver.highestAutoReason(sub, ctx);
+        if (!Objects.equals(prior, recomputed)) {
+            sub.setAutoIgnoreReason(recomputed);
+            subIssues.save(sub); // column-only write; no status change, no event
+        }
     }
 
     /** Reconcile {@code .secscan.yml} CVE ignores to the current file: create new, delete revoked (D-057). */
@@ -150,19 +187,26 @@ public class TriageApplier {
      */
     private static TriageResolver.AutoContext autoContext(TriageContext triage,
                                                           Map<String, Set<String>> sastRuleIdsByFile,
-                                                          boolean configFrozen) {
+                                                          boolean configFrozen, boolean globalScopeFrozen,
+                                                          Set<String> unreadableManifests) {
         SecscanConfig config = triage.config();
         // A frozen config contributes no exclude.paths (S3) — no NEW config-path ignore while it is unusable.
         List<String> extraPaths = (config.present() && !configFrozen) ? config.excludePaths() : List.of();
-        return new TriageResolver.AutoContext(extraPaths, triage.effectiveIncludeDev(), triage::scopeOf,
+        // The scope lookup returns null (no new DEV/TEST) when scope is frozen globally (SF2) or for THIS
+        // manifest (SF3); otherwise it defers to the per-(manifest,coordinate) declared scope.
+        TriageResolver.ScopeLookup scopes = (manifest, coordinate) ->
+                (globalScopeFrozen || unreadableManifests.contains(PathExclusion.normalize(manifest)))
+                        ? null : triage.scopeOf(manifest, coordinate);
+        return new TriageResolver.AutoContext(extraPaths, triage.effectiveIncludeDev(), scopes,
                 sastRuleIdsByFile, triage.epssAutoIgnoreEnabled());
     }
 
     /**
-     * True when a currently-ignored finding's reason came from a source frozen this scan (S3), so it must be left
-     * ignored rather than unignored: a config-derived {@code EXCLUDED_PATH} while the config is frozen, or a
-     * scope-derived {@code DEV_DEPENDENCY}/{@code TEST_SCOPE} while the scope inventory failed. (A default-glob
-     * EXCLUDED_PATH still resolves to a desired, so it never reaches the unignore branch anyway.)
+     * True when a currently-ignored finding's reason came from a source frozen this scan (S3/SF2/SF3), so it must
+     * be left ignored rather than unignored: a config-derived {@code EXCLUDED_PATH} while the config is frozen, or
+     * a scope-derived {@code DEV_DEPENDENCY}/{@code TEST_SCOPE} while scope is frozen for this finding (global
+     * failure, unreadable config, or this manifest unreadable). A default-glob EXCLUDED_PATH still resolves to a
+     * desired, so it never reaches the unignore branch anyway.
      */
     private static boolean isFrozenReason(SubIssue sub, boolean configFrozen, boolean scopeFrozen) {
         String reason = sub.getIgnoreReason();

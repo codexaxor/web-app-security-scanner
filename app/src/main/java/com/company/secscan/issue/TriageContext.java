@@ -4,8 +4,10 @@ import com.company.secscan.scan.parse.DeclaredScope;
 import com.company.secscan.scan.parse.SecscanConfig;
 import com.company.secscan.triage.PathExclusion;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The scan-time inputs the triage step applies beyond the stored findings (M7): the parsed {@code .secscan.yml}
@@ -21,26 +23,46 @@ import java.util.Map;
  * <p>None of these are fingerprint inputs; they are triage attributes recomputed every scan.
  */
 public record TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
-                            boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed) {
+                            boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed,
+                            List<String> unreadableScopeManifests) {
 
     private static final String SEP = "\u0000";
     private static final TriageContext EMPTY =
-            new TriageContext(SecscanConfig.absent(), List.of(), false, false, false);
+            new TriageContext(SecscanConfig.absent(), List.of(), false, false, false, List.of());
 
     public TriageContext {
         config = config == null ? SecscanConfig.absent() : config;
         declaredScopes = declaredScopes == null ? List.of() : List.copyOf(declaredScopes);
+        unreadableScopeManifests = unreadableScopeManifests == null ? List.of()
+                : List.copyOf(unreadableScopeManifests);
+    }
+
+    /** 5-arg (no per-manifest unreadable set) for callers predating SF1/SF3. */
+    public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
+                         boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed) {
+        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, scopeInventoryFailed, List.of());
     }
 
     /** 4-arg (scope inventory OK) for the common case. */
     public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
                          boolean epssAutoIgnoreEnabled) {
-        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, false);
+        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, false, List.of());
     }
 
     /** Back-compatible 3-arg (EPSS toggle off) for callers predating the LOW_EPSS wiring. */
     public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev) {
-        this(config, declaredScopes, effectiveIncludeDev, false, false);
+        this(config, declaredScopes, effectiveIncludeDev, false, false, List.of());
+    }
+
+    /** The repo-relative manifest paths whose scope could not be read this scan (SF3), normalized. */
+    public Set<String> unreadableManifestsNormalized() {
+        Set<String> out = new HashSet<>();
+        for (String m : unreadableScopeManifests) {
+            if (m != null) {
+                out.add(PathExclusion.normalize(m));
+            }
+        }
+        return out;
     }
 
     /** No config, no declared scopes, dev deps not included (existing callers/tests). */

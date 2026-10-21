@@ -144,6 +144,16 @@ public class SubIssue {
     @Column(name = "ignored_at")
     private Instant ignoredAt;
 
+    /**
+     * The highest-precedence AUTO cause currently detected for this finding (EXCLUDED_PATH / SECRET_PLACEHOLDER /
+     * DEV_DEPENDENCY / TEST_SCOPE / LOW_EPSS / DUPLICATE_RULE), or null when no auto cause applies (SF1, V18).
+     * Written every reconcile INDEPENDENTLY of {@link #ignoreReason} — even when an {@code IGNORE_RULE} holds the
+     * finding — so the API (removeRule / EPSS sweep) can keep a finding ignored under a scan-time-only cause it
+     * cannot itself recompute. Writing it is never a status change and never writes a triage_event.
+     */
+    @Column(name = "auto_ignore_reason")
+    private String autoIgnoreReason;
+
     @Column(name = "first_seen_scan_id")
     private UUID firstSeenScanId;
 
@@ -420,6 +430,15 @@ public class SubIssue {
 
     public String getStatus() {
         return status;
+    }
+
+    public String getAutoIgnoreReason() {
+        return autoIgnoreReason;
+    }
+
+    /** Sets the detected auto cause (SF1). Never a status change; the caller writes no triage_event. */
+    public void setAutoIgnoreReason(String autoIgnoreReason) {
+        this.autoIgnoreReason = autoIgnoreReason;
     }
 
     public String getIgnoreReason() {

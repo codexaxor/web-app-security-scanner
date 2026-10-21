@@ -105,8 +105,10 @@ public class ScannerOutputParser {
 
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
         String scopeStatus = m.scopeInventoryStatus == null ? ParsedScan.SCOPE_STATUS_OK : m.scopeInventoryStatus;
+        List<String> unreadable = m.unreadableScopeManifests == null ? List.of()
+                : List.copyOf(m.unreadableScopeManifests);
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable);
     }
 
     /**
@@ -787,6 +789,8 @@ public class ScannerOutputParser {
         public List<ManifestScope> declaredScopes;
         /** The scope inventory's own status ("ok"/"error"); "error" freezes dev/test triage (review S3). */
         public String scopeInventoryStatus;
+        /** Manifests the inventory could not parse; the worker freezes each one's scope state (review SF3). */
+        public List<String> unreadableScopeManifests;
     }
 
     /** A declared dev/test dependency scope read by our own inventory (M7, D-059). */
