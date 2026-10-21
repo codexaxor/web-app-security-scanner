@@ -37,10 +37,17 @@ logic). It is used by reconcile (`TriageApplier`), the API (`TriageService`) and
 rules the earliest `(created_at, id)` is the holder. A new rule over an auto-ignored finding quietly re-points
 `ignored_by_rule_id` (no event); `removeRule` re-resolves and keeps a finding ignored when another rule or an
 API-visible auto cause (path exclusion, secret placeholder, LOW_EPSS) still applies (quiet, no event), else
-unignores to the last-succeeded-scan status (never solves on API evidence). Scan-time-only auto causes (config
-paths, dev/test scope, duplicate rule) are re-applied by the next reconcile. CLAUDE.md domain rule 3 references
-this. Proven by `IgnoreScopeIT`, `UnignoreIT`, `TriagePrecedenceIT`, `TriageStabilityIT`.
-Consequences: identical ignore state however reached; one precedence authority (`ReasonCode` + `ReasonAssignment`).
+unignores to the last-succeeded-scan status (never solves on API evidence). **API-time triage (manual
+ignore/unignore, EPSS sweep) is an audited carve-out of CLAUDE.md domain rule 3 "status changes only through
+reconcile" (D-063)** — it still writes a `triage_event` for every status change and uses this same resolver.
+The scan-time-only auto causes (config `exclude.paths`, dev/test scope, duplicate SAST rule) that the API cannot
+recompute are persisted every reconcile in `sub_issue.auto_ignore_reason` (SF1, V18) — written even when an
+IGNORE_RULE holds the finding, never a status change, no event — and the API resolution consults it, so removing
+a rule over e.g. a TEST_SCOPE finding keeps it ignored under TEST_SCOPE with no event. CLAUDE.md domain rule 3
+references this. Proven by `IgnoreScopeIT`, `UnignoreIT`, `TriagePrecedenceIT`, `TriageStabilityIT`,
+`RuleRemovalKeepsScanTimeCauseIT`.
+Consequences: identical ignore state however reached; one precedence authority (`ReasonCode` + `ReasonAssignment`);
+one additive nullable column (`auto_ignore_reason`, V18).
 
 ## D-062 SAST ignores match on (rule_id, file_path), snippet-independent (2026-10-21, accepted)
 Context: an M7 manual ignore of a SAST finding must survive a snippet re-fingerprint (D-053: a substantive edit
