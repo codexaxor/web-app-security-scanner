@@ -180,6 +180,12 @@ RUN chmod 0444 /usr/local/bin/eol_detect.py
 COPY secscan_config.py /usr/local/bin/secscan_config.py
 RUN chmod 0444 /usr/local/bin/secscan_config.py
 
+# The declared dev/test scope inventory (M7, D-059): run `python3 -I scope_inventory.py` so the scanned tree is
+# never on sys.path; reads pom.xml / package.json / build.gradle(.kts) as data only, no network. Its unit tests
+# (scope_inventory_test.py) are NOT shipped (host-run, scopeInventoryTest).
+COPY scope_inventory.py /usr/local/bin/scope_inventory.py
+RUN chmod 0444 /usr/local/bin/scope_inventory.py
+
 COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh
 RUN chmod 0555 /usr/local/bin/secscan-lib.sh /usr/local/bin/run-scan.sh

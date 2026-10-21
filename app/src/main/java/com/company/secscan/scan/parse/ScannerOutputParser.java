@@ -104,7 +104,22 @@ public class ScannerOutputParser {
         }
 
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
-        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config));
+        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
+                toDeclaredScopes(m.declaredScopes));
+    }
+
+    /** Reduces the manifest's declared-scope entries (D-059) to a {@code coordinate -> scope} map for the worker. */
+    private Map<String, String> toDeclaredScopes(List<ManifestScope> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> out = new java.util.HashMap<>();
+        for (ManifestScope s : entries) {
+            if (s.coordinate != null && s.scope != null) {
+                out.put(s.coordinate, s.scope);
+            }
+        }
+        return out;
     }
 
     /** Maps the manifest's bounded {@code .secscan.yml} block (D-057) to the typed {@link SecscanConfig}. */
@@ -756,6 +771,16 @@ public class ScannerOutputParser {
         public List<ManifestWarning> warnings;
         public List<ManifestSyntheticPom> syntheticPoms;
         public ManifestConfig config;
+        public List<ManifestScope> declaredScopes;
+    }
+
+    /** A declared dev/test dependency scope read by our own inventory (M7, D-059). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestScope {
+        public String coordinate;
+        public String scope;
+        public String ecosystem;
+        public String filePath;
     }
 
     /** The bounded, whitelisted {@code .secscan.yml} the scanner read as data (M7, D-057). */

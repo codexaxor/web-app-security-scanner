@@ -130,7 +130,15 @@ public class ScanStateService {
 
         // Reconcile in the SAME transaction (M3 plan addition 1): findings and their issue-model state commit
         // atomically, so a worker crash never leaves findings unreconciled. No network I/O inside reconcile.
-        reconcile.reconcile(scanId, workspaceId, parsed.config());
+        // Effective include-dev-deps (D-059, review change #3): repository setting OR .secscan.yml — the file
+        // may only INCREASE visibility, never force-hide a dep below the SecScan repo setting.
+        boolean repoIncludeDev = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
+                .map(com.company.secscan.repository.Repository::isIncludeDevDeps).orElse(false);
+        boolean effectiveIncludeDev = repoIncludeDev
+                || (parsed.config().present() && Boolean.TRUE.equals(parsed.config().includeDevDependencies()));
+        com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
+                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev);
+        reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {
             job.markDone();

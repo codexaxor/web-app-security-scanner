@@ -59,7 +59,7 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         seedSast(scan1, repo, "opengrep-rules.custom.z", "src/main/App.java");           // control, stays open
 
         SecscanConfig cfg = new SecscanConfig(true, List.of("src/legacy"), Map.of(IGNORED_CVE, REASON), false);
-        reconcile.reconcile(scan1, WORKSPACE, cfg);
+        reconcile.reconcile(scan1, WORKSPACE, new TriageContext(cfg, Map.of(), false));
 
         // Nothing dropped — all four findings persist as sub-issues.
         List<SubIssue> subs = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
@@ -97,7 +97,7 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
         seedSast(scan2, repo, "opengrep-rules.custom.y", "src/legacy/Old.java");
         seedSast(scan2, repo, "opengrep-rules.custom.z", "src/main/App.java");
 
-        reconcile.reconcile(scan2, WORKSPACE, SecscanConfig.absent());
+        reconcile.reconcile(scan2, WORKSPACE, TriageContext.empty());
 
         List<SubIssue> after = subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo);
         // The revoked .secscan.yml CVE rule is gone; the CVE finding returns to open (seen this scan).

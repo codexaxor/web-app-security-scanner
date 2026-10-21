@@ -440,6 +440,18 @@ fi
 # Surface the reader's own warnings (symlink refused, unknown/oversized keys dropped, …) into the scan warnings.
 jq -c '.warnings[]?' "$SECSCAN_CONFIG_JSON" >> "$WORK/warnings.ndjson" 2>/dev/null || true
 
+# --- Declared dev/test scope inventory (M7, D-059): read the repo's OWN manifests (pom test scope, npm
+# devDependencies, Gradle test configs) as DATA ONLY so the worker can auto-triage DEV_DEPENDENCY/TEST_SCOPE.
+# OSV exposes no scope marker, and this never guesses — unclassifiable deps are omitted and stay visible. A
+# failure here never fails the scan (the inventory is simply empty). ---
+SCOPES_JSON="$WORK/scopes.json"
+set +e
+python3 -I /usr/local/bin/scope_inventory.py "$CHECKOUT" > "$SCOPES_JSON" 2>"$WORK/scopes.log"
+set -e
+if [ ! -s "$SCOPES_JSON" ] || ! jq -e 'has("scopes")' "$SCOPES_JSON" >/dev/null 2>&1; then
+    printf '{"scopes":[],"warnings":[],"status":"error"}' > "$SCOPES_JSON"
+fi
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -469,11 +481,13 @@ jq -nc \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
     --slurpfile cfg "$SECSCAN_CONFIG_JSON" \
+    --slurpfile scopes "$SCOPES_JSON" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
       toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv, opengrep:$opengrep, checkov:$checkov},
       warnings: ($warnings[0] // []),
       syntheticPoms: ($synth[0] // []),
       config: ($cfg[0] // null),
+      declaredScopes: (($scopes[0] // {}).scopes // []),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

@@ -1,5 +1,6 @@
 package com.company.secscan.issue;
 
+import com.company.secscan.finding.RawFinding;
 import com.company.secscan.scan.parse.SecscanConfig;
 import com.company.secscan.triage.IgnoreMatcher;
 import com.company.secscan.triage.PathExclusion;
@@ -62,9 +63,9 @@ public class TriageApplier {
      * the fingerprints seen in this scan; {@code solvableScanners} are the scanners authoritative to close findings
      * (so a cleared ignore returns to the correct open/solved — a failed/absent scanner closes nothing, so OPEN).
      */
-    public Set<UUID> applyAtReconcile(UUID workspaceId, UUID repositoryId, UUID scanId, SecscanConfig config,
+    public Set<UUID> applyAtReconcile(UUID workspaceId, UUID repositoryId, UUID scanId, TriageContext triage,
                                       Set<String> incomingFps, Set<String> solvableScanners) {
-        materializeSecscanCveRules(workspaceId, repositoryId, config);
+        materializeSecscanCveRules(workspaceId, repositoryId, triage.config());
 
         List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
         Map<UUID, String> groupKeyById = new HashMap<>();
@@ -74,7 +75,7 @@ public class TriageApplier {
 
         Set<UUID> touched = new HashSet<>();
         for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId)) {
-            Desired desired = resolveDesired(sub, rules, config, groupKeyById.get(sub.getGroupId()));
+            Desired desired = resolveDesired(sub, rules, triage, groupKeyById.get(sub.getGroupId()));
             boolean ignored = SubIssue.STATUS_IGNORED.equals(sub.getStatus());
             if (desired != null) {
                 if (!ignored) {
@@ -131,7 +132,7 @@ public class TriageApplier {
         }
     }
 
-    private Desired resolveDesired(SubIssue sub, List<IgnoreRule> rules, SecscanConfig config, String groupKey) {
+    private Desired resolveDesired(SubIssue sub, List<IgnoreRule> rules, TriageContext triage, String groupKey) {
         IgnoreMatcher.Finding f = new IgnoreMatcher.Finding(sub.getType(), sub.getRepositoryId(),
                 sub.getFingerprint(), groupKey, sub.getFilePath(), sub.getRuleId(), sub.getVulnId(),
                 sub.getCveAliases());
@@ -142,18 +143,31 @@ public class TriageApplier {
                 return new Desired(ReasonCode.IGNORE_RULE.code(), r.getId());
             }
         }
-        ReasonCode auto = autoReason(sub, config);
+        ReasonCode auto = autoReason(sub, triage);
         return auto == null ? null : new Desired(auto.code(), null);
     }
 
     /**
-     * The cause-based auto-ignore reason for a sub-issue, or null. Currently EXCLUDED_PATH only; later slices add
-     * SECRET_PLACEHOLDER, DEV_DEPENDENCY/TEST_SCOPE, LOW_EPSS and DUPLICATE_RULE here (D-059).
+     * The cause-based auto-ignore reason for a sub-issue, or null, in precedence order (D-059). EXCLUDED_PATH
+     * (defaults + {@code .secscan.yml} paths) outranks the dev/test scope auto-ignore, which applies only when
+     * the repository's effective include-dev-deps is false and our own inventory declared the dependency's scope
+     * (an unclassifiable dependency stays visible). SECRET_PLACEHOLDER, LOW_EPSS and DUPLICATE_RULE are added in
+     * later slices.
      */
-    private ReasonCode autoReason(SubIssue sub, SecscanConfig config) {
+    private ReasonCode autoReason(SubIssue sub, TriageContext triage) {
+        SecscanConfig config = triage.config();
         List<String> extraPaths = config.present() ? config.excludePaths() : List.of();
         if (PathExclusion.isExcluded(sub.getFilePath(), extraPaths)) {
             return ReasonCode.EXCLUDED_PATH;
+        }
+        if (RawFinding.TYPE_SCA.equals(sub.getType()) && !triage.effectiveIncludeDev()) {
+            String scope = triage.scopeOf(sub.getPackageName());
+            if ("test".equals(scope)) {
+                return ReasonCode.TEST_SCOPE;
+            }
+            if ("dev".equals(scope)) {
+                return ReasonCode.DEV_DEPENDENCY;
+            }
         }
         return null;
     }

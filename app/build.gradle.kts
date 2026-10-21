@@ -142,6 +142,22 @@ val secscanConfigTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-059 gate: the declared dev/test scope inventory (scanner-image/scope_inventory.py) is Python; host-run
+// unit tests under the DEFAULT build (stdlib unittest), mirroring eolDetectTest.
+val scopeInventoryTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the declared dev/test scope inventory's Python unit tests (D-059)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("scope_inventory.py")).withPropertyName("scopeInventory")
+    inputs.file(scannerDir.resolve("scope_inventory_test.py")).withPropertyName("scopeInventoryTest")
+    val marker = layout.buildDirectory.file("scope-inventory-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "scope_inventory_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest)
 }
