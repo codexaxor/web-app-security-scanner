@@ -97,6 +97,43 @@ public class ReScoreService {
         return count;
     }
 
+    /**
+     * Re-scores every OPEN sub-issue of ONE repository (the per-repo re-score a sensitivity change triggers,
+     * D-070/OD-15, change 5). Uses the SAME guard as {@link #rescoreAll}/{@link #rescoreWorkspace}: a
+     * column-scoped {@code updateScoreColumnsIfOpen} (status='open') per row and a status-free group rollup, so
+     * it writes NO {@code triage_event} and never changes a status or fingerprint. Returns the number recomputed.
+     */
+    @Transactional
+    public int rescoreRepository(UUID workspaceId, UUID repositoryId) {
+        boolean epssEnabled = workspaces.findById(workspaceId)
+                .map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
+        String sensitivity = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
+                .map(Repository::getSensitivity).orElse("normal");
+        List<SubIssue> open = subIssues.findByWorkspaceIdAndRepositoryIdAndStatus(
+                workspaceId, repositoryId, SubIssue.STATUS_OPEN);
+        Set<UUID> touchedGroups = new HashSet<>();
+        Set<String> unmapped = new TreeSet<>();
+        for (SubIssue sub : open) {
+            Computation c = scorer.compute(sub, sensitivity, epssEnabled);
+            if (c.unmappedSecretRule() != null) {
+                unmapped.add(c.unmappedSecretRule());
+            }
+            subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()),
+                    c.inKev(), c.epss());
+            touchedGroups.add(sub.getGroupId());
+        }
+        for (UUID groupId : touchedGroups) {
+            rollup.recomputeScoreRollup(workspaceId, groupId, fixConfig);
+        }
+        for (String ruleId : unmapped) {
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    ruleId);
+        }
+        log.info("Re-score recomputed {} open sub-issue(s) for repository {}", open.size(), repositoryId);
+        return open.size();
+    }
+
     private int rescoreWorkspace(UUID workspaceId, boolean epssAdjustmentsEnabled, Map<String, Integer> fixConfig,
                                  Set<String> unmappedSink) {
         List<SubIssue> open = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN);

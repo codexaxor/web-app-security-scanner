@@ -22,6 +22,13 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** All sub-issues in a workspace with the given status — the re-score job loads the OPEN ones (D-049). */
     List<SubIssue> findByWorkspaceIdAndStatus(UUID workspaceId, String status);
 
+    /** One repository's sub-issues with the given status — the per-repo re-score (sensitivity change) loads the
+     * OPEN ones (D-049/D-070, change 5). Workspace-scoped (rule 1). */
+    List<SubIssue> findByWorkspaceIdAndRepositoryIdAndStatus(UUID workspaceId, UUID repositoryId, String status);
+
+    /** One sub-issue by id, workspace-scoped — the side panel / events endpoints (OD-14 items 5/6). */
+    java.util.Optional<SubIssue> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
+
     /** Every sub-issue in a workspace — a manual ignore rule with no repository scope applies across all repos. */
     List<SubIssue> findByWorkspaceId(UUID workspaceId);
 

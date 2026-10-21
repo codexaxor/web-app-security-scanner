@@ -6,6 +6,7 @@ import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanTaskView;
 import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.scan.api.ScanWarningView;
 import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.Optional;
@@ -35,14 +36,16 @@ public class ScanService {
     private final ScanRepository scans;
     private final ScanTaskRepository tasks;
     private final ScanFindingRepository findings;
+    private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final ScanEnqueuer enqueuer;
 
     public ScanService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
-                       RepositoryRepository repositories, ScanEnqueuer enqueuer) {
+                       ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
+        this.warnings = warnings;
         this.repositories = repositories;
         this.enqueuer = enqueuer;
     }
@@ -78,6 +81,27 @@ public class ScanService {
                 .findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId,
                         PageRequest.of(Math.max(0, page), Math.max(1, size)))
                 .map(ScanView::of));
+    }
+
+    /** All scans in the workspace, newest-first, paginated (OD-14 item 2). */
+    @Transactional(readOnly = true)
+    public PagedResponse<ScanView> listAll(int page, int size) {
+        return PagedResponse.fromPage(scans
+                .findByWorkspaceId(WORKSPACE, PageRequest.of(Math.max(0, page), Math.max(1, size),
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC,
+                                "createdAt")))
+                .map(ScanView::of));
+    }
+
+    /** One scan's warnings, paginated (OD-14 item 2); 404 if the scan is not in this workspace. */
+    @Transactional(readOnly = true)
+    public PagedResponse<ScanWarningView> listWarnings(UUID scanId, int page, int size) {
+        scans.findByIdAndWorkspaceId(scanId, WORKSPACE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such scan."));
+        return PagedResponse.fromPage(warnings
+                .findByWorkspaceIdAndScanId(WORKSPACE, scanId,
+                        PageRequest.of(Math.max(0, page), Math.max(1, size)))
+                .map(ScanWarningView::of));
     }
 
     @Transactional(readOnly = true)

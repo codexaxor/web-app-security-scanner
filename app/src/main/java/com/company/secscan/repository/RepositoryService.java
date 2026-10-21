@@ -40,22 +40,33 @@ public class RepositoryService {
     private static final Logger log = LoggerFactory.getLogger(RepositoryService.class);
     private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
 
+    private static final Set<String> SENSITIVITIES = Set.of("low", "normal", "high");
+    private static final String DEACTIVATED_BY_USER = "DEACTIVATED_BY_USER";
+
     private final GitLabClient client;
     private final GitlabConnectionRepository connections;
     private final RepositoryRepository repositories;
     private final RepositoryConnectionGuard guard;
     private final RepositoryUpserter upserter;
     private final TokenCipherHolder cipher;
+    private final RepositorySummaryService summaries;
+    // api-only bean (@Profile("api")); injected via a provider so the worker, which also creates this service,
+    // starts without it. patch() runs only from the api controller, where the provider resolves.
+    private final org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore;
 
     public RepositoryService(GitLabClient client, GitlabConnectionRepository connections,
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
-                             RepositoryUpserter upserter, TokenCipherHolder cipher) {
+                             RepositoryUpserter upserter, TokenCipherHolder cipher,
+                             RepositorySummaryService summaries,
+                             org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
         this.guard = guard;
         this.upserter = upserter;
         this.cipher = cipher;
+        this.summaries = summaries;
+        this.reScore = reScore;
     }
 
     /**
@@ -154,9 +165,72 @@ public class RepositoryService {
     public PagedResponse<RepositoryView> listSelected(int page, int size) {
         Map<UUID, GitlabConnection> byId = connections.findByWorkspaceId(WORKSPACE).stream()
                 .collect(Collectors.toMap(GitlabConnection::getId, Function.identity()));
+        Map<UUID, RepositorySummaryService.RepositorySummary> rollups = summaries.summariesByRepo(WORKSPACE);
         return PagedResponse.fromPage(
                 repositories.findByWorkspaceId(WORKSPACE, PageRequest.of(Math.max(0, page), Math.max(1, size)))
-                        .map(r -> RepositoryView.of(r, byId.get(r.getConnectionId()))));
+                        .map(r -> RepositoryView.of(r, byId.get(r.getConnectionId()),
+                                summaries.summaryOrEmpty(rollups, r.getId()))));
+    }
+
+    /**
+     * Updates a repository's settings (OD-15 / D-070). {@code sensitivity} must be low/normal/high (else 400);
+     * a change triggers an immediate per-repo re-score (score-only, 0 triage_event). {@code includeDevDeps} is
+     * saved and takes effect at the NEXT scan. Activation (change 1): deactivating sets
+     * {@code inactive_reason=DEACTIVATED_BY_USER}; reactivating succeeds only for a user-deactivated repo that
+     * still has a connection, else 409. A repository outside the workspace → 404.
+     */
+    @Transactional
+    public RepositoryView patch(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active) {
+        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
+        boolean rescoreNeeded = false;
+
+        if (sensitivity != null) {
+            if (!SENSITIVITIES.contains(sensitivity)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "sensitivity must be one of low, normal, high.");
+            }
+            rescoreNeeded = !sensitivity.equals(repo.getSensitivity());
+            repo.setSensitivity(sensitivity);
+            log.info("Repository {} sensitivity set", repositoryId);
+        }
+        if (includeDevDeps != null) {
+            repo.setIncludeDevDeps(includeDevDeps); // takes effect at the next scan (no API-time triage, D-063)
+            log.info("Repository {} includeDevDeps set", repositoryId);
+        }
+        if (active != null) {
+            applyActivation(repo, active);
+            log.info("Repository {} active set", repositoryId);
+        }
+        repositories.save(repo);
+
+        if (rescoreNeeded) {
+            // Immediate, score-only re-score through the existing D-049 path: 0 triage_event, no status change.
+            reScore.getObject().rescoreRepository(WORKSPACE, repositoryId);
+        }
+        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
+        RepositorySummaryService.RepositorySummary summary =
+                summaries.summaryOrEmpty(summaries.summariesByRepo(WORKSPACE), repositoryId);
+        return RepositoryView.of(repo, conn, summary);
+    }
+
+    private void applyActivation(Repository repo, boolean active) {
+        if (!active) {
+            if (repo.isActive()) {
+                repo.deactivate(DEACTIVATED_BY_USER);
+            }
+            return;
+        }
+        if (repo.isActive()) {
+            return; // already active — idempotent
+        }
+        // Reactivation is allowed only for a user-deactivated repository that still has a connection; any other
+        // inactive_reason (e.g. NO_ACCESSIBLE_CONNECTION) or a detached repo must be re-selected via a connection.
+        if (!DEACTIVATED_BY_USER.equals(repo.getInactiveReason()) || repo.getConnectionId() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This repository cannot be reactivated here; re-select the project via a connection.");
+        }
+        repo.activate();
     }
 
     // --- internals ---

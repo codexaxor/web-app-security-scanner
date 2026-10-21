@@ -67,7 +67,7 @@ public class TriageService {
         if (repositoryId != null && repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository in this workspace.");
         }
-        IgnoreRule rule = ignoreRules.save(new IgnoreRule(WORKSPACE, scope, repositoryId, matchValue.trim(),
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, scope, repositoryId, matchValue.trim(),
                 reason.trim(), MANUAL_ACTOR));
         applyRule(rule);
         return IgnoreRuleView.of(rule);
@@ -81,7 +81,7 @@ public class TriageService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such sub-issue."));
         requireReason(reason);
         String matchValue = IgnoreMatcher.subIssueMatchValue(toFinding(sub, groupKeyOf(sub.getGroupId())));
-        IgnoreRule rule = ignoreRules.save(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_SUBISSUE,
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_SUBISSUE,
                 sub.getRepositoryId(), matchValue, reason.trim(), MANUAL_ACTOR));
         applyRule(rule);
         return IgnoreRuleView.of(rule);
@@ -93,7 +93,7 @@ public class TriageService {
         IssueGroup group = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
         requireReason(reason);
-        IgnoreRule rule = ignoreRules.save(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_GROUP,
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_GROUP,
                 group.getRepositoryId(), group.getGroupKey(), reason.trim(), MANUAL_ACTOR));
         applyRule(rule);
         return IgnoreRuleView.of(rule);
