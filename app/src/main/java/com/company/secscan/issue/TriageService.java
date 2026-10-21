@@ -3,6 +3,7 @@ package com.company.secscan.issue;
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.issue.api.IgnoreRuleView;
 import com.company.secscan.issue.api.IgnoredItemView;
+import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.triage.IgnoreMatcher;
 import com.company.secscan.triage.ReasonCode;
 import com.company.secscan.workspace.Workspace;
@@ -42,10 +43,12 @@ public class TriageService {
     private final GroupRollupService rollup;
     private final TriageStatusResolver statusResolver;
     private final WorkspaceRepository workspaces;
+    private final RepositoryRepository repositories;
 
     public TriageService(IgnoreRuleRepository ignoreRules, SubIssueRepository subIssues,
                          IssueGroupRepository groups, TriageEventRepository events, GroupRollupService rollup,
-                         TriageStatusResolver statusResolver, WorkspaceRepository workspaces) {
+                         TriageStatusResolver statusResolver, WorkspaceRepository workspaces,
+                         RepositoryRepository repositories) {
         this.ignoreRules = ignoreRules;
         this.subIssues = subIssues;
         this.groups = groups;
@@ -53,12 +56,17 @@ public class TriageService {
         this.rollup = rollup;
         this.statusResolver = statusResolver;
         this.workspaces = workspaces;
+        this.repositories = repositories;
     }
 
     /** Create a generic rule (path / cve / rule, global or per-repo; also subissue/group given an explicit value). */
     @Transactional
     public IgnoreRuleView createRule(String scope, UUID repositoryId, String matchValue, String reason) {
         validate(scope, matchValue, reason);
+        // N1: a per-repo rule must target a repository IN THIS WORKSPACE — never another tenant's repo.
+        if (repositoryId != null && repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository in this workspace.");
+        }
         IgnoreRule rule = ignoreRules.save(new IgnoreRule(WORKSPACE, scope, repositoryId, matchValue.trim(),
                 reason.trim(), MANUAL_ACTOR));
         applyRule(rule);
@@ -136,10 +144,12 @@ public class TriageService {
 
     @Transactional(readOnly = true)
     public PagedResponse<IgnoredItemView> listIgnored(int page, int size) {
-        return PagedResponse.fromPage(subIssues
-                .findByWorkspaceIdAndStatus(WORKSPACE, SubIssue.STATUS_IGNORED,
-                        PageRequest.of(Math.max(0, page), Math.max(1, size)))
-                .map(sub -> IgnoredItemView.of(sub, ruleFor(sub))));
+        org.springframework.data.domain.Page<SubIssue> ignored = subIssues.findByWorkspaceIdAndStatus(
+                WORKSPACE, SubIssue.STATUS_IGNORED, PageRequest.of(Math.max(0, page), Math.max(1, size)));
+        // N1: load the holding rules for the whole page in ONE query (no per-row findById N+1).
+        Map<UUID, IgnoreRule> rulesById = rulesFor(ignored.getContent());
+        return PagedResponse.fromPage(ignored.map(sub -> IgnoredItemView.of(sub,
+                sub.getIgnoredByRuleId() == null ? null : rulesById.get(sub.getIgnoredByRuleId()))));
     }
 
     // --- internals ---
@@ -194,18 +204,23 @@ public class TriageService {
                 sub.getFilePath(), sub.getRuleId(), sub.getVulnId(), sub.getCveAliases());
     }
 
+    /** Group keys for the given sub-issues, workspace-scoped (N1 — never a cross-tenant group leaks in). */
     private Map<UUID, String> groupKeyMap(List<SubIssue> subs) {
         Set<UUID> ids = new HashSet<>();
         for (SubIssue s : subs) {
             ids.add(s.getGroupId());
         }
         Map<UUID, String> out = new HashMap<>();
-        groups.findAllById(ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        groups.findAllById(ids).forEach(g -> {
+            if (WORKSPACE.equals(g.getWorkspaceId())) {
+                out.put(g.getId(), g.getGroupKey());
+            }
+        });
         return out;
     }
 
     private String groupKeyOf(UUID groupId) {
-        return groups.findById(groupId).map(IssueGroup::getGroupKey).orElse(null);
+        return groups.findByIdAndWorkspaceId(groupId, WORKSPACE).map(IssueGroup::getGroupKey).orElse(null);
     }
 
     /** The workspace EPSS auto-ignore toggle — the one auto cause the API can re-evaluate (D-060/D-063). */
@@ -213,9 +228,21 @@ public class TriageService {
         return workspaces.findById(WORKSPACE).map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
     }
 
-    private IgnoreRule ruleFor(SubIssue sub) {
-        return sub.getIgnoredByRuleId() == null ? null
-                : ignoreRules.findById(sub.getIgnoredByRuleId()).orElse(null);
+    /** The holding rules for a page of ignored sub-issues, workspace-scoped, in one query (N1 — no N+1). */
+    private Map<UUID, IgnoreRule> rulesFor(List<SubIssue> subs) {
+        Set<UUID> ruleIds = new HashSet<>();
+        for (SubIssue s : subs) {
+            if (s.getIgnoredByRuleId() != null) {
+                ruleIds.add(s.getIgnoredByRuleId());
+            }
+        }
+        Map<UUID, IgnoreRule> out = new HashMap<>();
+        for (IgnoreRule r : ignoreRules.findAllById(ruleIds)) {
+            if (WORKSPACE.equals(r.getWorkspaceId())) {
+                out.put(r.getId(), r);
+            }
+        }
+        return out;
     }
 
     private void validate(String scope, String matchValue, String reason) {

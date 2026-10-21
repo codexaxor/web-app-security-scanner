@@ -83,8 +83,9 @@ public class WorkspaceSettingsService {
                 rollup.recompute(workspaceId, groupId, fixConfig);
             }
         }
-        // Apply/remove the scoring-only EPSS tiers on the still-open findings (no status change, no triage_event).
-        reScore.rescoreAll();
+        // Apply/remove the scoring-only EPSS tiers on THIS workspace's still-open findings (N2: only this
+        // workspace, not every tenant). No status change, no triage_event.
+        reScore.rescoreWorkspace(workspaceId);
         log.info("EPSS auto-ignore {} for workspace {}; {} finding(s) changed status",
                 enabled ? "enabled" : "disabled", workspaceId, touched.size());
         return settings;

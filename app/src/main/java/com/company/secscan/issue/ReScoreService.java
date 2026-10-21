@@ -78,6 +78,25 @@ public class ReScoreService {
         return count;
     }
 
+    /**
+     * Re-scores every open sub-issue in ONE workspace (N2: the EPSS toggle must touch only its own workspace,
+     * not every tenant). Returns the number recomputed.
+     */
+    @Transactional
+    public int rescoreWorkspace(UUID workspaceId) {
+        boolean epssEnabled = workspaces.findById(workspaceId)
+                .map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
+        Set<String> unmapped = new TreeSet<>();
+        int count = rescoreWorkspace(workspaceId, epssEnabled, fixConfig, unmapped);
+        for (String ruleId : unmapped) {
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    ruleId);
+        }
+        log.info("Re-score recomputed {} open sub-issue(s) for workspace {}", count, workspaceId);
+        return count;
+    }
+
     private int rescoreWorkspace(UUID workspaceId, boolean epssAdjustmentsEnabled, Map<String, Integer> fixConfig,
                                  Set<String> unmappedSink) {
         List<SubIssue> open = subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_OPEN);
