@@ -125,6 +125,23 @@ val eolDetectTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-057 gate: the .secscan.yml reader (scanner-image/secscan_config.py) is Python; its unit tests run under the
+// host python3 wired into the DEFAULT build (stdlib unittest; the whitelist/caps/confinement tests need no
+// PyYAML, the YAML-parse tests self-skip when PyYAML is absent), mirroring eolDetectTest.
+val secscanConfigTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the .secscan.yml reader's Python unit tests (D-057)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("secscan_config.py")).withPropertyName("secscanConfig")
+    inputs.file(scannerDir.resolve("secscan_config_test.py")).withPropertyName("secscanConfigTest")
+    val marker = layout.buildDirectory.file("secscan-config-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "secscan_config_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest)
 }

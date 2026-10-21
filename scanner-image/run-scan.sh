@@ -424,6 +424,22 @@ if [ "$EOL_STATUS" = "failed" ] && [ -s "$WORK/eol.log" ]; then
     tail -c 2000 "$WORK/eol.log" >&2 || true
 fi
 
+# --- .secscan.yml (M7, D-057): read the OPTIONAL in-repo config as DATA ONLY and emit a bounded, whitelisted
+# JSON the worker applies at triage step 9. This is the ONLY carve-out of D-037, and only because the worker
+# surfaces + audits every suppression it yields. `python3 -I` keeps the scanned tree off sys.path; the reader is
+# symlink-safe, realpath-confined to the clone, and NEVER echoes raw file bytes. A failure here never fails the
+# scan — the config is simply treated as absent. ---
+SECSCAN_CONFIG_JSON="$WORK/secscan_config.json"
+set +e
+python3 -I /usr/local/bin/secscan_config.py "$CHECKOUT" > "$SECSCAN_CONFIG_JSON" 2>"$WORK/secscan_config.log"
+set -e
+if [ ! -s "$SECSCAN_CONFIG_JSON" ] || ! jq -e 'has("present")' "$SECSCAN_CONFIG_JSON" >/dev/null 2>&1; then
+    printf '{"present":false,"excludePaths":[],"ignoreCves":{},"includeDevDependencies":null,"warnings":[],"status":"error"}' \
+        > "$SECSCAN_CONFIG_JSON"
+fi
+# Surface the reader's own warnings (symlink refused, unknown/oversized keys dropped, …) into the scan warnings.
+jq -c '.warnings[]?' "$SECSCAN_CONFIG_JSON" >> "$WORK/warnings.ndjson" 2>/dev/null || true
+
 # --- Manifest ---
 jq -s '.' "$WORK/warnings.ndjson" > "$WORK/warnings.json"
 jq -nc \
@@ -452,10 +468,12 @@ jq -nc \
     --argjson eoldur "$EOL_DUR_MS" \
     --slurpfile warnings "$WORK/warnings.json" \
     --slurpfile synth "$SYNTH_MAP" \
+    --slurpfile cfg "$SECSCAN_CONFIG_JSON" \
     '{schemaVersion:1, cloneFailed:false, commit:$commit, checkoutPath:$checkout,
       toolVersions:{git:$git, betterleaks:$betterleaks, "osv-scanner":$osv, opengrep:$opengrep, checkov:$checkov},
       warnings: ($warnings[0] // []),
       syntheticPoms: ($synth[0] // []),
+      config: ($cfg[0] // null),
       scanners:[
         {name:"secret", status:$sstatus, exitCode:$sexit, durationMs:$sdur, findingsFile:"secrets.json"},
         {name:"sca", status:$castatus, exitCode:$caexit, durationMs:$cadur, findingsFile:"osv.json",

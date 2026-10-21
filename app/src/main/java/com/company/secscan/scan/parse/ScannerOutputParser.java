@@ -104,7 +104,17 @@ public class ScannerOutputParser {
         }
 
         Map<String, String> versions = m.toolVersions == null ? Map.of() : m.toolVersions;
-        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings);
+        return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config));
+    }
+
+    /** Maps the manifest's bounded {@code .secscan.yml} block (D-057) to the typed {@link SecscanConfig}. */
+    private SecscanConfig toSecscanConfig(ManifestConfig c) {
+        if (c == null || !c.present) {
+            return SecscanConfig.absent();
+        }
+        List<String> paths = c.excludePaths == null ? List.of() : c.excludePaths;
+        Map<String, String> cves = c.ignoreCves == null ? Map.of() : c.ignoreCves;
+        return new SecscanConfig(true, paths, cves, c.includeDevDependencies);
     }
 
     private List<RawFinding> readSecretFindings(Path findingsFile) {
@@ -745,6 +755,16 @@ public class ScannerOutputParser {
         public List<ManifestScanner> scanners;
         public List<ManifestWarning> warnings;
         public List<ManifestSyntheticPom> syntheticPoms;
+        public ManifestConfig config;
+    }
+
+    /** The bounded, whitelisted {@code .secscan.yml} the scanner read as data (M7, D-057). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class ManifestConfig {
+        public boolean present;
+        public List<String> excludePaths;
+        public Map<String, String> ignoreCves;
+        public Boolean includeDevDependencies;
     }
 
     /** Maps a synthetic Gradle pom's container path to its originating {@code build.gradle} (repo-relative). */

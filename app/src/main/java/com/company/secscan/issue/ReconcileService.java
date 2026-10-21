@@ -51,13 +51,14 @@ public class ReconcileService {
     private final RepositoryRepository repositories;
     private final GroupRollupService rollup;
     private final EolCycleRepository eolCycles;
+    private final TriageApplier triageApplier;
     private final Reconciler reconciler = new Reconciler();
 
     public ReconcileService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                             IssueGroupRepository groups, SubIssueRepository subIssues, TriageEventRepository events,
                             SecretFingerprinterHolder fingerprinter, SubIssueScorer scorer,
                             RepositoryRepository repositories, GroupRollupService rollup,
-                            EolCycleRepository eolCycles) {
+                            EolCycleRepository eolCycles, TriageApplier triageApplier) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
@@ -69,6 +70,7 @@ public class ReconcileService {
         this.repositories = repositories;
         this.rollup = rollup;
         this.eolCycles = eolCycles;
+        this.triageApplier = triageApplier;
     }
 
     /**
@@ -76,8 +78,14 @@ public class ReconcileService {
      * no-op) and guarded against stale, out-of-order scans. Always stamps {@code scan.reconciled_at}. The scan
      * is loaded scoped to {@code workspaceId} (domain rule 1); every other query is already workspace-scoped.
      */
-    @Transactional
+    /** Reconcile with no in-repo config (existing callers/tests). */
     public void reconcile(UUID scanId, UUID workspaceId) {
+        reconcile(scanId, workspaceId, com.company.secscan.scan.parse.SecscanConfig.absent());
+    }
+
+    @Transactional
+    public void reconcile(UUID scanId, UUID workspaceId,
+                          com.company.secscan.scan.parse.SecscanConfig config) {
         Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         if (scan.getReconciledAt() != null) {
             return; // already reconciled (idempotent)
@@ -186,6 +194,12 @@ public class ReconcileService {
                     SubIssue.STATUS_SOLVED, TriageEvent.REASON_SOLVED_NOT_DETECTED, scanId));
             touchedGroups.add(sub.getGroupId());
         }
+
+        // Triage step 9 (M7): apply .secscan.yml + manual ignore rules + auto-ignore, and clear ignores whose
+        // cause/rule is gone — all through reconcile, each with a triage_event. Runs AFTER plan application and
+        // BEFORE the rollup so the group's derived status reflects newly-(un)ignored sub-issues this scan.
+        touchedGroups.addAll(triageApplier.applyAtReconcile(workspaceId, repositoryId, scanId, config,
+                findingByFp.keySet(), solvableScanners));
 
         for (UUID groupId : touchedGroups) {
             rollup.recompute(workspaceId, groupId, fixConfig);

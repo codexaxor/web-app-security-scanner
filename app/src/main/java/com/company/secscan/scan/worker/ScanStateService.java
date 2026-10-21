@@ -130,7 +130,7 @@ public class ScanStateService {
 
         // Reconcile in the SAME transaction (M3 plan addition 1): findings and their issue-model state commit
         // atomically, so a worker crash never leaves findings unreconciled. No network I/O inside reconcile.
-        reconcile.reconcile(scanId, workspaceId);
+        reconcile.reconcile(scanId, workspaceId, parsed.config());
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {
             job.markDone();
