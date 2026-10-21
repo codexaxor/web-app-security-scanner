@@ -243,6 +243,21 @@ category (injection 30, misconfig 15, default 20); EOL upgrade 300. Kept as a co
 **Manual ignore scopes:** this sub-issue, this group, path prefix (per repo), CVE (global or per repo), rule id
 (global or per repo). Each requires a reason.
 
+**Triage API (M7, D-058).** All under `/api/v1`, record DTOs, server-side pagination, workspace-scoped:
+
+| Method · path | Purpose |
+| --- | --- |
+| `POST /ignore-rules` `{scope, repositoryId?, matchValue, reason}` | Create a generic ignore rule (path/cve/rule; global when `repositoryId` null) and apply it |
+| `POST /sub-issues/{id}/ignore` `{reason}` | Ignore one sub-issue (subissue scope; SAST matches rule+file, D-062) |
+| `POST /issue-groups/{id}/ignore` `{reason}` | Ignore a whole group |
+| `DELETE /ignore-rules/{id}` | Remove a rule; findings it held return to the reconcile-computed status |
+| `GET /ignore-rules` | List active rules (paged) |
+| `GET /ignored` | The Ignored view: each ignored finding with reason code, rule and creator (paged) |
+
+Auto-ignores (`EXCLUDED_PATH`, `DEV_DEPENDENCY`/`TEST_SCOPE`, `SECRET_PLACEHOLDER`, `LOW_EPSS`, `DUPLICATE_RULE`)
+clear via their cause at reconcile/on-toggle (a `triage_event`); manual unignore (the `DELETE`) applies to manual
+ignores. Until M10 wires an authenticated principal (OD-9), a manual rule's `created_by` is `"user"`.
+
 **In-repo config `.secscan.yml`**
 
 ```yaml
