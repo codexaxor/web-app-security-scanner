@@ -108,9 +108,9 @@ public final class Scoring {
         // and the two tiers are mutually exclusive so they never double-apply. Applied only when the workspace
         // EPSS toggle is on. EPSS is a descriptive, NON-fingerprint input (D-051).
         if (in.epssAdjustmentsEnabled()) {
-            int epssDelta = EpssPolicy.scoreDelta(in.epss());
+            int epssDelta = EpssPolicy.scoreDelta(in.epss(), in.onKev());
             if (epssDelta != 0) {
-                breakdown.add(new ScoreLine("epss_tier", EpssPolicy.tierLabel(in.epss()), epssDelta));
+                breakdown.add(new ScoreLine("epss_tier", EpssPolicy.tierLabel(in.epss(), in.onKev()), epssDelta));
                 raw += epssDelta;
             }
         }

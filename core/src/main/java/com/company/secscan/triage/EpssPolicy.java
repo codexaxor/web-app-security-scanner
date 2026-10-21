@@ -8,11 +8,14 @@ package com.company.secscan.triage;
  * <ul>
  *   <li><b>Status</b> — {@link #isLowEpssAutoIgnore}: {@code EPSS < 1%} AND not on KEV → {@link ReasonCode#LOW_EPSS}
  *       auto-ignore (a real status change at reconcile/on-toggle, with a triage_event);</li>
- *   <li><b>Score only</b> — {@link #scoreDelta}: {@code [0,5%)} → −10, {@code [5%,10%)} → −5, {@code ≥10%} → 0.
- *       The two tiers are mutually exclusive (strict bands) so they never double-apply, and this path writes NO
+ *   <li><b>Score only</b> — {@link #scoreDelta}: strict bands (review S1). A finding that QUALIFIES for the
+ *       LOW_EPSS status auto-ignore ({@code EPSS < 1%} AND not KEV) gets delta 0 — the status path owns it, so the
+ *       score is not also docked. Otherwise {@code [0,1%)}-but-KEV and {@code [1%,5%)} → −10, {@code [5%,10%)} →
+ *       −5, {@code ≥10%} → 0. The tiers are mutually exclusive so they never double-apply; this path writes NO
  *       triage_event.</li>
  * </ul>
- * Both are gated by the workspace EPSS toggle at the caller; a KEV-listed finding is never auto-ignored.
+ * Both are gated by the workspace EPSS toggle at the caller; a KEV-listed finding is never auto-ignored (so a
+ * KEV finding below 1% keeps the −10 score tier, since no status auto-ignore removes it).
  */
 public final class EpssPolicy {
 
@@ -35,12 +38,17 @@ public final class EpssPolicy {
     }
 
     /**
-     * The scoring-only EPSS delta (D-060): {@code [0,5%)} → −10, {@code [5%,10%)} → −5, else 0. Strict bands, so
-     * exactly one tier applies — never both. {@code null} EPSS → 0.
+     * The scoring-only EPSS delta (D-060, strict bands per review S1). {@code null} EPSS → 0. A finding that
+     * qualifies for the LOW_EPSS status auto-ignore ({@code EPSS < 1%} AND not KEV) → 0: the status path owns it,
+     * so the score is not also docked. Otherwise {@code [0,5%)} → −10 (this includes a KEV finding below 1%,
+     * which is never status-ignored), {@code [5%,10%)} → −5, {@code ≥10%} → 0. Exactly one tier applies.
      */
-    public static int scoreDelta(Double epss) {
+    public static int scoreDelta(Double epss, boolean onKev) {
         if (epss == null) {
             return 0;
+        }
+        if (isLowEpssAutoIgnore(epss, onKev)) {
+            return 0; // the LOW_EPSS status auto-ignore handles this finding; no double-dock on score
         }
         if (epss < TIER_10_MAX) {
             return SCORE_DELTA_UNDER_5;
@@ -52,8 +60,8 @@ public final class EpssPolicy {
     }
 
     /** A human label for the applied tier, for the score breakdown; null when no tier applies. */
-    public static String tierLabel(Double epss) {
-        int delta = scoreDelta(epss);
+    public static String tierLabel(Double epss, boolean onKev) {
+        int delta = scoreDelta(epss, onKev);
         if (delta == SCORE_DELTA_UNDER_5) {
             return "EPSS below 5%";
         }

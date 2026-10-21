@@ -196,7 +196,12 @@ class ScoringTest {
     // --- EPSS scoring tiers (D-060): scoring-only, off by default, strict bands, no double-apply ---
 
     private static ScoreInput scaEpss(String maxSeverity, String label, Double epss, boolean enabled) {
-        return new ScoreInput("sca", maxSeverity, label, null, false, "normal", null, false, epss, enabled);
+        return scaEpss(maxSeverity, label, epss, enabled, false);
+    }
+
+    private static ScoreInput scaEpss(String maxSeverity, String label, Double epss, boolean enabled,
+                                      boolean onKev) {
+        return new ScoreInput("sca", maxSeverity, label, null, onKev, "normal", null, false, epss, enabled);
     }
 
     @Test
@@ -229,10 +234,27 @@ class ScoringTest {
 
     @Test
     void theTwoTiersNeverBothApply() {
-        // A single finding gets exactly one epss_tier line (−10 OR −5), never two.
-        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.001, true));
+        // A single finding gets AT MOST one epss_tier line (−10 OR −5), never two. At 2% the −10 tier applies.
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.02, true));
         long epssLines = r.breakdown().stream().filter(l -> l.code().equals("epss_tier")).count();
         assertThat(epssLines).isEqualTo(1);
-        assertThat(delta(r, "epss_tier")).isEqualTo(-10); // <1% is a subset of <5%
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+    }
+
+    @Test
+    void nonKevBelowOnePercentGetsNoScoreTier() {
+        // Review S1: a non-KEV finding below 1% qualifies for the LOW_EPSS STATUS auto-ignore, so its score is
+        // NOT also docked — no epss_tier line (strict bands; the status path owns it).
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.0099, true));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void kevBelowOnePercentStillGetsTheMinusTenTier() {
+        // Review S1: KEV is never status-auto-ignored, so a KEV finding below 1% keeps the −10 score tier.
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.0099, true, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+        assertThat(r.score()).isEqualTo(45); // base 50 + KEV 5 − EPSS 10
     }
 }
