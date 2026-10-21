@@ -1,12 +1,15 @@
 package com.company.secscan.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.triage.ReasonCode;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * S5 gate (D-058): every manual ignore scope moves the matching finding(s) to {@code ignored} with reason code
@@ -32,6 +35,15 @@ class IgnoreScopeIT extends TriageSeedSupport {
         triage.ignoreSubIssue(sub.getId(), "false positive");
 
         assertIgnoredByRule(byVuln(repo, "CVE-2022-42889"));
+    }
+
+    @Test
+    void createRuleRejectsARepositoryOutsideTheWorkspace() {
+        // N1: a per-repo rule must target a repository in this workspace — a random/foreign id is a 404.
+        assertThatThrownBy(() -> triage.createRule(IgnoreRule.SCOPE_PATH, UUID.randomUUID(), "src/x", "reason"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
     }
 
     @Test
