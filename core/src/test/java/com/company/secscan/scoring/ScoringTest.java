@@ -192,4 +192,47 @@ class ScoringTest {
         assertThat(has(r, "test_path")).isFalse();
         assertThat(r.score()).isEqualTo(75);
     }
+
+    // --- EPSS scoring tiers (D-060): scoring-only, off by default, strict bands, no double-apply ---
+
+    private static ScoreInput scaEpss(String maxSeverity, String label, Double epss, boolean enabled) {
+        return new ScoreInput("sca", maxSeverity, label, null, false, "normal", null, false, epss, enabled);
+    }
+
+    @Test
+    void epssTierIsNotAppliedWhenTheToggleIsOff() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.001, false));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void epssBelowFivePercentSubtractsTenWhenEnabled() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.02, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10);
+        assertThat(r.score()).isEqualTo(40); // 50 − 10
+    }
+
+    @Test
+    void epssBetweenFiveAndTenPercentSubtractsFiveWhenEnabled() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.07, true));
+        assertThat(delta(r, "epss_tier")).isEqualTo(-5);
+        assertThat(r.score()).isEqualTo(45); // 50 − 5
+    }
+
+    @Test
+    void epssAtOrAboveTenPercentHasNoTier() {
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.10, true));
+        assertThat(has(r, "epss_tier")).isFalse();
+        assertThat(r.score()).isEqualTo(50);
+    }
+
+    @Test
+    void theTwoTiersNeverBothApply() {
+        // A single finding gets exactly one epss_tier line (−10 OR −5), never two.
+        ScoreResult r = Scoring.score(scaEpss("5.0", "MODERATE", 0.001, true));
+        long epssLines = r.breakdown().stream().filter(l -> l.code().equals("epss_tier")).count();
+        assertThat(epssLines).isEqualTo(1);
+        assertThat(delta(r, "epss_tier")).isEqualTo(-10); // <1% is a subset of <5%
+    }
 }
