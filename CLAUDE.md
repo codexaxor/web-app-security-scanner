@@ -99,7 +99,7 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
    its scanner succeeded → solved. Scanner failed/timed out → its findings untouched. Ignored stays ignored.
 4. Every status change writes a `triage_event` (actor, reason code, scan id).
 5. Every auto-ignore has a reason code: `DEV_DEPENDENCY`, `TEST_SCOPE`, `EXCLUDED_PATH`, `SECRET_PLACEHOLDER`,
-   `LOW_EPSS`, `IGNORE_RULE`.
+   `LOW_EPSS`, `IGNORE_RULE`, `DUPLICATE_RULE` (D-061, M7).
 6. Severity is 0–100 (Critical 90–100, High 70–89, Medium 40–69, Low 1–39); every adjustment goes in
    `score_breakdown`.
 

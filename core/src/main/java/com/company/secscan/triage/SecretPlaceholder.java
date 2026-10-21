@@ -19,9 +19,13 @@ public final class SecretPlaceholder {
     private static final Set<String> PLACEHOLDER_SEGMENTS =
             Set.of("example", "examples", "sample", "samples", "template", "templates");
 
-    /** Masked-preview prefixes (first 4 chars, lower-cased) of common placeholder values. */
+    /**
+     * Masked-preview prefixes (first 4 chars, lower-cased) of common placeholder VALUES. Note {@code ****} is
+     * deliberately NOT here: it is the mask for any short/real secret (D-027), not a placeholder marker — matching
+     * it would false-ignore a real short secret.
+     */
     private static final Set<String> PLACEHOLDER_PREVIEWS =
-            Set.of("chan" /* changeme */, "exam" /* example */, "plac" /* placeholder */, "****" /* masked short */);
+            Set.of("chan" /* changeme */, "exam" /* example */, "plac" /* placeholder */);
 
     private SecretPlaceholder() {
     }

@@ -60,6 +60,15 @@ public class SubIssueScorer {
      * once per repository. Used by the re-score job, which then writes only the score columns of OPEN rows.
      */
     public Computation compute(SubIssue sub, String repoSensitivity) {
+        return compute(sub, repoSensitivity, false);
+    }
+
+    /**
+     * As {@link #compute(SubIssue, String)}, with the workspace EPSS toggle (D-060): when
+     * {@code epssAdjustmentsEnabled} is true the scoring-only EPSS tiers (−10 / −5) are applied. The LOW_EPSS
+     * STATUS auto-ignore is NOT here — it is a reconcile/on-toggle status change, never the score path.
+     */
+    public Computation compute(SubIssue sub, String repoSensitivity, boolean epssAdjustmentsEnabled) {
         List<String> cves = candidateCves(sub);
         boolean onKev = !cves.isEmpty() && !kevEntries.findPresentCves(cves).isEmpty();
         BigDecimal epss = maxEpss(cves);
@@ -84,7 +93,8 @@ public class SubIssueScorer {
         boolean testPath = TestPaths.isTestPath(sub.getFilePath());
 
         ScoreInput in = new ScoreInput(sub.getType(), sub.getToolSeverity(), sub.getSeverityLabel(),
-                sub.getRuleId(), onKev, repoSensitivity, eolStatus, testPath);
+                sub.getRuleId(), onKev, repoSensitivity, eolStatus, testPath,
+                epss == null ? null : epss.doubleValue(), epssAdjustmentsEnabled);
         ScoreResult result = Scoring.score(in);
 
         String unmapped = null;
@@ -101,7 +111,12 @@ public class SubIssueScorer {
      * Returns the unmapped secret rule id (or null) so the caller can log it once per run (N2).
      */
     public String score(SubIssue sub, String repoSensitivity) {
-        Computation c = compute(sub, repoSensitivity);
+        return score(sub, repoSensitivity, false);
+    }
+
+    /** As {@link #score(SubIssue, String)}, with the workspace EPSS toggle applied to the scoring tiers (D-060). */
+    public String score(SubIssue sub, String repoSensitivity, boolean epssAdjustmentsEnabled) {
+        Computation c = compute(sub, repoSensitivity, epssAdjustmentsEnabled);
         sub.setInKev(c.inKev());
         sub.setEpss(c.epss());
         sub.setScore(c.score());

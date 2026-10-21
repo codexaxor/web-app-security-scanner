@@ -8,10 +8,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * A tenant. In single-tenant mode there is exactly one, seeded by {@code V2__default_workspace.sql}.
- * The {@code settings} jsonb column exists in the table but is not mapped yet (added in a later milestone).
+ * The {@code settings} jsonb column carries per-workspace tuning — M7 maps it for the EPSS toggle (D-060).
  */
 @Entity
 @Table(name = "workspace")
@@ -26,6 +28,11 @@ public class Workspace {
 
     @Column(name = "name", nullable = false)
     private String name;
+
+    // Initialized so an entity INSERT sends non-null JSON (the column is NOT NULL; V2 seeds the default via SQL).
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "settings", columnDefinition = "jsonb")
+    private WorkspaceSettings settings = new WorkspaceSettings();
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
@@ -48,5 +55,18 @@ public class Workspace {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    /** Never null to callers: an unset {@code settings} jsonb reads as defaults (EPSS toggle off). */
+    public WorkspaceSettings getSettings() {
+        return settings == null ? new WorkspaceSettings() : settings;
+    }
+
+    public void setSettings(WorkspaceSettings settings) {
+        this.settings = settings;
+    }
+
+    public boolean isEpssAutoIgnoreEnabled() {
+        return getSettings().isEpssAutoIgnoreEnabled();
     }
 }

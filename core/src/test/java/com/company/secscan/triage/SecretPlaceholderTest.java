@@ -23,7 +23,13 @@ class SecretPlaceholderTest {
     void knownPlaceholderPreviewsAreMatched() {
         assertThat(SecretPlaceholder.isPlaceholder("src/App.java", "chan")).as("changeme").isTrue();
         assertThat(SecretPlaceholder.isPlaceholder("src/App.java", "EXAM")).as("example, case-insensitive").isTrue();
-        assertThat(SecretPlaceholder.isPlaceholder("src/App.java", "****")).as("masked short value").isTrue();
+    }
+
+    @Test
+    void maskedShortSecretIsNotAPlaceholder() {
+        // **** is the mask for any short/real secret (D-027), NOT a placeholder marker.
+        assertThat(SecretPlaceholder.isPlaceholder("config/deploy-key.pem", "****")).isFalse();
+        assertThat(SecretPlaceholder.isPlaceholder("src/main/App.java", "****")).isFalse();
     }
 
     @Test

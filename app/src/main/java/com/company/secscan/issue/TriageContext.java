@@ -12,13 +12,19 @@ import java.util.Map;
  *
  * <p>None of these are fingerprint inputs; they are triage attributes recomputed every scan.
  */
-public record TriageContext(SecscanConfig config, Map<String, String> declaredScopes, boolean effectiveIncludeDev) {
+public record TriageContext(SecscanConfig config, Map<String, String> declaredScopes, boolean effectiveIncludeDev,
+                            boolean epssAutoIgnoreEnabled) {
 
-    private static final TriageContext EMPTY = new TriageContext(SecscanConfig.absent(), Map.of(), false);
+    private static final TriageContext EMPTY = new TriageContext(SecscanConfig.absent(), Map.of(), false, false);
 
     public TriageContext {
         config = config == null ? SecscanConfig.absent() : config;
         declaredScopes = declaredScopes == null ? Map.of() : Map.copyOf(declaredScopes);
+    }
+
+    /** Back-compatible 3-arg (EPSS toggle off) for callers predating the LOW_EPSS wiring. */
+    public TriageContext(SecscanConfig config, Map<String, String> declaredScopes, boolean effectiveIncludeDev) {
+        this(config, declaredScopes, effectiveIncludeDev, false);
     }
 
     /** No config, no declared scopes, dev deps not included (existing callers/tests). */

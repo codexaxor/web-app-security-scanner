@@ -46,11 +46,13 @@ public class ScanStateService {
     private final SecretFingerprinterHolder fingerprinter;
     private final ReconcileService reconcile;
     private final EolEnricher eolEnricher;
+    private final com.company.secscan.workspace.WorkspaceRepository workspaces;
 
     public ScanStateService(ScanRepository scans, ScanJobRepository jobs, ScanTaskRepository tasks,
                             ScanFindingRepository findings, ScanWarningRepository warnings,
                             RepositoryRepository repositories, SecretFingerprinterHolder fingerprinter,
-                            ReconcileService reconcile, EolEnricher eolEnricher) {
+                            ReconcileService reconcile, EolEnricher eolEnricher,
+                            com.company.secscan.workspace.WorkspaceRepository workspaces) {
         this.scans = scans;
         this.jobs = jobs;
         this.tasks = tasks;
@@ -60,6 +62,7 @@ public class ScanStateService {
         this.fingerprinter = fingerprinter;
         this.reconcile = reconcile;
         this.eolEnricher = eolEnricher;
+        this.workspaces = workspaces;
     }
 
     @Transactional
@@ -136,8 +139,10 @@ public class ScanStateService {
                 .map(com.company.secscan.repository.Repository::isIncludeDevDeps).orElse(false);
         boolean effectiveIncludeDev = repoIncludeDev
                 || (parsed.config().present() && Boolean.TRUE.equals(parsed.config().includeDevDependencies()));
+        boolean epssAutoIgnore = workspaces.findById(workspaceId)
+                .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
         com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
-                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev);
+                parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore);
         reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {

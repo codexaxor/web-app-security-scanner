@@ -61,8 +61,8 @@ public final class PathExclusion {
         return false;
     }
 
-    /** Forward slashes; strip a leading {@code ./} or {@code /} and any trailing {@code /}. */
-    static String normalize(String path) {
+    /** Forward slashes; strip a leading {@code ./} or {@code /} and any trailing {@code /}. Shared normalizer. */
+    public static String normalize(String path) {
         if (path == null) {
             return "";
         }
