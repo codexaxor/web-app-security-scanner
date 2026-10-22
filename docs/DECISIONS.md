@@ -1120,6 +1120,18 @@ Decision: `workspace_id` on every business table from day one.
   - **M3 gap "issues of an inactive repository stay open"** — resolved by OD-15/D-070 DISPLAY rules: an inactive
     repo keeps its statuses (reconcile never runs) but its groups/sub-issues are excluded from Feed/Dashboard
     totals by default, shown behind an "Inactive" filter + a visible "N inactive repos, M open findings" line.
+  - **OD-19 PROPOSED (not built in M8; investigation in `docs/reports/M8-S10b-duplicate-ignored-sast.md`):**
+    duplicate *ignored* sub-issues accumulate when a finding's fingerprint changes while it is ignored. Root
+    cause: the SAST fingerprint includes the normalized-snippet hash (scanner-computed), which shifts when the
+    Opengrep binary/rule bundle or the normalization algorithm changes (as it did on 2026-10-20, M6 `/review-pr`);
+    reconcile's solve step is gated on `status='open'` (`Reconciler.java:95`), so the vanished old fingerprint is
+    not closed ("ignored stays ignored") while the new one is re-ignored → two ignored rows. **Open findings do
+    NOT accumulate** (missing open → solved). Proposed fix (touches reconcile/resolver = domain rule 3, so human
+    decision): (1) solve an *ignored* finding that is absent from a scanner-complete scan when its hold is
+    re-derivable (auto cause or rule/path/CVE-scope), routed through the D-063 resolver, writing a `triage_event`;
+    (2) a one-off maintenance pass (no migration) to retire the rows already accumulated; (3) optionally reduce
+    SAST fingerprint churn with a structural match key. Not a security issue (the live finding is tracked
+    correctly; surplus rows are stale ignored clutter).
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
