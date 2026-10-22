@@ -189,3 +189,53 @@ GET /dashboard/summary; nothing is computed in the browser.
   D-065..D-072 + the M8 deferred register; this work log. No migration, no scanner/hardening change.
 
 Final test counts: app **305**, core **116**, vitest **2**, Playwright e2e **31** (×2). No `/finish-milestone`.
+
+## S10 — fix + UX pass (Phase B continued)
+
+No migration, no scanner change, NO new dependencies (React/react-router/react-query/plain CSS only); CSP
+unchanged (`style-src 'self'`, styling only in CSS files). Data semantics unchanged — every oracle assertion
+(UI=API=SQL) preserved; only two non-oracle e2e steps adjusted for the redesign.
+
+### S10a — relative-time units bug ✓ (`a10e401`)
+`lib/format.relativeTime` divided by the right unit but labelled it with the next-smaller unit (8.7h → "9m",
+3.4d → "3h"). Replaced with one shared formatter on `Intl.RelativeTimeFormat` (built-in, no dep): <60s "just
+now"; minutes; hours; days; >30d an absolute date; null/invalid "—"; future reads "in …". Added `exactTime()`
+and a `RelativeTime` component that shows the exact local timestamp (locale + timezone) as a title tooltip
+everywhere a relative time appears. vitest: 8 cases covering 59s/60s, 59m/60m, 23h/24h, 29d/30d, the two
+reported values, future and null/invalid. e2e: 8h40m → "9 hours ago" and 3d10h → "3 days ago" asserted on
+Repositories, Dashboard and Ignored.
+
+### S10b — duplicate ignored SAST sub-issues (investigation only) ✓ (`d750052`)
+Read-only against the dev DB; no data changed. Report: `docs/reports/M8-S10b-duplicate-ignored-sast.md`. Root
+cause: the SAST fingerprint includes the scanner-computed normalized-snippet hash, which shifted on 2026-10-20
+(Opengrep re-pin + Java→shell `SnippetNormalizer`, commits 12dbe23 / 05d9121); `Reconciler.java:95` solves only
+`status='open'` findings, so the vanished OLD fingerprint stayed ignored ("ignored stays ignored") while the new
+one was re-ignored → two ignored rows. Open findings do NOT accumulate (missing open → solved; empirically 2
+ignored duplicate clusters, 0 open). Fix proposed as **OD-19** (touches reconcile/domain rule 3 — not
+implemented). The line-number UI aid landed in S10d.
+
+### S10c — design system foundation ✓ (`2949713`)
+`src/styles/{tokens,base,components}.css` (imported via `styles.css`): severity colors used for severity only;
+separate status roles (new=blue, todo=grey, ignored=muted, solved=green); surface/border/text levels; focus
+ring; 4/8/12/16/24/32 spacing; 12–32 type scale; radii; one font stack; AA contrast in light and dark. Shared
+components: SeverityPill, StatusChip, TypeBadge, RepoName, Button, Card, PageHeader, EmptyState, InfoTip,
+SeverityBar, Legend, Toggle, RelativeTime, ScanStatusChip, accessible Dialog (role=dialog, aria-modal, Esc,
+focus-trap, focus restore) and ConfirmDialog. Human-label maps in `src/lib/labels.ts`. Shell restyled (wordmark,
+nav active state, user + Sign out).
+
+### S10d — screens rebuilt + backend read-model additions ✓ (`35c714e`, fixes in `30ac253`)
+All 8 screens rebuilt on the system (see commit body). Severity colors now identical Feed↔panel (orange-98
+mismatch fixed). Backend (no migration, ITs added): `IssueGroupView.findingCount` (batch count, no N+1;
+FeedSearchIT), `IgnoredItemView.line` (SastIgnoreChurnIT), `GET /issue-groups/{id}` for the panel header. Two
+fixes after the first e2e run: dropped the sticky table header (it overlapped the first row and intercepted a
+click) and showed a scan's real status via `ScanStatusChip` ("Completed"/"Failed"/"Partial") instead of the
+issue `StatusChip` ("Solved").
+
+### S10 gates
+- G1 `./gradlew build` → BUILD SUCCESSFUL (app + core; +2 ITs). G2 UI gate (typecheck/build/2+8 vitest/guard)
+  green. `npm audit`: **0 vulnerabilities** (no new deps).
+- G3 `npm run e2e`: **54 Playwright tests** (31 prior + 7 `s10.spec` + 16 `screens.spec`), run twice
+  back-to-back, all green, no flakes. Screenshots at 1440×900 and 1280×800 in `ui/e2e/artifacts/screens/`
+  (gitignored).
+- Oracle assertions unchanged; two non-oracle steps adjusted (Show-inactive toggle; delete-confirm). No
+  migration, no scanner change, no new deps, CSP unchanged, numbers unchanged.
