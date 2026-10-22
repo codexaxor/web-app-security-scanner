@@ -41,6 +41,7 @@ for (const vp of VIEWPORTS) {
 const THEMED: [string, string][] = [
   ["dashboard", "/dashboard"],
   ["feed-panel", `/feed/${COMMONS_TEXT}`],
+  ["feed-secret", "/feed?type=secret"], // Feed filtered to secret findings (S10f label review)
   ["ignored", "/ignored"],
   ["repositories", "/repositories"],
 ];

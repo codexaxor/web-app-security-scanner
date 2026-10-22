@@ -280,3 +280,29 @@ existing oracle assertions unchanged.
   back-to-back, all green, no flakes (one race fix after the first run — wait for the Feed rows before reading
   their counts). Screenshots in `ui/e2e/artifacts/screens/` (gitignored).
 - No migration, no scanner change, no new deps, CSP unchanged, oracle assertions unchanged.
+
+## S10f — plain-English type names (last UI change before the walkthrough)
+
+No migration, no scanner/ingest change, no new deps, CSP unchanged, oracle assertions unchanged.
+
+1. **Type names (`b624cf8`):** three representations in `lib/labels.ts` — badge (short: Dependency / Code /
+   Secret / Infrastructure / Runtime), full (Vulnerable dependency / Code weakness / Exposed secret /
+   Infrastructure config / Outdated runtime) and acronym (SCA/SAST/IaC/EOL, **tooltip only**). Type badges show
+   the short name; the Feed type filter, the Dashboard type bars and the side-panel header show the full name;
+   the acronym appears only in `title` attributes. API values stay the lowercase codes. e2e (`s10f.spec`): no
+   visible text node equals SCA/SAST/IaC/EOL on Feed/Dashboard/Ignored; filtering by "Vulnerable dependency"
+   returns the same rows as `type=sca` (and every row's badge reads "Dependency"). The one existing non-oracle
+   badge-text assertion in `feed.spec` updated SAST "SAST" → "Code".
+2. **IaC titles — investigated (read-only), NOT changed.** The Checkov check name/description is **not persisted
+   anywhere** today: `issue_group.title` holds the check id (e.g. `CKV_DOCKER_2`), `subtitle` is empty, and
+   `sub_issue.advisory_summary`/`cwe`/`severity_label` are empty. `ScannerOutputParser.parseIac` reads
+   `check_id`/`resource`/`file_path`/`file_line_range`/`severity` but **not** Checkov's `check_name`. Showing the
+   human name therefore needs an **ingest change (capture `check_name` at parse)** → deferred to **M8.5**. IaC
+   titles left as the check id.
+
+### S10f gates
+- G1 unchanged (no app change; last `./gradlew build` green). G2 UI gate green (typecheck/build/10 vitest/guard
+  44 files). `npm audit`: 0 vulnerabilities.
+- G3 `npm run e2e`: **74 Playwright tests** (70 + 2 `s10f.spec` + 2 feed-secret screenshots), run twice
+  back-to-back, all green, no flakes. 26 screenshots (incl. light+dark Feed/Dashboard for label review) in
+  `ui/e2e/artifacts/screens/`.

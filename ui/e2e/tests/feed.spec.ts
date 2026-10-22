@@ -81,7 +81,7 @@ test("default sort is severity desc and filters narrow by type", async ({ page, 
   await expect(page.getByTestId("feed-row").first()).toBeVisible();
   const typeCells = await page.getByTestId("feed-row").locator("td:first-child").allInnerTexts();
   expect(typeCells.length).toBeGreaterThan(0);
-  expect(typeCells.every((b) => b.includes("SAST"))).toBeTruthy();
+  expect(typeCells.every((b) => b.includes("Code"))).toBeTruthy(); // SAST badge → plain "Code" (S10f)
 });
 
 test("New (<7d) vs To Do status at the 7-day boundary", async ({ page }) => {
