@@ -64,9 +64,13 @@ export { expect };
 export const adminEmail = () => process.env.E2E_ADMIN_EMAIL ?? "admin@example.com";
 export const adminPassword = () => ADMIN_PASSWORD;
 
-/** Signs in through the in-app gate using the per-run bootstrap admin credentials. */
-export async function signIn(page: Page): Promise<void> {
-  await page.goto("/");
+/**
+ * Signs in through the in-app gate using the per-run bootstrap admin credentials. Navigates to `path` FIRST (a
+ * full load that wipes the in-memory credentials), then signs in there — the gate preserves the URL, so the
+ * requested route renders after sign-in (route restore). Credentials are never reloaded across a page.goto.
+ */
+export async function signIn(page: Page, path = "/"): Promise<void> {
+  await page.goto(path);
   await page.getByLabel("Email").fill(adminEmail());
   await page.getByLabel("Password").fill(adminPassword());
   await page.getByRole("button", { name: /continue|sign in/i }).click();

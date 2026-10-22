@@ -20,7 +20,7 @@ import java.util.UUID;
  * {@code cwePhrase}, {@code inKev}, and the stored {@code epss} probability. EPSS is displayed only (adjustments
  * off in M5); when present, {@code epssAttribution} carries the required © FIRST.org line (D-047).
  */
-public record SubIssueView(UUID id, UUID groupId, String type, String scanner, String status,
+public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type, String scanner, String status,
                            String vulnId, String ruleId, String packageName, String installedVersion,
                            String fixedVersion, String filePath, Integer line, String secretPreview,
                            String toolSeverity, String ignoreReason, Integer score, String band,
@@ -46,7 +46,8 @@ public record SubIssueView(UUID id, UUID groupId, String type, String scanner, S
         Integer score = s.getScore();
         String cwePhrase = CweDictionary.getInstance().phrase(s.getCwe(), s.getAdvisorySummary());
         String epssAttribution = s.getEpss() != null ? EPSS_ATTRIBUTION : null;
-        return new SubIssueView(s.getId(), s.getGroupId(), s.getType(), s.getScanner(), s.getStatus(),
+        return new SubIssueView(s.getId(), s.getGroupId(), s.getRepositoryId(), s.getType(), s.getScanner(),
+                s.getStatus(),
                 s.getVulnId(), s.getRuleId(), s.getPackageName(), s.getInstalledVersion(), s.getFixedVersion(),
                 s.getFilePath(), s.getLine(), s.getSecretPreview(), s.getToolSeverity(), s.getIgnoreReason(),
                 score, score == null ? null : Scoring.band(score), s.getScoreBreakdown(), s.getCvss(),

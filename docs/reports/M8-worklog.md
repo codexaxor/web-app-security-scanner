@@ -17,7 +17,7 @@ G3 `npm run e2e` (S0, S3–S9; S1/S2 run the existing-screens smoke); G4 clean g
 | 5 | rescoreRepository same lock/guard + concurrency test | S1 | S1 | `SensitivityRescoreIT`, `SensitivityRescoreConcurrencyIT` |
 | 6 | pin node + playwright by digest; pw non-root, no socket | S0 | S0 | `ui/Dockerfile` digest; `e2e/run-e2e.mjs` (pwuser, no socket, ro mount) |
 | 7 | workspace-2 complete seed dataset | S0/S2 | S2 | `e2e/fixtures/seed.sql` (complete ws2 + ws1; oracle in S4+) |
-| 8 | path-scope ignore matches IgnoreMatcher format | S6 | _pending_ | _pending_ |
+| 8 | path-scope ignore matches IgnoreMatcher format | S6 | S6 | `e2e panel.spec` (path prefix hint; ignore leaves Focus) |
 | 9 | error handler: no stack traces; 401 entrypoint unchanged | S1 | S1 | `ApiErrorBodyIT` (400/404/409 shape, no trace; 401 no WWW-Authenticate) |
 | 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | S0,S1,S3 | `ScanCreatedAtIT` (R1/R4); `e2e onboarding.spec` (route restored after re-auth) |
 
@@ -120,3 +120,28 @@ panel for now; S6 completes it).
   Focus vs All (ignored groups appear only in All), >50 server-side pagination for core-keycloak (64 groups →
   50 + 14), default severity-desc sort, type filter, New/To-Do at the 7-day boundary (fresh bulk group = New,
   30-day inactive group = To Do under Include inactive).
+
+### S6 — Issue side panel ✓
+Full panel: per sub-issue the CVE/GHSA link (built from a regex-validated id, never from data), KEV badge, EPSS
+value + "© FIRST.org" attribution whenever EPSS shows, installed→fixed, file/line, CWE phrase, the secret
+preview as given (4 chars), the itemized score breakdown, and a per-sub-issue history. Ignore at all 5 scopes
+(subissue, group, path-prefix this repo, CVE this repo|global, rule this repo|global) with a required reason and
+a confirm for global scopes; the path match_value is a repo-relative PREFIX per core.triage.IgnoreMatcher
+(change 8), with that hint shown. Unignore deletes the holding manual rule; a .secscan.yml rule shows the
+edit-in-repo message and offers no unignore; an auto-ignored finding shows its cause and no unignore. Every
+triage mutation invalidates the panel/feed/summary/ignored/dashboard/repositories families.
+
+- Additive backend: `SubIssueView` gains `repositoryId` (the panel needs it for repo-scoped ignores); no
+  migration. Seed gains a .secscan.yml-held finding.
+- Tests: `e2e panel.spec` — CVE link + KEV + EPSS attribution + installed→fixed; reason-required + global
+  confirm gating; ignore (subissue) removes the group from Focus (API oracle); .secscan.yml message + no
+  unignore; auto-cause message + no unignore; unignore restores the finding to open; history lists events.
+
+> **HARD STOP (S6 gate) — disk full.** The root filesystem `/` (57G, holds `/var/lib/docker`) is 100% full from
+> repeated e2e image rebuilds; Testcontainers/e2e can no longer start a container. (/home, where the repo lives,
+> has 127G — the P10 check looked there and missed that Docker is on root.) S6 CODE is complete and the UI gate
+> (typecheck/build/vitest/guard) + targeted backend tests (SubIssuePanelIT, IssueApiIT) passed; the full
+> `./gradlew build` and the S6 e2e failed ONLY with ExceptionInInitializerError / "postgres exited 1" — Docker
+> out of space, not a code defect. Reclaimable without touching the dev DB: ~2.6G Docker build cache
+> (`docker builder prune`) + ~4.4G unused images (`docker image prune -a`); the `postgres-data` named volume and
+> the running default stack are preserved. Awaiting approval to prune (plan P10 gates `docker builder prune`).

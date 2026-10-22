@@ -155,6 +155,19 @@ select gen_random_uuid(), ig.workspace_id, ig.id, ig.repository_id, 'sca', 'sca'
 from issue_group ig
 where ig.workspace_id = '00000000-0000-0000-0000-000000000001' and ig.group_key like 'ign|%';
 
+-- An ignored finding held by the .secscan.yml rule (created_by='secscan.yml') → the panel shows the
+-- "edit .secscan.yml" message and offers NO unignore button.
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, first_seen_at)
+values ('40000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'sca', 'sca|secscanyml-held', 'Ignored via .secscan.yml',
+        'ignored', now() - interval '4 days');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, status,
+                       ignore_reason, ignored_by_rule_id, ignored_at, created_at)
+values ('50000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000002', 'sca', 'sca',
+        'fp-secscanyml', 'CVE-2025-22869', 'ignored', 'IGNORE_RULE',
+        '60000000-0000-0000-0000-000000000003', now() - interval '4 days', now() - interval '4 days');
+
 -- triage_events inside and outside the 7-day window (New uses sub.created_at; Solved/Auto-ignored use at).
 -- Solved within 7d (the finding is backdated out of the New window via its own created_at above/below).
 insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, status, score,

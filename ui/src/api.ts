@@ -113,6 +113,7 @@ export interface ScoreLine {
 export interface SubIssueView {
   id: string;
   groupId: string;
+  repositoryId: string;
   type: IssueType;
   scanner: string;
   status: string;

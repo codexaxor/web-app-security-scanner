@@ -56,3 +56,23 @@ export function bandOf(score: number | null | undefined): BandName | "ignored" {
 export function titleCase(s: string): string {
   return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
+
+const CVE_RE = /^CVE-\d{4}-\d{4,}$/i;
+const GHSA_RE = /^GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}$/i;
+
+/**
+ * An advisory URL built by OUR code from a REGEX-VALIDATED id, never from free data (OD-13d). Returns null when
+ * the id is not a recognised CVE/GHSA, so the UI shows plain text instead of a link.
+ */
+export function advisoryLink(id: string | null | undefined): string | null {
+  if (!id) {
+    return null;
+  }
+  if (CVE_RE.test(id)) {
+    return `https://nvd.nist.gov/vuln/detail/${id.toUpperCase()}`;
+  }
+  if (GHSA_RE.test(id)) {
+    return `https://github.com/advisories/${id.toUpperCase()}`;
+  }
+  return null;
+}
