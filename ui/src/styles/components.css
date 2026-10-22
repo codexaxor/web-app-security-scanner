@@ -8,8 +8,8 @@
   display: flex;
   align-items: center;
   gap: var(--sp-4);
-  padding: 0 var(--sp-4);
-  height: 56px;
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 56px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: sticky;
@@ -34,7 +34,8 @@
 .nav {
   display: flex;
   gap: var(--sp-1);
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
 }
 .nav-link {
@@ -63,6 +64,14 @@
   gap: var(--sp-3);
   color: var(--muted);
   font-size: var(--fs-sm);
+  flex: none;
+  margin-left: auto;
+}
+.theme-control button {
+  height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
 }
 .content {
   max-width: var(--content-max);
@@ -311,17 +320,47 @@ a.stat-link:hover .stat-num {
 .pill-score {
   font-variant-numeric: tabular-nums;
 }
-/* small severity count pills (Repositories) */
+/* compact labeled severity counts (Repositories): "C 1 · H 2 · M 2 · L 0" on one line */
 .sevmini {
   display: inline-flex;
-  gap: var(--sp-1);
-  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
 }
-.sevmini .pill {
-  padding: 1px 8px;
+.sevmini-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-weight: 650;
 }
-.sevmini .pill.is-zero {
-  opacity: 0.4;
+.sevmini-item + .sevmini-item::before {
+  content: "·";
+  color: var(--muted);
+  margin-right: var(--sp-1);
+  font-weight: 400;
+}
+.sevmini-letter {
+  font-size: var(--fs-xs);
+  opacity: 0.85;
+}
+.sevmini-item.sev-critical {
+  color: var(--sev-critical);
+}
+.sevmini-item.sev-high {
+  color: var(--sev-high);
+}
+.sevmini-item.sev-medium {
+  color: var(--sev-medium);
+}
+.sevmini-item.sev-low {
+  color: var(--sev-low);
+}
+.sevmini-item.is-zero {
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 /* ---------- status chip ---------- */
@@ -376,16 +415,26 @@ a.stat-link:hover .stat-num {
 }
 
 /* ---------- repo name ---------- */
-.repo-name {
+.repo-name-wrap {
   display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+}
+.repo-name {
+  display: block;
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: bottom;
   font-weight: 600;
 }
 .repo-path {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: var(--fs-xs);
 }
@@ -433,9 +482,9 @@ a.stat-link:hover .stat-num {
   background: var(--sev-low);
 }
 .legend {
-  display: flex;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 4px var(--sp-4);
   font-size: var(--fs-xs);
 }
 .legend-item {
@@ -443,7 +492,13 @@ a.stat-link:hover .stat-num {
   align-items: center;
   gap: 5px;
   color: var(--text-2);
+  text-decoration: none;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+a.legend-item:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 .legend-dot {
   width: 9px;
@@ -482,6 +537,7 @@ a.stat-link:hover .stat-num {
   height: 18px;
 }
 .hbar-fill {
+  display: block;
   background: var(--accent);
   height: 100%;
   border-radius: var(--radius-sm);
@@ -784,6 +840,7 @@ button.health-item {
   background: var(--surface);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   box-shadow: var(--shadow-2);
 }
 .panel-header {
@@ -800,7 +857,7 @@ button.health-item {
 .panel-title {
   margin-top: var(--sp-2);
   font-size: var(--fs-lg);
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .panel-sub {
   margin-top: 4px;
@@ -816,6 +873,10 @@ button.health-item {
 .remediation {
   font-weight: 600;
   color: var(--text);
+  overflow-wrap: anywhere;
+}
+.group-head .row-between {
+  gap: var(--sp-2);
 }
 .location-actions {
   display: flex;
@@ -852,7 +913,8 @@ button.health-item {
 }
 .kv dd {
   margin: 0;
-  word-break: break-word;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .location {
   border: 1px solid var(--border);
@@ -863,15 +925,40 @@ button.health-item {
 }
 .location-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: var(--sp-3);
+}
+.location-id-wrap {
+  min-width: 0;
+  flex: 1;
+}
+.location-id {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  word-break: break-all;
+}
+.file-path {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.location-badges {
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
-  flex-wrap: wrap;
+  flex: none;
 }
 .file-line {
   font-family: var(--mono);
   font-size: var(--fs-sm);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .breakdown {
   list-style: none;
@@ -949,6 +1036,11 @@ button.health-item {
   font-family: var(--mono);
   font-size: var(--fs-xs);
   word-break: break-all;
+}
+/* advisory / description subtitles stay in the body font (never monospace) */
+.subtitle-text {
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
 }
 
 /* ---------- pager ---------- */

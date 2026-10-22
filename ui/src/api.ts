@@ -94,7 +94,9 @@ export interface IssueGroupView {
   severityScore: number | null;
   fixTimeMinutes: number | null;
   firstSeenAt: string;
-  findingCount: number;
+  openCount: number;
+  ignoredCount: number;
+  solvedCount: number;
 }
 
 export interface FeedSummaryView {

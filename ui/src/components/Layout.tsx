@@ -1,7 +1,33 @@
 import { NavLink, Outlet } from "react-router";
 import { useAuth } from "../auth";
+import { useTheme, type Theme } from "../theme";
 import SignInGate from "./SignInGate";
 import Button from "./Button";
+
+const THEME_OPTS: [Theme, string][] = [
+  ["light", "Light"],
+  ["dark", "Dark"],
+  ["system", "System"],
+];
+
+function ThemeControl() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className="segmented theme-control" role="group" aria-label="Theme">
+      {THEME_OPTS.map(([t, label]) => (
+        <button
+          key={t}
+          className={theme === t ? "active" : ""}
+          aria-pressed={theme === t}
+          data-theme-opt={t}
+          onClick={() => setTheme(t)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard" },
@@ -51,6 +77,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="topbar-user">
+          <ThemeControl />
           <span className="muted">admin</span>
           <Button variant="ghost" size="sm" onClick={signOut}>
             Sign out

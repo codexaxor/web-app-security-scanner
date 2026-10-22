@@ -8,7 +8,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import Button from "../components/Button";
 import ConfirmDialog from "../components/ConfirmDialog";
 import TypeBadge from "../components/TypeBadge";
-import { EmptyState, PageHeader } from "../components/ui";
+import { EmptyState, PageHeader, PathText } from "../components/ui";
 import CreateRuleDialog, { type RulePrefill } from "../components/CreateRuleDialog";
 
 const SIZE = 50;
@@ -70,9 +70,8 @@ export default function IgnoredPage() {
                       <strong>{findingTitle(it)}</strong>
                     </div>
                     {it.filePath ? (
-                      <div className="muted file-line">
-                        {it.filePath}
-                        {it.line != null ? `:${it.line}` : ""}
+                      <div className="muted">
+                        <PathText path={it.filePath} line={it.line} />
                       </div>
                     ) : null}
                   </td>

@@ -119,23 +119,24 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
   return (
     <div className="location" data-testid="subissue">
       <div className="location-head">
-        <span className="file-line">
-          {link ? (
-            <a href={link} target="_blank" rel="noreferrer">
-              {sub.vulnId}
-            </a>
-          ) : (
-            idLabel
-          )}
+        <div className="location-id-wrap">
+          <span className="location-id">
+            {link ? (
+              <a href={link} target="_blank" rel="noreferrer">
+                {sub.vulnId}
+              </a>
+            ) : (
+              idLabel
+            )}
+          </span>
           {sub.filePath ? (
-            <span className="muted">
-              {" · "}
+            <div className="file-path muted" title={sub.filePath}>
               {sub.filePath}
               {sub.line != null ? `:${sub.line}` : ""}
-            </span>
+            </div>
           ) : null}
-        </span>
-        <span className="row">
+        </div>
+        <span className="location-badges">
           {sub.inKev ? (
             <span className="badge-kev" data-testid="kev-badge">
               KEV

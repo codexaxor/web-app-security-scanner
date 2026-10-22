@@ -55,6 +55,25 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   );
 }
 
+/** A file path (optionally with :line) that prefers to wrap AFTER each "/" (a <wbr> per segment) rather than
+ *  mid-word; the full path:line is the title. Monospace via .file-line. */
+export function PathText({ path, line }: { path: string; line?: number | null }) {
+  const parts = path.split("/");
+  const full = line != null ? `${path}:${line}` : path;
+  return (
+    <span className="file-line" title={full}>
+      {parts.map((p, i) => (
+        <span key={i}>
+          {i > 0 ? "/" : ""}
+          {i > 0 ? <wbr /> : null}
+          {p}
+        </span>
+      ))}
+      {line != null ? `:${line}` : ""}
+    </span>
+  );
+}
+
 /** A title-based tooltip affordance: a small "?" that reveals `text` on hover/focus (native title), also exposed
  *  to assistive tech via aria-label. CSP-safe — no JS popovers. */
 export function InfoTip({ text }: { text: string }) {

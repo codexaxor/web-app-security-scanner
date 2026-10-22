@@ -94,17 +94,16 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     Page<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId, Pageable pageable);
 
     /**
-     * The Feed's per-group finding count (M8 S10d): number of sub-issues in each of the given groups (any
-     * status — mirrors what the side panel lists as "N affected locations"). Returns rows of [groupId, count];
-     * groups with no sub-issue are simply absent. One query for the whole page, so the feed stays free of an
-     * N+1 per row. Workspace-scoped.
+     * The Feed's per-group finding counts broken down by status (M8 S10e): rows of [groupId, status, count] for
+     * each of the given groups. The Feed shows open vs ignored separately (a group can hold a mix); groups with
+     * no sub-issue of a status are simply absent. One query for the whole page — no N+1 per row. Workspace-scoped.
      */
     @Query("""
-            select s.groupId, count(s) from SubIssue s
+            select s.groupId, s.status, count(s) from SubIssue s
             where s.workspaceId = :ws and s.groupId in :groupIds
-            group by s.groupId
+            group by s.groupId, s.status
             """)
-    java.util.List<Object[]> countByGroupIds(@Param("ws") UUID ws, @Param("groupIds") List<UUID> groupIds);
+    java.util.List<Object[]> countByGroupIdsAndStatus(@Param("ws") UUID ws, @Param("groupIds") List<UUID> groupIds);
 
     /**
      * Writes ONLY the derived score columns of a sub-issue, and ONLY while it is still {@code open} (B1). The

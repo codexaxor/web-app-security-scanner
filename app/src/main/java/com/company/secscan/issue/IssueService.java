@@ -64,20 +64,35 @@ public class IssueService {
                 range == null ? null : range[0], range == null ? null : range[1], includeInactive,
                 PageRequest.of(Math.max(0, page), Math.max(1, size)));
         Map<UUID, String> paths = repoPaths();
-        Map<UUID, Long> counts = findingCounts(pageResult.getContent());
-        return PagedResponse.fromPage(pageResult.map(g ->
-                IssueGroupView.of(g, paths.get(g.getRepositoryId()), counts.getOrDefault(g.getId(), 0L))));
+        Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
+        return PagedResponse.fromPage(pageResult.map(g -> toView(g, paths, counts)));
     }
 
-    /** Sub-issue counts for the groups on this feed page, in one query (no N+1). Empty page → empty map. */
-    private Map<UUID, Long> findingCounts(List<IssueGroup> pageGroups) {
+    /** Build a view with its open/ignored/solved sub-issue counts (0,0,0 when the group has no sub-issue). */
+    private IssueGroupView toView(IssueGroup g, Map<UUID, String> paths, Map<UUID, long[]> counts) {
+        long[] c = counts.getOrDefault(g.getId(), new long[3]);
+        return IssueGroupView.of(g, paths.get(g.getRepositoryId()), c[0], c[1], c[2]);
+    }
+
+    /**
+     * Per-group sub-issue counts by status for a feed page, in one query (no N+1). The array is
+     * [openCount, ignoredCount, solvedCount]. Empty page → empty map.
+     */
+    private Map<UUID, long[]> findingCounts(List<IssueGroup> pageGroups) {
         if (pageGroups.isEmpty()) {
             return Map.of();
         }
         List<UUID> ids = pageGroups.stream().map(IssueGroup::getId).toList();
-        Map<UUID, Long> counts = new HashMap<>();
-        for (Object[] row : subIssues.countByGroupIds(WORKSPACE, ids)) {
-            counts.put((UUID) row[0], ((Number) row[1]).longValue());
+        Map<UUID, long[]> counts = new HashMap<>();
+        for (Object[] row : subIssues.countByGroupIdsAndStatus(WORKSPACE, ids)) {
+            long[] c = counts.computeIfAbsent((UUID) row[0], k -> new long[3]);
+            long n = ((Number) row[2]).longValue();
+            switch ((String) row[1]) {
+                case SubIssue.STATUS_OPEN -> c[0] = n;
+                case SubIssue.STATUS_IGNORED -> c[1] = n;
+                case SubIssue.STATUS_SOLVED -> c[2] = n;
+                default -> { /* unknown status: ignored in the breakdown */ }
+            }
         }
         return counts;
     }
@@ -87,8 +102,7 @@ public class IssueService {
     public IssueGroupView getGroup(UUID groupId) {
         IssueGroup g = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
-        long count = findingCounts(List.of(g)).getOrDefault(g.getId(), 0L);
-        return IssueGroupView.of(g, repoPaths().get(g.getRepositoryId()), count);
+        return toView(g, repoPaths(), findingCounts(List.of(g)));
     }
 
     /** The Feed summary bar (OD-14 item 4): band group counts for the view + 7-day finding buckets (change 3). */

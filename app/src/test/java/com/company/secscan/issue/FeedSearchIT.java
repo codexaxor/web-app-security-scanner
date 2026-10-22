@@ -69,18 +69,30 @@ class FeedSearchIT extends AbstractGitLabIT {
     }
 
     @Test
-    void feedRowCarriesSubIssueFindingCount() {
+    void feedRowCarriesSubIssueCountsBrokenDownByStatus() {
         Repository repo = seedRepo(WORKSPACE, 8109L, true);
-        IssueGroup two = group(WORKSPACE, repo.getId(), "two", 90, IssueGroup.STATUS_OPEN);
-        group(WORKSPACE, repo.getId(), "zero", 50, IssueGroup.STATUS_OPEN); // no sub-issues
-        subIssues.save(new SubIssue(WORKSPACE, two.getId(), repo.getId(), "sca", "sca", "fp-a", null));
-        subIssues.save(new SubIssue(WORKSPACE, two.getId(), repo.getId(), "sca", "sca", "fp-b", null));
+        IssueGroup mixed = group(WORKSPACE, repo.getId(), "mixed", 90, IssueGroup.STATUS_OPEN);
+        group(WORKSPACE, repo.getId(), "empty", 50, IssueGroup.STATUS_OPEN); // no sub-issues
+        subIssues.save(new SubIssue(WORKSPACE, mixed.getId(), repo.getId(), "sca", "sca", "fp-o1", null));
+        subIssues.save(new SubIssue(WORKSPACE, mixed.getId(), repo.getId(), "sca", "sca", "fp-o2", null));
+        SubIssue ign = new SubIssue(WORKSPACE, mixed.getId(), repo.getId(), "sca", "sca", "fp-ig", null);
+        ign.ignore("DEV_DEPENDENCY", null);
+        subIssues.save(ign);
+        SubIssue sol = new SubIssue(WORKSPACE, mixed.getId(), repo.getId(), "sca", "sca", "fp-sv", null);
+        sol.solve();
+        subIssues.save(sol);
 
-        var page = service.listGroups(repo.getId(), null, "focus", null, false, 0, 50);
-        assertThat(page.content()).filteredOn(v -> v.title().equals("two"))
-                .singleElement().satisfies(v -> assertThat(v.findingCount()).isEqualTo(2));
-        assertThat(page.content()).filteredOn(v -> v.title().equals("zero"))
-                .singleElement().satisfies(v -> assertThat(v.findingCount()).isEqualTo(0));
+        var page = service.listGroups(repo.getId(), null, "all", null, false, 0, 50);
+        assertThat(page.content()).filteredOn(v -> v.title().equals("mixed")).singleElement().satisfies(v -> {
+            assertThat(v.openCount()).isEqualTo(2);
+            assertThat(v.ignoredCount()).isEqualTo(1);
+            assertThat(v.solvedCount()).isEqualTo(1);
+        });
+        assertThat(page.content()).filteredOn(v -> v.title().equals("empty")).singleElement().satisfies(v -> {
+            assertThat(v.openCount()).isEqualTo(0);
+            assertThat(v.ignoredCount()).isEqualTo(0);
+            assertThat(v.solvedCount()).isEqualTo(0);
+        });
     }
 
     @Test

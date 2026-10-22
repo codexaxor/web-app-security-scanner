@@ -64,13 +64,17 @@ export default function DashboardPage() {
       </div>
 
       <h2 className="section-head">Scan health</h2>
-      <p className="muted" data-testid="scan-health-count">
-        {d?.scanHealth.unhealthyRepoCount ?? 0} repositor
-        {(d?.scanHealth.unhealthyRepoCount ?? 0) === 1 ? "y" : "ies"} with a partial/failed scan or warnings
-      </p>
       {healthRepos.length === 0 ? (
-        <p className="muted">All scans healthy.</p>
+        <p className="muted" data-testid="scan-health-count">All scans healthy</p>
       ) : (
+        <p className="muted" data-testid="scan-health-count">
+          {d?.scanHealth.unhealthyRepoCount ?? 0}{" "}
+          {(d?.scanHealth.unhealthyRepoCount ?? 0) === 1 ? "repository needs" : "repositories need"} attention —{" "}
+          {failedPartial.length > 0 ? `${failedPartial.length} failed/partial` : "all scans completed"} ·{" "}
+          {withWarnings.length} with warning{withWarnings.length === 1 ? "" : "s"}
+        </p>
+      )}
+      {healthRepos.length === 0 ? null : (
         <div className="stack-4">
           {failedPartial.length > 0 ? (
             <div>
@@ -78,7 +82,9 @@ export default function DashboardPage() {
               <div className="chip-row">
                 {failedPartial.map((r) => (
                   <span key={r.repositoryPath} className="chip chip-ignored health-item" data-testid="health-row">
-                    <RepoName path={r.repositoryPath} /> · {titleCase(r.lastScanStatus)}
+                    <RepoName path={r.repositoryPath} />
+                    {" · "}
+                    {titleCase(r.lastScanStatus)}
                   </span>
                 ))}
               </div>
@@ -98,7 +104,9 @@ export default function DashboardPage() {
                       disabled={!repo?.lastScan}
                       onClick={() => repo?.lastScan && setWarnings({ scanId: repo.lastScan.id, path: r.repositoryPath })}
                     >
-                      <RepoName path={r.repositoryPath} /> · {r.warningCount} warning{r.warningCount === 1 ? "" : "s"}
+                      <RepoName path={r.repositoryPath} />
+                      {" · "}
+                      {r.warningCount} warning{r.warningCount === 1 ? "" : "s"}
                     </button>
                   );
                 })}

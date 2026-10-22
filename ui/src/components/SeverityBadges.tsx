@@ -1,25 +1,21 @@
 import type { OpenBySeverity } from "../api";
 
-const ITEMS: [keyof OpenBySeverity, string][] = [
-  ["critical", "Critical"],
-  ["high", "High"],
-  ["medium", "Medium"],
-  ["low", "Low"],
+const ITEMS: [keyof OpenBySeverity, string, string][] = [
+  ["critical", "C", "Critical"],
+  ["high", "H", "High"],
+  ["medium", "M", "Medium"],
+  ["low", "L", "Low"],
 ];
 
-/** Per-repo open-by-severity as four labeled mini severity pills (count-only, band-colored). Zero bands are
- *  dimmed, not hidden, so the row layout stays stable. `data-sev` + title give the band for tooltip and tests. */
+/** Per-repo open-by-severity as one compact, labeled, non-wrapping line: "C 1 · H 2 · M 2 · L 0" (band-colored
+ *  letters; zero counts muted). The count sits in its own `data-sev` span so it reads as just the number. */
 export default function SeverityBadges({ counts }: { counts: OpenBySeverity }) {
   return (
     <span className="sevmini">
-      {ITEMS.map(([k, label]) => (
-        <span
-          key={k}
-          className={`pill pill-${k}${counts[k] === 0 ? " is-zero" : ""}`}
-          data-sev={k}
-          title={`${label}: ${counts[k]}`}
-        >
-          {counts[k]}
+      {ITEMS.map(([k, letter, label]) => (
+        <span key={k} className={`sevmini-item sev-${k}${counts[k] === 0 ? " is-zero" : ""}`} title={`${label}: ${counts[k]}`}>
+          <span className="sevmini-letter">{letter}</span>
+          <span data-sev={k}>{counts[k]}</span>
         </span>
       ))}
     </span>

@@ -220,10 +220,23 @@ export default function FeedPage() {
                     <td>
                       <div className="stack-tight">
                         <strong>{t.title}</strong>
-                        {t.subtitle ? <div className="muted mono-sub">{t.subtitle}</div> : null}
+                        {t.subtitle ? (
+                          <div className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}>
+                            {t.subtitle}
+                          </div>
+                        ) : null}
                       </div>
                     </td>
-                    <td className="cell-num">{g.findingCount}</td>
+                    <td className="cell-num" data-testid="findings-count" data-open={g.openCount}>
+                      {view === "all" ? (
+                        <span>
+                          {g.openCount} open
+                          {g.ignoredCount > 0 ? ` · ${g.ignoredCount} ignored` : ""}
+                        </span>
+                      ) : (
+                        g.openCount
+                      )}
+                    </td>
                     <td>
                       <SeverityPill score={g.severityScore} />
                     </td>
