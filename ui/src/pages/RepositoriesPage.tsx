@@ -11,13 +11,9 @@ import RepoSettingsDialog from "../components/RepoSettingsDialog";
 import WarningsDrawer from "../components/WarningsDrawer";
 import ErrorBanner from "../components/ErrorBanner";
 import Button from "../components/Button";
-import StatusChip from "../components/StatusChip";
-import { PageHeader, EmptyState } from "../components/ui";
+import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
 
 const SIZE = 50;
-
-const scanChipKind = (status: string) =>
-  status === "completed" ? "solved" : status === "failed" || status === "partial" ? "ignored" : "todo";
 
 export default function RepositoriesPage() {
   const [page, setPage] = useState(0);
@@ -112,7 +108,7 @@ export default function RepositoriesPage() {
                   <td>
                     {r.lastScan ? (
                       <span className="row">
-                        <StatusChip kind={scanChipKind(r.lastScan.status)} /> <RelativeTime iso={r.lastScan.finishedAt} />
+                        <ScanStatusChip status={r.lastScan.status} /> <RelativeTime iso={r.lastScan.finishedAt} />
                       </span>
                     ) : (
                       <span className="muted">Never scanned</span>

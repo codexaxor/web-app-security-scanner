@@ -19,6 +19,8 @@ test("deleting a rule restores the finding it held", async ({ page, request }) =
   await signIn(page, "/ignored");
   const ruleRow = page.getByTestId("ignore-rule").filter({ hasText: "CVE-2099-00001" });
   await ruleRow.getByTestId("delete-rule").click();
+  // Delete now goes through a confirm dialog (S10d).
+  await page.getByRole("dialog", { name: "Delete ignore rule" }).getByRole("button", { name: "Delete rule" }).click();
 
   await expect
     .poll(async () => {

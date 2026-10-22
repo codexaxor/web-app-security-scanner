@@ -31,6 +31,21 @@ export function PageHeader({
   );
 }
 
+/** A scan's own status as a colored chip (Completed green, Partial amber, Failed red, else neutral). Distinct
+ *  from StatusChip, which is for issue status (New/To Do/Ignored/Solved). */
+export function ScanStatusChip({ status }: { status: string }) {
+  const cls =
+    status === "completed"
+      ? "chip-solved"
+      : status === "partial"
+        ? "chip-warn"
+        : status === "failed"
+          ? "chip-bad"
+          : "chip-todo";
+  const label = status ? status.charAt(0).toUpperCase() + status.slice(1) : "—";
+  return <span className={`chip ${cls}`}>{label}</span>;
+}
+
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="empty">

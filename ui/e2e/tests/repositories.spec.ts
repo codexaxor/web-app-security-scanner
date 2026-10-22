@@ -39,6 +39,8 @@ test("shows the inactive line and an Inactive badge, and the scan button is disa
   await page.getByRole("link", { name: "Repositories", exact: true }).click();
   await expect(page.getByTestId("inactive-line")).toContainText("inactive repo");
 
+  // Inactive repos are hidden by default now (S10d) — reveal them to see legacy-batch.
+  await page.getByText("Show inactive").click();
   const legacy = await repoRow(page, "acme/legacy-batch");
   await expect(legacy.getByText("Inactive")).toBeVisible();
   await expect(legacy.getByRole("button", { name: "Scan", exact: true })).toBeDisabled();

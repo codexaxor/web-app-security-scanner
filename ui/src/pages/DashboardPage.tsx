@@ -7,10 +7,9 @@ import { titleCase } from "../lib/format";
 import { typeShort } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
-import StatusChip from "../components/StatusChip";
 import WarningsDrawer from "../components/WarningsDrawer";
 import ErrorBanner from "../components/ErrorBanner";
-import { Card, PageHeader, EmptyState, SeverityBar, Legend } from "../components/ui";
+import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
 import type { BandName } from "../lib/format";
 
 type Bands = { critical: number; high: number; medium: number; low: number };
@@ -23,9 +22,6 @@ function duration(startedAt: string | null, finishedAt: string | null): string {
   const s = secs % 60;
   return s ? `${m}m ${s}s` : `${m}m`;
 }
-
-const scanChipKind = (status: string) =>
-  status === "completed" ? "solved" : status === "failed" || status === "partial" ? "ignored" : "todo";
 
 export default function DashboardPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
@@ -143,7 +139,7 @@ export default function DashboardPage() {
                   </td>
                   <td>{s.trigger}</td>
                   <td>
-                    <StatusChip kind={scanChipKind(s.status)} />
+                    <ScanStatusChip status={s.status} />
                   </td>
                   <td>{duration(s.startedAt, s.finishedAt)}</td>
                   <td>

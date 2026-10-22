@@ -28,7 +28,8 @@ insert into epss_score (cve, epss, percentile) values
 insert into gitlab_connection (id, workspace_id, base_url, group_full_path, gitlab_group_id, token_ciphertext,
                                token_scopes, token_expires_at)
 values ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
-        'https://gitlab.example.com', 'acme', 42, 'fake-ciphertext', 'read_api,read_repository', date '2027-01-01');
+        'https://gitlab.example.com', 'acme', 42, 'fake-ciphertext', 'read_api,read_repository',
+        now() + interval '10 days'); -- expiring soon (< 14d) → Connect screen shows amber "10 days left" (S10d)
 
 insert into repository (id, workspace_id, connection_id, gitlab_project_id, path_with_namespace, default_branch,
                         active, sensitivity, include_dev_deps, languages, inactive_reason)
@@ -230,6 +231,32 @@ insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner,
                        created_at)
 values (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000009',
         '20000000-0000-0000-0000-000000000004', 'sca', 'sca', 'fp-inactive', 'open', 88, now() - interval '30 days');
+
+-- M8 S10a: a dedicated ACTIVE repo with scans at precise ages so the relative-time formatter can be asserted
+-- in the real UI (8h40m → "9 hours ago", 3d10h → "3 days ago"). Scans are completed with no warnings (scan
+-- health untouched); the one finding is ignored (not counted in open bands / type breakdown / focus feed).
+insert into repository (id, workspace_id, connection_id, gitlab_project_id, path_with_namespace, default_branch,
+                        active, sensitivity, include_dev_deps, languages, inactive_reason)
+values ('20000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-000000000001', 110, 'acme/time-fixture', 'main', true, 'normal', false,
+        '["Java"]'::jsonb, null);
+insert into scan (id, workspace_id, repository_id, trigger, commit_sha, status, started_at, finished_at) values
+  ('30000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001',
+   '20000000-0000-0000-0000-000000000010', 'manual', 'tfa', 'completed',
+   now() - interval '8 hours 45 minutes', now() - interval '8 hours 40 minutes'),
+  ('30000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001',
+   '20000000-0000-0000-0000-000000000010', 'schedule', 'tfb', 'completed',
+   now() - interval '3 days 10 hours 6 minutes', now() - interval '3 days 10 hours');
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, first_seen_at)
+values ('40000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000010', 'sca', 'sca|time-fixture', 'Time-fixture ignored', 'ignored',
+        now() - interval '3 days 10 hours');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, status,
+                       ignore_reason, ignored_at, created_at)
+values ('50000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000010', '20000000-0000-0000-0000-000000000010', 'sca', 'sca',
+        'fp-time-fixture', 'CVE-2024-99999', 'ignored', 'DEV_DEPENDENCY',
+        now() - interval '3 days 10 hours', now() - interval '3 days 10 hours');
 
 -- ========================================================================================================
 -- WORKSPACE 2 — the isolation oracle (must NEVER appear in the UI or any count)

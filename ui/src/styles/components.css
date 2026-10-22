@@ -244,15 +244,12 @@ a.stat-link:hover .stat-num {
   vertical-align: middle;
 }
 .table thead th {
-  position: sticky;
-  top: 56px;
   background: var(--surface-2);
   font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
   font-weight: 650;
-  z-index: 1;
 }
 .table tbody tr:last-child td {
   border-bottom: none;
@@ -357,6 +354,11 @@ a.stat-link:hover .stat-num {
   color: var(--status-solved);
   background: var(--status-solved-bg);
   border-color: var(--status-solved);
+}
+.chip-bad {
+  color: var(--danger);
+  background: var(--sev-critical-bg);
+  border-color: var(--danger);
 }
 
 /* ---------- type badge (neutral; never severity-colored) ---------- */
