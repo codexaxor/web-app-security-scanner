@@ -336,6 +336,8 @@ export const api = {
   getScan: (scanId: string) => request<{ scan: ScanView }>("GET", `/api/v1/scans/${scanId}`),
   listScanWarnings: (scanId: string, page: number, size: number) =>
     request<Paged<ScanWarningView>>("GET", `/api/v1/scans/${scanId}/warnings?page=${page}&size=${size}`),
+  listScansAll: (page: number, size: number) =>
+    request<Paged<ScanView>>("GET", `/api/v1/scans?page=${page}&size=${size}`),
 
   listFeed: (p: FeedParams) =>
     request<Paged<IssueGroupView>>("GET", `/api/v1/issue-groups${feedQuery(p)}`),

@@ -168,3 +168,13 @@ invalidates those families).
   one), so the test now asserts the SPECIFIC low-EPSS finding moves between Focus and Ignored, not aggregate
   totals. (Observation, not fixed — out of M8/UI scope: `DuplicateRuleMap.shouldIgnore` NPEs on a null SAST
   rule_id; unreachable with real data since rule_id is part of the SAST fingerprint.)
+
+### S8 — Dashboard ✓
+Dashboard page: band-count cards for issue groups and findings (with a segmented severity bar), the issue-type
+breakdown as plain CSS bars, scan health (repos whose last scan is partial/failed or raised warnings), the
+inactive-repository line, and a recent-scans table (GET /scans + a repo-id→path map). All numbers come from
+GET /dashboard/summary; nothing is computed in the browser.
+
+- Tests: `e2e dashboard.spec` — totals/band counts UI = API = SQL, workspace isolation (the other workspace's
+  critical finding is in a direct cross-workspace SQL count but never in the dashboard), scan-health count, type
+  breakdown = API. Gate: typecheck/build/vitest/guard green; e2e below.
