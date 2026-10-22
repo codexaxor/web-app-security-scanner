@@ -145,3 +145,26 @@ triage mutation invalidates the panel/feed/summary/ignored/dashboard/repositorie
 > out of space, not a code defect. Reclaimable without touching the dev DB: ~2.6G Docker build cache
 > (`docker builder prune`) + ~4.4G unused images (`docker image prune -a`); the `postgres-data` named volume and
 > the running default stack are preserved. Awaiting approval to prune (plan P10 gates `docker builder prune`).
+
+### S7 — Ignored view + Settings ✓
+Ignored page: a findings table (reason code, holding rule's reason + scope, creator, ignored time) and a rules
+table with Delete and "Create new…" (prefilled from the old rule — no edit-in-place, D-069). Deleting a rule
+restores the findings it held. Settings page: the EPSS auto-ignore toggle (GET/PUT /workspace/settings); turning
+it on/off re-evaluates LOW_EPSS and the effect shows in the Feed/Ignored counts after refetch (the mutation
+invalidates those families).
+
+- Seed gains a low-EPSS (0.5%, not KEV) open finding and a manual rule + held finding dedicated to the
+  delete-restores test (kept independent of the panel's rule to avoid cross-spec coupling).
+- Tests: `e2e ignored.spec` (rows = GET /ignored; reason/creator/non-blank time; delete rule restores the held
+  finding; "Create new" prefilled) and `e2e settings.spec` (EPSS toggle moves Feed focus −1 / Ignored +1 and
+  round-trips). Gate: typecheck/build/vitest/guard green; e2e below.
+
+  Problem (settings.spec, debugged against a throwaway `secscan-dbg` stack): (1) a Playwright controlled-
+  checkbox + async mutation needs click()+poll, not check(); (2) the e2e seed's SAST rows had a null rule_id →
+  `DuplicateRuleMap.shouldIgnore` NPE'd during the toggle sweep (fixed: SAST/IaC rows get a rule_id — real SAST
+  always does); (3) the re-score re-enriches `sub_issue.epss` from `epss_score`, so the low-EPSS fixture's CVE
+  must be in that table (added), and the api profile's scheduled intel-sync/re-score was disabled in the e2e so
+  it can't clobber the seed; (4) the toggle-off sweep clears EVERY LOW_EPSS ignore (including the seed's standalone
+  one), so the test now asserts the SPECIFIC low-EPSS finding moves between Focus and Ignored, not aggregate
+  totals. (Observation, not fixed — out of M8/UI scope: `DuplicateRuleMap.shouldIgnore` NPEs on a null SAST
+  rule_id; unreachable with real data since rule_id is part of the SAST fingerprint.)

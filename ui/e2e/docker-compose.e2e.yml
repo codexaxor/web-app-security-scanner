@@ -34,6 +34,10 @@ services:
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${E2E_ADMIN_PASSWORD}
       # Empty on purpose: no GitLab egress is allowed from the e2e api.
       SECSCAN_GITLAB_ALLOWED_HOSTS: ""
+      # Deterministic seed: no scheduled KEV/EPSS/EOL sync or re-score sweep that would clobber the seeded
+      # intel tables (e.g. replacing epss_score from the live feed). Triage/toggle paths still run on demand.
+      SECSCAN_INTEL_SCHEDULED_SYNC_ENABLED: "false"
+      SECSCAN_SCANNER_POLLING_ENABLED: "false"
     ports:
       - "127.0.0.1:8091:8080"
     depends_on:

@@ -15,7 +15,10 @@ insert into kev_entry (cve, vuln_name, date_added) values
   on conflict (cve) do nothing;
 insert into epss_score (cve, epss, percentile) values
   ('CVE-2022-42889', 0.94412, 0.99),
-  ('CVE-2021-44228', 0.97500, 0.99)
+  ('CVE-2021-44228', 0.97500, 0.99),
+  -- The low-EPSS fixture's CVE MUST be in this intel table: the re-score (scheduled, and on every EPSS toggle)
+  -- re-enriches sub_issue.epss from here, so a CVE missing here would null the value and break the toggle.
+  ('CVE-2024-00001', 0.00500, 0.10)
   on conflict (cve) do nothing;
 
 -- ========================================================================================================
@@ -78,10 +81,15 @@ select gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '20000000-0000
        now() - (g || ' hours')::interval
 from generate_series(1, 64) g;
 
-insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, status, score,
-                       created_at)
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, rule_id, file_path,
+                       status, score, created_at)
 select gen_random_uuid(), ig.workspace_id, ig.id, ig.repository_id, ig.type, ig.type,
-       'fp-' || ig.group_key, 'open', ig.severity_score, ig.first_seen_at
+       'fp-' || ig.group_key,
+       -- SAST/IaC findings always carry a rule id in real scans (it is part of the fingerprint); set one so the
+       -- triage resolver's DUPLICATE_RULE check never sees a null rule id.
+       case when ig.type in ('sast', 'iac') then 'bulk-rule-' || ig.group_key else null end,
+       case when ig.type in ('sast', 'iac', 'secret') then 'src/Bulk' || ig.group_key || '.java' else null end,
+       'open', ig.severity_score, ig.first_seen_at
 from issue_group ig
 where ig.workspace_id = '00000000-0000-0000-0000-000000000001' and ig.group_key like 'bulk|%';
 
@@ -134,7 +142,23 @@ insert into ignore_rule (id, workspace_id, scope, repository_id, match_value, re
   ('60000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'rule',
    null, 'generic-password', 'Accepted org-wide <img src=x onerror=alert(1)>', 'user'),
   ('60000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'cve',
-   '20000000-0000-0000-0000-000000000002', 'CVE-2025-22869', 'Only used in an offline build tool', 'secscan.yml');
+   '20000000-0000-0000-0000-000000000002', 'CVE-2025-22869', 'Only used in an offline build tool', 'secscan.yml'),
+  -- A manual rule dedicated to the Ignored-view delete-restores test (kept independent of the panel's rule).
+  ('60000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', 'cve',
+   '20000000-0000-0000-0000-000000000002', 'CVE-2099-00001', 'Dedicated for the delete-restores test', 'user');
+
+-- A finding held ignored by the dedicated manual rule above; deleting that rule restores it (Ignored view, R4).
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, severity_score,
+                         fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'sca', 'sca|deltest', 'Delete-restores fixture', 'ignored', null,
+        null, now() - interval '6 days');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, status,
+                       ignore_reason, ignored_by_rule_id, ignored_at, created_at)
+values ('50000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000006', '20000000-0000-0000-0000-000000000002', 'sca', 'sca',
+        'fp-deltest', 'CVE-2099-00001', 'ignored', 'IGNORE_RULE',
+        '60000000-0000-0000-0000-000000000005', now() - interval '6 days', now() - interval '6 days');
 
 -- One IGNORED group per reason code (null score → shown "Ignored", no band), each with an ignored sub-issue
 -- carrying that reason code; one of them is held by the manual rule above.
@@ -154,6 +178,19 @@ select gen_random_uuid(), ig.workspace_id, ig.id, ig.repository_id, 'sca', 'sca'
        now() - interval '5 days', now() - interval '5 days'
 from issue_group ig
 where ig.workspace_id = '00000000-0000-0000-0000-000000000001' and ig.group_key like 'ign|%';
+
+-- A low-EPSS open finding (EPSS 0.5%, not on KEV) in an active repo. With the EPSS toggle OFF it is a normal
+-- open finding; turning the toggle ON auto-ignores it as LOW_EPSS (Settings → Feed/Ignored counts move, R5).
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, severity_score,
+                         fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000003', 'sca', 'sca|low-epss', 'Low-EPSS dependency', 'open', 50, 15,
+        now() - interval '2 hours');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, package,
+                       status, score, epss, in_kev, created_at)
+values ('50000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000005', '20000000-0000-0000-0000-000000000003', 'sca', 'sca',
+        'fp-low-epss', 'CVE-2024-00001', 'com.example:lib', 'open', 50, 0.005, false, now() - interval '2 hours');
 
 -- An ignored finding held by the .secscan.yml rule (created_by='secscan.yml') → the panel shows the
 -- "edit .secscan.yml" message and offers NO unignore button.
