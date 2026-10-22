@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { api, AuthRequiredError, clearCredentials, setCredentials } from "../api";
 import { useAuth } from "../auth";
+import Button from "./Button";
 
 /**
  * In-memory sign-in (OD-13a). Credentials live only in memory for the session; a refresh re-signs-in. We verify
@@ -35,21 +36,35 @@ export default function SignInGate() {
   }
 
   return (
-    <form onSubmit={submit} className="signin">
-      <h2>Sign in</h2>
+    <form onSubmit={submit} className="form">
+      <h1>Sign in</h1>
       <p className="muted">Use the bootstrap admin credentials.</p>
-      <label>
-        Email
-        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
-      </label>
-      <label>
-        Password
-        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
-      </label>
+      <div className="field">
+        <label htmlFor="signin-email">Email</label>
+        <input
+          id="signin-email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          autoComplete="username"
+          required
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="signin-password">Password</label>
+        <input
+          id="signin-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          autoComplete="current-password"
+          required
+        />
+      </div>
       {error && <p className="field-error">{error}</p>}
-      <button type="submit" disabled={busy}>
+      <Button type="submit" variant="primary" disabled={busy}>
         {busy ? "Signing in…" : "Continue"}
-      </button>
+      </Button>
     </form>
   );
 }
