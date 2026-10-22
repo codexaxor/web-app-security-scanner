@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type FeedParams, type IssueType, type Band, type View, type IssueGroupView } from "../api";
 import { qk } from "../queryClient";
 import { fixTime, titleCase } from "../lib/format";
-import { humanizeRuleId, typeShort } from "../lib/labels";
+import { humanizeRuleId, typeLabel } from "../lib/labels";
 import ErrorBanner from "../components/ErrorBanner";
 import SubIssuePanel from "../components/SubIssuePanel";
 import SeverityPill from "../components/SeverityPill";
@@ -143,7 +143,7 @@ export default function FeedPage() {
           <option value="">All types</option>
           {TYPES.map((t) => (
             <option key={t} value={t}>
-              {typeShort(t)}
+              {typeLabel(t)}
             </option>
           ))}
         </select>

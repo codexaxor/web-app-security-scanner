@@ -527,9 +527,14 @@ a.legend-item:hover {
 }
 .hbar {
   display: grid;
-  grid-template-columns: 110px 1fr 48px;
+  grid-template-columns: 160px 1fr 48px;
   gap: var(--sp-3);
   align-items: center;
+}
+.hbar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hbar-track {
   background: var(--surface-2);
@@ -1067,6 +1072,6 @@ button.health-item {
     position: static;
   }
   .hbar {
-    grid-template-columns: 90px 1fr 40px;
+    grid-template-columns: 120px 1fr 40px;
   }
 }

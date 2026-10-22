@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
 import { titleCase } from "../lib/format";
-import { typeShort } from "../lib/labels";
+import { typeAcronym, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
@@ -54,7 +54,9 @@ export default function DashboardPage() {
         {(d?.byType ?? []).length === 0 ? <p className="muted">No open findings.</p> : null}
         {(d?.byType ?? []).map((t) => (
           <Link key={t.type} className="hbar" to={`/feed?type=${t.type}`} data-testid={`type-${t.type}`}>
-            <span>{typeShort(t.type)}</span>
+            <span className="hbar-label" title={typeAcronym(t.type)}>
+              {typeLabel(t.type)}
+            </span>
             <span className="hbar-track">
               <span className="hbar-fill" style={{ width: `${(t.count / maxType) * 100}%` }} />
             </span>

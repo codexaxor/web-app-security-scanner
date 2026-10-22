@@ -20,8 +20,30 @@ export function reasonLabel(code: string | null | undefined): string {
   return REASON_LABEL[code] ?? code;
 }
 
-/** Issue types. Short code for the compact badge; long phrase for the tooltip / verbose contexts. */
-export const TYPE_SHORT: Record<string, string> = {
+/**
+ * Issue types — three plain-English representations (S10f). The acronym (SCA/SAST/IaC/EOL) is for TOOLTIPS ONLY
+ * and never shown as visible text. API values stay the lowercase codes.
+ *   - badge: the short plain name shown in a type badge ("Dependency")
+ *   - label: the full plain name for filters, the Dashboard and the panel ("Vulnerable dependency")
+ *   - acronym: the technical acronym, tooltip only ("SCA")
+ */
+export const TYPE_BADGE: Record<string, string> = {
+  sca: "Dependency",
+  sast: "Code",
+  secret: "Secret",
+  iac: "Infrastructure",
+  eol: "Runtime",
+};
+
+export const TYPE_LABEL: Record<string, string> = {
+  sca: "Vulnerable dependency",
+  sast: "Code weakness",
+  secret: "Exposed secret",
+  iac: "Infrastructure config",
+  eol: "Outdated runtime",
+};
+
+export const TYPE_ACRONYM: Record<string, string> = {
   sca: "SCA",
   sast: "SAST",
   secret: "Secret",
@@ -29,20 +51,16 @@ export const TYPE_SHORT: Record<string, string> = {
   eol: "EOL",
 };
 
-export const TYPE_LABEL: Record<string, string> = {
-  sca: "Vulnerable dependency",
-  sast: "Code issue",
-  secret: "Exposed secret",
-  iac: "Infrastructure config",
-  eol: "End-of-life runtime",
-};
-
-export function typeShort(type: string): string {
-  return TYPE_SHORT[type] ?? type.toUpperCase();
+export function typeBadge(type: string): string {
+  return TYPE_BADGE[type] ?? type;
 }
 
 export function typeLabel(type: string): string {
   return TYPE_LABEL[type] ?? type;
+}
+
+export function typeAcronym(type: string): string {
+  return TYPE_ACRONYM[type] ?? type.toUpperCase();
 }
 
 // Acronyms that should stay upper-cased when humanizing a rule-id segment.

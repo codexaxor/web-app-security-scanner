@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type IgnoreRuleView, type IgnoredItemView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
-import { reasonLabel, humanizeRuleId, typeShort } from "../lib/labels";
+import { reasonLabel, humanizeRuleId, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
 import ErrorBanner from "../components/ErrorBanner";
 import Button from "../components/Button";
@@ -16,7 +16,7 @@ const SIZE = 50;
 function findingTitle(it: IgnoredItemView): string {
   if (it.vulnId) return it.vulnId;
   if (it.ruleId) return it.type === "sast" ? humanizeRuleId(it.ruleId) : it.ruleId;
-  return it.packageName ?? typeShort(it.type);
+  return it.packageName ?? typeLabel(it.type);
 }
 
 function ignoredBy(createdBy: string | null): string {

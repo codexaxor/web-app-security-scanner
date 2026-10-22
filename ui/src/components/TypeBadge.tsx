@@ -1,11 +1,11 @@
-import { typeLabel, typeShort } from "../lib/labels";
+import { typeAcronym, typeBadge, typeLabel } from "../lib/labels";
 
-/** Neutral badge showing the short type code (SCA/SAST/Secret/IaC/EOL); the full human label is the tooltip.
- *  Never severity-colored. */
+/** Neutral badge showing the short plain type name ("Dependency", "Code", …); the full name + acronym are the
+ *  tooltip. Never severity-colored; the acronym (SCA/SAST/IaC/EOL) never appears as visible text. */
 export default function TypeBadge({ type }: { type: string }) {
   return (
-    <span className="type-badge" title={typeLabel(type)}>
-      {typeShort(type)}
+    <span className="type-badge" title={`${typeLabel(type)} (${typeAcronym(type)})`}>
+      {typeBadge(type)}
     </span>
   );
 }
