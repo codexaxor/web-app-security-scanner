@@ -94,6 +94,7 @@ export interface IssueGroupView {
   severityScore: number | null;
   fixTimeMinutes: number | null;
   firstSeenAt: string;
+  findingCount: number;
 }
 
 export interface FeedSummaryView {
@@ -186,6 +187,7 @@ export interface IgnoredItemView {
   ruleId: string | null;
   packageName: string | null;
   filePath: string | null;
+  line: number | null;
   reasonCode: string | null;
   ignoreRuleId: string | null;
   ruleScope: string | null;
@@ -343,6 +345,7 @@ export const api = {
     request<Paged<IssueGroupView>>("GET", `/api/v1/issue-groups${feedQuery(p)}`),
   feedSummary: (p: FeedParams) =>
     request<FeedSummaryView>("GET", `/api/v1/issue-groups/summary${feedQuery(p, true)}`),
+  getGroup: (groupId: string) => request<IssueGroupView>("GET", `/api/v1/issue-groups/${groupId}`),
   listSubIssues: (groupId: string, page: number, size: number) =>
     request<Paged<SubIssueView>>(
       "GET",

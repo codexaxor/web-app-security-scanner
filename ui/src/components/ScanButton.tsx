@@ -40,12 +40,19 @@ export default function ScanButton({ repositoryId, disabled }: { repositoryId: s
   }, [status]);
 
   const scanning = scanId != null;
+  const busy = scanning || start.isPending;
   return (
     <button
-      className="primary"
-      disabled={disabled || scanning || start.isPending}
+      className="btn btn-secondary btn-sm"
+      disabled={disabled || busy}
       onClick={() => start.mutate()}
-      title={disabled ? "Inactive repositories cannot be scanned" : "Start a scan"}
+      title={
+        disabled
+          ? "Inactive repositories cannot be scanned"
+          : busy
+            ? "A scan is already queued or running"
+            : "Start a scan"
+      }
     >
       {scanning ? "Scanning…" : start.isPending ? "Starting…" : "Scan"}
     </button>

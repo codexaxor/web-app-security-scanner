@@ -37,6 +37,7 @@ export const qk = {
   feedAll: ["feed"] as const,
   feedSummary: (params: unknown) => ["feed-summary", params] as const,
   feedSummaryAll: ["feed-summary"] as const,
+  group: (groupId: string) => ["issue-group", groupId] as const,
   subIssues: (groupId: string, page: number) => ["sub-issues", groupId, page] as const,
   subIssuesAll: ["sub-issues"] as const,
   subIssueEvents: (subId: string, page: number) => ["sub-issue-events", subId, page] as const,

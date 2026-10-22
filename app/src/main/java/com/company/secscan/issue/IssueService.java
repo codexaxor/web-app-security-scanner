@@ -10,6 +10,7 @@ import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.workspace.Workspace;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -63,7 +64,31 @@ public class IssueService {
                 range == null ? null : range[0], range == null ? null : range[1], includeInactive,
                 PageRequest.of(Math.max(0, page), Math.max(1, size)));
         Map<UUID, String> paths = repoPaths();
-        return PagedResponse.fromPage(pageResult.map(g -> IssueGroupView.of(g, paths.get(g.getRepositoryId()))));
+        Map<UUID, Long> counts = findingCounts(pageResult.getContent());
+        return PagedResponse.fromPage(pageResult.map(g ->
+                IssueGroupView.of(g, paths.get(g.getRepositoryId()), counts.getOrDefault(g.getId(), 0L))));
+    }
+
+    /** Sub-issue counts for the groups on this feed page, in one query (no N+1). Empty page → empty map. */
+    private Map<UUID, Long> findingCounts(List<IssueGroup> pageGroups) {
+        if (pageGroups.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> ids = pageGroups.stream().map(IssueGroup::getId).toList();
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : subIssues.countByGroupIds(WORKSPACE, ids)) {
+            counts.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return counts;
+    }
+
+    /** One group for the side-panel header (M8 S10d). 404 if not in this workspace. */
+    @Transactional(readOnly = true)
+    public IssueGroupView getGroup(UUID groupId) {
+        IssueGroup g = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
+        long count = findingCounts(List.of(g)).getOrDefault(g.getId(), 0L);
+        return IssueGroupView.of(g, repoPaths().get(g.getRepositoryId()), count);
     }
 
     /** The Feed summary bar (OD-14 item 4): band group counts for the view + 7-day finding buckets (change 3). */

@@ -7,6 +7,9 @@ import {
   RepositoryView,
   TargetType,
 } from "../api";
+import Button from "./Button";
+import ConfirmDialog from "./ConfirmDialog";
+import { Card, EmptyState } from "./ui";
 
 /**
  * Connect screen: lists the workspace's GitLab connections (group or single project) and lets the user add a
@@ -22,7 +25,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ConnectionTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConnectionView | null>(null);
   const [removal, setRemoval] = useState<ConnectionRemovalResult | null>(null);
 
   async function refresh() {
@@ -66,7 +69,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
     try {
       const r = await api.deleteConnection(id);
       setRemoval(r);
-      setConfirmId(null);
+      setConfirm(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove connection");
@@ -78,134 +81,182 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const reposUsing = (id: string) => repos.filter((r) => r.connectionId === id).length;
 
   return (
-    <section style={{ display: "grid", gap: "1.5rem", maxWidth: 640 }}>
+    <div className="stack-4 onboarding">
       <div>
-        <h2>GitLab connections</h2>
+        <h2 className="section-head">GitLab connections</h2>
         {connections.length === 0 ? (
-          <p style={{ color: "#555" }}>No connections yet. Add a group or a single project below.</p>
+          <EmptyState title="No connections yet">Add a group or a single project below.</EmptyState>
         ) : (
-          <table style={{ borderCollapse: "collapse", width: "100%" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #ccc" }}>
-                <th>Type</th>
-                <th>Target</th>
-                <th>Expires</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {connections.map((c) => (
-                <tr key={c.id} style={{ borderBottom: "1px solid #eee" }}>
-                  <td>{c.targetType}</td>
-                  <td>{c.targetType === "group" ? c.groupFullPath : c.projectFullPath}</td>
-                  <td>{c.tokenExpiresAt ?? "never"}</td>
-                  <td style={{ textAlign: "right" }}>
-                    {confirmId === c.id ? (
-                      <span>
-                        {reposUsing(c.id)} repo(s) will be reassigned or deactivated.{" "}
-                        <button disabled={busy} onClick={() => remove(c.id)}>
-                          Confirm
-                        </button>{" "}
-                        <button disabled={busy} onClick={() => setConfirmId(null)}>
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
-                      <button disabled={busy} onClick={() => setConfirmId(c.id)}>
-                        Remove
-                      </button>
-                    )}
-                  </td>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Target</th>
+                  <th>Token expiry</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {connections.map((c) => {
+                  const exp = expiry(c.tokenExpiresAt);
+                  return (
+                    <tr key={c.id} data-testid="connection-row">
+                      <td>
+                        <span className="type-badge">{c.targetType}</span>
+                      </td>
+                      <td>{c.targetType === "group" ? c.groupFullPath : c.projectFullPath}</td>
+                      <td>
+                        <span className={exp.cls} data-testid="connection-expiry">
+                          {exp.text}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirm(c)}>
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
         {removal && (
-          <p style={{ color: "#0a7d33" }}>
+          <p className="ok-text">
             Connection removed. {removal.reassigned} repositor{removal.reassigned === 1 ? "y" : "ies"} reassigned,{" "}
             {removal.deactivated} deactivated.
           </p>
         )}
       </div>
 
-      <form style={{ display: "grid", gap: "0.75rem" }}>
-        <h3 style={{ margin: 0 }}>Add a connection</h3>
-        <div style={{ display: "flex", gap: "1rem" }}>
-          <label>
+      <Card>
+        <form className="form">
+          <h3>Add a connection</h3>
+          <div className="row" role="radiogroup" aria-label="Target type">
+            <label className="check">
+              <input
+                type="radio"
+                name="targetType"
+                checked={targetType === "group"}
+                onChange={() => setTargetType("group")}
+              />
+              Group
+            </label>
+            <label className="check">
+              <input
+                type="radio"
+                name="targetType"
+                checked={targetType === "project"}
+                onChange={() => setTargetType("project")}
+              />
+              Single project
+            </label>
+          </div>
+          <div className="field">
+            <label htmlFor="conn-url">Server URL</label>
+            <input id="conn-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="conn-path">{targetType === "group" ? "Group path or URL" : "Project path or URL"}</label>
             <input
-              type="radio"
-              name="targetType"
-              checked={targetType === "group"}
-              onChange={() => setTargetType("group")}
-            />{" "}
-            Group
-          </label>
-          <label>
+              id="conn-path"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              placeholder={
+                targetType === "group"
+                  ? "e.g. celloscope/platform or a pasted group URL"
+                  : "e.g. celloscope/platform/core-keycloak or a pasted project URL"
+              }
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="conn-token">Access token</label>
             <input
-              type="radio"
-              name="targetType"
-              checked={targetType === "project"}
-              onChange={() => setTargetType("project")}
-            />{" "}
-            Single project
-          </label>
-        </div>
-        <label>
-          Server URL
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-        </label>
-        <label>
-          {targetType === "group" ? "Group path or URL" : "Project path or URL"}
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder={
-              targetType === "group"
-                ? "e.g. celloscope/platform or a pasted group URL"
-                : "e.g. celloscope/platform/core-keycloak or a pasted project URL"
-            }
-          />
-        </label>
-        <label>
-          Access token (read_api, read_repository)
-          <input value={token} onChange={(e) => setToken(e.target.value)} type="password" />
-        </label>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button type="submit" disabled={busy} onClick={(e) => run(false, e)}>
-            Test connection
-          </button>
-          <button type="button" disabled={busy} onClick={(e) => run(true, e)}>
-            Add
-          </button>
-        </div>
-      </form>
+              id="conn-token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              type="password"
+              autoComplete="off"
+            />
+            <span className="help">Needs read_api and read_repository. Stored encrypted; never shown again.</span>
+          </div>
+          <div className="row">
+            <Button type="submit" variant="secondary" disabled={busy} onClick={(e) => run(false, e)}>
+              Test connection
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={(e) => run(true, e)}>
+              Add
+            </Button>
+          </div>
+        </form>
+      </Card>
 
-      {error && <p style={{ color: "#b00020" }}>{error}</p>}
+      {error && <p className="field-error">{error}</p>}
 
       {result && !result.ok && (
-        <div style={{ color: "#b00020" }}>
-          <strong>{errorLabel(result.errorCode)}</strong>
-          <div>{result.message}</div>
+        <div className="banner banner-error" role="alert">
+          <span>
+            <strong>{errorLabel(result.errorCode)}: </strong>
+            {result.message}
+          </span>
         </div>
       )}
 
       {result && result.ok && (
-        <div style={{ color: "#0a7d33" }}>
-          <div>
+        <Card>
+          <div className="ok-text">
             Connected to GitLab <strong>{result.gitlabVersion}</strong>,{" "}
             {result.targetType === "group" ? "group " : "project "}
             <strong>{result.targetType === "group" ? result.groupFullPath : result.projectFullPath}</strong>.
           </div>
-          <div>Scopes: {(result.tokenScopes ?? []).join(", ")}</div>
-          <div>
+          <div className="muted">Scopes: {(result.tokenScopes ?? []).join(", ")}</div>
+          <div className="muted">
             Token expires: {result.tokenExpiresAt ?? "never"}
-            {result.expiringSoon && <span style={{ color: "#b06f00" }}> — expiring soon, plan to rotate</span>}
+            {result.expiringSoon && <span className="expiry-warn"> — expiring soon, plan to rotate</span>}
           </div>
-        </div>
+        </Card>
       )}
-    </section>
+
+      {confirm ? (
+        <ConfirmDialog
+          title="Remove connection"
+          confirmLabel="Remove connection"
+          confirmVariant="danger"
+          busy={busy}
+          onConfirm={() => remove(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        >
+          <p>
+            Remove the connection to{" "}
+            <strong>{confirm.targetType === "group" ? confirm.groupFullPath : confirm.projectFullPath}</strong>?
+          </p>
+          <p className="muted">
+            {reposUsing(confirm.id)} repositor{reposUsing(confirm.id) === 1 ? "y" : "ies"} using it will be
+            reassigned to another connection for the same target, or deactivated if none remains (D-020).
+          </p>
+        </ConfirmDialog>
+      ) : null}
+    </div>
   );
+}
+
+/** Token expiry as a date + "N days left"; amber under 14 days, red when already expired. */
+function expiry(iso: string | null): { text: string; cls: string } {
+  if (!iso) {
+    return { text: "No expiry", cls: "muted" };
+  }
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) {
+    return { text: "No expiry", cls: "muted" };
+  }
+  const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(when);
+  const days = Math.ceil((when.getTime() - Date.now()) / 86400000);
+  if (days < 0) {
+    return { text: `${date} · expired`, cls: "expiry-expired" };
+  }
+  return { text: `${date} · ${days} day${days === 1 ? "" : "s"} left`, cls: days < 14 ? "expiry-warn" : "muted" };
 }
 
 function errorLabel(code: string | null): string {

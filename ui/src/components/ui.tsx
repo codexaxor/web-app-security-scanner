@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import type { BandName } from "../lib/format";
 
 // Small presentational primitives grouped in one module: Card, PageHeader, EmptyState, InfoTip, SeverityBar,
@@ -70,15 +71,30 @@ export function SeverityBar({ bands }: { bands: Bands }) {
 }
 
 /** Band legend. Each item's visible text begins with the count (e.g. "12 critical") so existing count oracles
- *  read the leading number; `prefix` makes the data-testids (`band-critical`, `group-critical`, …). */
-export function Legend({ bands, prefix }: { bands: Bands; prefix: string }) {
+ *  read the leading number; `prefix` makes the data-testids (`band-critical`, `group-critical`, …). When
+ *  `linkTo` is given each item is a link to the pre-filtered Feed. */
+export function Legend({
+  bands,
+  prefix,
+  linkTo,
+}: {
+  bands: Bands;
+  prefix: string;
+  linkTo?: (band: BandName) => string;
+}) {
   return (
     <div className="legend">
-      {ORDER.map((k) => (
-        <span key={k} className="legend-item" data-testid={`${prefix}-${k}`}>
-          <span className={`legend-dot seg-${k}`} /> {bands[k]} {BAND_LABEL[k]}
-        </span>
-      ))}
+      {ORDER.map((k) =>
+        linkTo ? (
+          <Link key={k} className="legend-item" data-testid={`${prefix}-${k}`} to={linkTo(k)}>
+            <span className={`legend-dot seg-${k}`} /> {bands[k]} {BAND_LABEL[k]}
+          </Link>
+        ) : (
+          <span key={k} className="legend-item" data-testid={`${prefix}-${k}`}>
+            <span className={`legend-dot seg-${k}`} /> {bands[k]} {BAND_LABEL[k]}
+          </span>
+        ),
+      )}
     </div>
   );
 }

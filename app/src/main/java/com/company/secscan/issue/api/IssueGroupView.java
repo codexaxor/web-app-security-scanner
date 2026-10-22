@@ -10,10 +10,11 @@ import java.util.UUID;
  */
 public record IssueGroupView(UUID id, UUID repositoryId, String repositoryPath, String type, String title,
                              String subtitle, String status, Integer severityScore, Integer fixTimeMinutes,
-                             Instant firstSeenAt) {
+                             Instant firstSeenAt, long findingCount) {
 
-    public static IssueGroupView of(IssueGroup g, String repositoryPath) {
+    public static IssueGroupView of(IssueGroup g, String repositoryPath, long findingCount) {
         return new IssueGroupView(g.getId(), g.getRepositoryId(), repositoryPath, g.getType(), g.getTitle(),
-                g.getSubtitle(), g.getStatus(), g.getSeverityScore(), g.getFixTimeMinutes(), g.getFirstSeenAt());
+                g.getSubtitle(), g.getStatus(), g.getSeverityScore(), g.getFixTimeMinutes(), g.getFirstSeenAt(),
+                findingCount);
     }
 }

@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
 import ErrorBanner from "./ErrorBanner";
+import Dialog from "./Dialog";
+import RepoName from "./RepoName";
 
 /** Lists one scan's scan-health warnings (OD-14 item 2) in a side drawer. Text only. */
 export default function WarningsDrawer({
@@ -19,29 +21,34 @@ export default function WarningsDrawer({
   });
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <aside className="panel" role="dialog" aria-label="Scan warnings" onClick={(e) => e.stopPropagation()}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Scan warnings — {repositoryPath}</h2>
-          <button onClick={onClose} aria-label="Close">
+    <Dialog title="Scan warnings" onClose={onClose} variant="drawer">
+      <div className="panel-header">
+        <div className="row-between">
+          <div>
+            <h2>Scan warnings</h2>
+            <div className="muted">
+              <RepoName path={repositoryPath} />
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
+      </div>
+      <div className="panel-body stack">
         {q.error ? <ErrorBanner error={q.error} /> : null}
         {q.isLoading ? <p className="muted">Loading…</p> : null}
         {q.data && q.data.content.length === 0 ? <p className="muted">No warnings for this scan.</p> : null}
-        <ul className="stack" style={{ listStyle: "none", padding: 0 }}>
-          {q.data?.content.map((w) => (
-            <li key={w.id} className="subissue">
-              <div className="row">
-                <span className="badge badge-inactive">{w.code}</span>
-                {w.filePath ? <code>{w.filePath}</code> : null}
-              </div>
-              <div>{w.message}</div>
-            </li>
-          ))}
-        </ul>
-      </aside>
-    </div>
+        {q.data?.content.map((w) => (
+          <div key={w.id} className="location">
+            <div className="row">
+              <span className="type-badge">{w.code}</span>
+              {w.filePath ? <code>{w.filePath}</code> : null}
+            </div>
+            <div>{w.message}</div>
+          </div>
+        ))}
+      </div>
+    </Dialog>
   );
 }

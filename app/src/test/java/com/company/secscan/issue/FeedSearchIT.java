@@ -31,6 +31,8 @@ class FeedSearchIT extends AbstractGitLabIT {
     GitlabConnectionRepository connections;
     @Autowired
     WorkspaceRepository workspaces;
+    @Autowired
+    SubIssueRepository subIssues;
 
     private Repository seedRepo(UUID ws, long id, boolean active) {
         GitlabConnection conn = connections.save(GitlabConnection.forGroup(
@@ -64,6 +66,21 @@ class FeedSearchIT extends AbstractGitLabIT {
         // The all-ignored group has a null score (shown "Ignored", no band).
         assertThat(all.content()).filteredOn(g -> g.title().equals("ignored1"))
                 .singleElement().satisfies(g -> assertThat(g.severityScore()).isNull());
+    }
+
+    @Test
+    void feedRowCarriesSubIssueFindingCount() {
+        Repository repo = seedRepo(WORKSPACE, 8109L, true);
+        IssueGroup two = group(WORKSPACE, repo.getId(), "two", 90, IssueGroup.STATUS_OPEN);
+        group(WORKSPACE, repo.getId(), "zero", 50, IssueGroup.STATUS_OPEN); // no sub-issues
+        subIssues.save(new SubIssue(WORKSPACE, two.getId(), repo.getId(), "sca", "sca", "fp-a", null));
+        subIssues.save(new SubIssue(WORKSPACE, two.getId(), repo.getId(), "sca", "sca", "fp-b", null));
+
+        var page = service.listGroups(repo.getId(), null, "focus", null, false, 0, 50);
+        assertThat(page.content()).filteredOn(v -> v.title().equals("two"))
+                .singleElement().satisfies(v -> assertThat(v.findingCount()).isEqualTo(2));
+        assertThat(page.content()).filteredOn(v -> v.title().equals("zero"))
+                .singleElement().satisfies(v -> assertThat(v.findingCount()).isEqualTo(0));
     }
 
     @Test

@@ -3,6 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { api, type SubIssueView } from "../api";
 import { invalidateFor } from "../queryClient";
 import ErrorBanner from "./ErrorBanner";
+import Dialog from "./Dialog";
+import Button from "./Button";
 
 /**
  * Ignore one finding at one of the 5 SPEC scopes (D-058). A reason is required (also enforced server-side).
@@ -32,10 +34,12 @@ export default function IgnoreDialog({
   sub,
   groupId,
   onClose,
+  defaultScope = "subissue",
 }: {
   sub: SubIssueView;
   groupId: string;
   onClose: () => void;
+  defaultScope?: ScopeKey;
 }) {
   const options = useMemo<ScopeOption[]>(() => {
     const opts: ScopeOption[] = [
@@ -63,7 +67,9 @@ export default function IgnoreDialog({
     return opts;
   }, [sub]);
 
-  const [scope, setScope] = useState<ScopeKey>("subissue");
+  const [scope, setScope] = useState<ScopeKey>(
+    options.some((o) => o.key === defaultScope) ? defaultScope : "subissue",
+  );
   const current = options.find((o) => o.key === scope)!;
   const [value, setValue] = useState(current.initialValue ?? "");
   const [reason, setReason] = useState("");
@@ -107,49 +113,52 @@ export default function IgnoreDialog({
   const canSubmit = reasonOk && valueOk && globalOk && !submit.isPending;
 
   return (
-    <div className="overlay overlay-center" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label="Ignore finding" onClick={(e) => e.stopPropagation()}>
-        <h2>Ignore finding</h2>
-        {submit.error ? <ErrorBanner error={submit.error} /> : null}
-        <div className="stack">
-          <label>
-            Scope
-            <select aria-label="Ignore scope" value={scope} onChange={(e) => onScopeChange(e.target.value as ScopeKey)}>
-              {options.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {current.needsValue ? (
-            <label>
-              Match value
-              <input value={value} onChange={(e) => setValue(e.target.value)} />
-              {current.hint ? <small className="muted">{current.hint}</small> : null}
-            </label>
-          ) : null}
-          <label>
-            Reason (required)
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
-          </label>
-          {!reasonOk ? <small className="field-error">A reason is required.</small> : null}
-          {current.global ? (
-            <label className="row">
-              <input type="checkbox" checked={confirmGlobal} onChange={(e) => setConfirmGlobal(e.target.checked)} />
-              I understand this applies across <strong>every repository</strong> in the workspace.
-            </label>
-          ) : null}
+    <Dialog title="Ignore finding" onClose={onClose} variant="center">
+      <h2>Ignore finding</h2>
+      {submit.error ? <ErrorBanner error={submit.error} /> : null}
+      <div className="form">
+        <div className="field">
+          <label htmlFor="ignore-scope">Scope</label>
+          <select
+            id="ignore-scope"
+            aria-label="Ignore scope"
+            value={scope}
+            onChange={(e) => onScopeChange(e.target.value as ScopeKey)}
+          >
+            {options.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.8rem" }}>
-          <button onClick={onClose} disabled={submit.isPending}>
-            Cancel
-          </button>
-          <button className="primary" onClick={() => submit.mutate()} disabled={!canSubmit}>
-            Ignore
-          </button>
+        {current.needsValue ? (
+          <div className="field">
+            <label htmlFor="ignore-value">Match value</label>
+            <input id="ignore-value" value={value} onChange={(e) => setValue(e.target.value)} />
+            {current.hint ? <span className="help">{current.hint}</span> : null}
+          </div>
+        ) : null}
+        <div className="field">
+          <label htmlFor="ignore-reason">Reason (required)</label>
+          <textarea id="ignore-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
+          {!reasonOk ? <span className="field-error">A reason is required.</span> : null}
         </div>
+        {current.global ? (
+          <label className="check">
+            <input type="checkbox" checked={confirmGlobal} onChange={(e) => setConfirmGlobal(e.target.checked)} />
+            I understand this applies across <strong>&nbsp;every repository&nbsp;</strong> in the workspace.
+          </label>
+        ) : null}
       </div>
-    </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose} disabled={submit.isPending}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={() => submit.mutate()} disabled={!canSubmit}>
+          Ignore
+        </Button>
+      </div>
+    </Dialog>
   );
 }

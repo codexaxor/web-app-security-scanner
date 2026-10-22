@@ -46,6 +46,12 @@ public class IssueController {
         return service.feedSummary(repositoryId, type, view, includeInactive);
     }
 
+    /** One issue group (the side-panel header). 404 if it is not in this workspace. */
+    @GetMapping("/issue-groups/{groupId}")
+    public IssueGroupView getGroup(@PathVariable UUID groupId) {
+        return service.getGroup(groupId);
+    }
+
     /** One group's sub-issues; paginated server-side. */
     @GetMapping("/issue-groups/{groupId}/sub-issues")
     public PagedResponse<SubIssueView> listSubIssues(

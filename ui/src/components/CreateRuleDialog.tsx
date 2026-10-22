@@ -3,6 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { api } from "../api";
 import { invalidateFor } from "../queryClient";
 import ErrorBanner from "./ErrorBanner";
+import Dialog from "./Dialog";
+import Button from "./Button";
 
 /**
  * Create a generic ignore rule (path / cve / rule), prefilled from an existing rule (OD-16: "create new"
@@ -45,47 +47,43 @@ export default function CreateRuleDialog({
   const canSubmit = matchValue.trim() && reason.trim() && !create.isPending;
 
   return (
-    <div className="overlay overlay-center" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label="Create ignore rule" onClick={(e) => e.stopPropagation()}>
-        <h2>Create ignore rule</h2>
-        {create.error ? <ErrorBanner error={create.error} /> : null}
-        <div className="stack">
-          <label>
-            Scope
-            <select value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value="path">Path prefix</option>
-              <option value="cve">CVE</option>
-              <option value="rule">Rule id</option>
-            </select>
-          </label>
-          <label>
-            Match value
-            <input value={matchValue} onChange={(e) => setMatchValue(e.target.value)} />
-            {scope === "path" ? (
-              <small className="muted">A repo-relative path prefix (matches this path and everything under it).</small>
-            ) : null}
-          </label>
-          <label>
-            Reason (required)
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
-          </label>
-          <label className="row">
-            <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} />
-            Global — apply across every repository
-          </label>
-          {global ? (
-            <small className="muted">This rule applies to every repository in the workspace.</small>
+    <Dialog title="Create ignore rule" onClose={onClose} variant="center">
+      <h2>Create ignore rule</h2>
+      {create.error ? <ErrorBanner error={create.error} /> : null}
+      <div className="form">
+        <div className="field">
+          <label htmlFor="rule-scope">Scope</label>
+          <select id="rule-scope" value={scope} onChange={(e) => setScope(e.target.value)}>
+            <option value="path">Path prefix</option>
+            <option value="cve">CVE</option>
+            <option value="rule">Rule id</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="rule-value">Match value</label>
+          <input id="rule-value" value={matchValue} onChange={(e) => setMatchValue(e.target.value)} />
+          {scope === "path" ? (
+            <span className="help">A repo-relative path prefix (matches this path and everything under it).</span>
           ) : null}
         </div>
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.8rem" }}>
-          <button onClick={onClose} disabled={create.isPending}>
-            Cancel
-          </button>
-          <button className="primary" onClick={() => create.mutate()} disabled={!canSubmit}>
-            Create rule
-          </button>
+        <div className="field">
+          <label htmlFor="rule-reason">Reason (required)</label>
+          <textarea id="rule-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
         </div>
+        <label className="check">
+          <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} />
+          Global — apply across every repository
+        </label>
+        {global ? <span className="help">This rule applies to every repository in the workspace.</span> : null}
       </div>
-    </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose} disabled={create.isPending}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={() => create.mutate()} disabled={!canSubmit}>
+          Create rule
+        </Button>
+      </div>
+    </Dialog>
   );
 }

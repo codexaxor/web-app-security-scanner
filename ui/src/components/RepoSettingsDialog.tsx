@@ -3,6 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { api, type RepositoryView } from "../api";
 import { invalidateFor } from "../queryClient";
 import ErrorBanner from "./ErrorBanner";
+import Dialog from "./Dialog";
+import Button from "./Button";
 
 /**
  * Repository settings (OD-15). Sensitivity re-scores immediately on save; include-dev-deps takes effect at the
@@ -37,44 +39,39 @@ export default function RepoSettingsDialog({
   });
 
   return (
-    <div className="overlay overlay-center" onClick={onClose}>
-      <div className="modal" role="dialog" aria-label="Repository settings" onClick={(e) => e.stopPropagation()}>
-        <h2>Settings — {repo.pathWithNamespace}</h2>
-        {save.error ? <ErrorBanner error={save.error} /> : null}
-        <div className="stack">
-          <label>
-            Sensitivity
-            <select value={sensitivity} onChange={(e) => setSensitivity(e.target.value)}>
-              <option value="low">Low (−10)</option>
-              <option value="normal">Normal</option>
-              <option value="high">High (+5)</option>
-            </select>
-          </label>
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={includeDevDeps}
-              onChange={(e) => setIncludeDevDeps(e.target.checked)}
-            />
-            Include dev / test dependencies (takes effect on the next scan)
-          </label>
-          <label className="row">
-            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
-            Active (scans enabled)
-          </label>
+    <Dialog title="Repository settings" onClose={onClose} variant="center">
+      <h2>Settings</h2>
+      <p className="muted">{repo.pathWithNamespace}</p>
+      {save.error ? <ErrorBanner error={save.error} /> : null}
+      <div className="form">
+        <div className="field">
+          <label htmlFor="repo-sensitivity">Sensitivity</label>
+          <select id="repo-sensitivity" value={sensitivity} onChange={(e) => setSensitivity(e.target.value)}>
+            <option value="low">Low (−10)</option>
+            <option value="normal">Normal</option>
+            <option value="high">High (+5)</option>
+          </select>
         </div>
-        <div className="row" style={{ marginTop: "0.8rem", justifyContent: "flex-end" }}>
-          <button onClick={onClose} disabled={save.isPending}>
-            Cancel
-          </button>
-          <button onClick={() => save.mutate(false)} disabled={save.isPending}>
-            Save
-          </button>
-          <button className="primary" onClick={() => save.mutate(true)} disabled={save.isPending || !active}>
-            Save and rescan
-          </button>
-        </div>
+        <label className="check">
+          <input type="checkbox" checked={includeDevDeps} onChange={(e) => setIncludeDevDeps(e.target.checked)} />
+          Include dev / test dependencies (takes effect on the next scan)
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+          Active (scans enabled)
+        </label>
       </div>
-    </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
+          Cancel
+        </Button>
+        <Button variant="secondary" onClick={() => save.mutate(false)} disabled={save.isPending}>
+          Save
+        </Button>
+        <Button variant="primary" onClick={() => save.mutate(true)} disabled={save.isPending || !active}>
+          Save and rescan
+        </Button>
+      </div>
+    </Dialog>
   );
 }

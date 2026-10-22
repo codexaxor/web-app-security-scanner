@@ -1,42 +1,110 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type SubIssueView } from "../api";
+import { api, type IssueGroupView, type SubIssueView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
 import { advisoryLink, titleCase } from "../lib/format";
+import { humanizeRuleId, reasonLabel, typeLabel } from "../lib/labels";
 import RelativeTime from "./RelativeTime";
 import ErrorBanner from "./ErrorBanner";
 import IgnoreDialog from "./IgnoreDialog";
+import Dialog from "./Dialog";
+import Button from "./Button";
+import SeverityPill from "./SeverityPill";
+import TypeBadge from "./TypeBadge";
+import RepoName from "./RepoName";
 
-/** The full issue side panel (S6): every sub-issue's SPEC fields, ignore at 5 scopes, unignore (delete the
- *  holding manual rule), the .secscan.yml 409 message, the auto-ignore explanation, and per-sub-issue history. */
+/** Remediation line per issue type, from existing data only. */
+function remediation(group: IssueGroupView | undefined, subs: SubIssueView[]): string {
+  const type = group?.type ?? subs[0]?.type;
+  if (type === "sca") {
+    const pkg = group?.title ?? subs[0]?.packageName ?? "the dependency";
+    const fixed = subs.map((s) => s.fixedVersion).filter(Boolean);
+    return fixed.length
+      ? `Fix: upgrade ${pkg} to ${fixed[fixed.length - 1]}`
+      : `Fix: no fixed version is available yet for ${pkg}.`;
+  }
+  if (type === "secret") return "Fix: rotate the exposed secret and remove it from the repository history.";
+  if (type === "iac") return "Fix: correct the flagged infrastructure configuration.";
+  if (type === "eol") return "Fix: upgrade to a supported runtime version.";
+  return "Fix: review and remediate the flagged code.";
+}
+
+/** The full issue side panel (S6/S10d): a group header (title, severity, type, repo, remediation, affected
+ *  locations, Ignore group…) then a compact locations list, each with its SPEC fields, triage and history. */
 export default function SubIssuePanel({ groupId, onClose }: { groupId: string; onClose: () => void }) {
+  const group = useQuery({ queryKey: qk.group(groupId), queryFn: () => api.getGroup(groupId) });
   const q = useQuery({
     queryKey: qk.subIssues(groupId, 0),
     queryFn: () => api.listSubIssues(groupId, 0, 100),
   });
+  const [ignoreGroup, setIgnoreGroup] = useState(false);
+
+  const subs = q.data?.content ?? [];
+  const g = group.data;
+  const title = g ? (g.type === "sast" ? humanizeRuleId(g.title) : g.title) : "Issue";
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <aside className="panel" role="dialog" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Issue details</h2>
-          <button onClick={onClose} aria-label="Close">
+    <Dialog title="Issue details" onClose={onClose} variant="drawer">
+      <div className="panel-header">
+        <div className="row-between">
+          <div className="row">
+            {g ? <TypeBadge type={g.type} /> : null}
+            {g ? <SeverityPill score={g.severityScore} /> : null}
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
+        <h2 className="panel-title">{title}</h2>
+        {g ? (
+          <div className="muted panel-sub">
+            <RepoName path={g.repositoryPath} showPath /> · {typeLabel(g.type)}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="panel-body">
+        {group.error ? <ErrorBanner error={group.error} /> : null}
         {q.error ? <ErrorBanner error={q.error} /> : null}
+
+        {g ? (
+          <div className="group-head">
+            <div className="remediation">{remediation(g, subs)}</div>
+            <div className="row-between">
+              <span className="muted">
+                {subs.length} affected location{subs.length === 1 ? "" : "s"}
+              </span>
+              {subs.length > 0 ? (
+                <Button variant="secondary" size="sm" onClick={() => setIgnoreGroup(true)}>
+                  Ignore group…
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {q.isLoading ? <p className="muted">Loading…</p> : null}
-        {q.data?.content.map((s) => (
-          <SubIssueCard key={s.id} sub={s} groupId={groupId} />
+        {subs.map((s) => (
+          <LocationCard key={s.id} sub={s} groupId={groupId} />
         ))}
-      </aside>
-    </div>
+
+        {ignoreGroup && subs[0] ? (
+          <IgnoreDialog
+            sub={subs[0]}
+            groupId={groupId}
+            defaultScope="group"
+            onClose={() => setIgnoreGroup(false)}
+          />
+        ) : null}
+      </div>
+    </Dialog>
   );
 }
 
-function SubIssueCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) {
+function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) {
   const [showIgnore, setShowIgnore] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const unignore = useMutation({
     mutationFn: () => api.deleteIgnoreRule(sub.ignoreRuleId as string),
@@ -46,46 +114,43 @@ function SubIssueCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
   const link = advisoryLink(sub.vulnId);
   const isSecscanYml = sub.ruleCreatedBy === "secscan.yml";
   const heldByRule = sub.ignoreRuleId != null;
+  const idLabel = sub.vulnId ?? sub.ruleId ?? sub.packageName ?? sub.type;
 
   return (
-    <div className="subissue" data-testid="subissue">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>
+    <div className="location" data-testid="subissue">
+      <div className="location-head">
+        <span className="file-line">
           {link ? (
             <a href={link} target="_blank" rel="noreferrer">
               {sub.vulnId}
             </a>
           ) : (
-            sub.vulnId ?? sub.ruleId ?? sub.packageName ?? sub.type
+            idLabel
           )}
-        </strong>
-        <span className="row" style={{ gap: "0.3rem" }}>
-          {sub.inKev ? <span className="badge badge-kev" data-testid="kev-badge">KEV</span> : null}
-          {sub.score != null ? <span className="badge sev-high">{sub.score}</span> : null}
+          {sub.filePath ? (
+            <span className="muted">
+              {" · "}
+              {sub.filePath}
+              {sub.line != null ? `:${sub.line}` : ""}
+            </span>
+          ) : null}
+        </span>
+        <span className="row">
+          {sub.inKev ? (
+            <span className="badge-kev" data-testid="kev-badge">
+              KEV
+            </span>
+          ) : null}
+          {sub.score != null ? <SeverityPill score={sub.score} showScore /> : null}
         </span>
       </div>
 
       <dl className="kv">
-        {sub.packageName ? (
-          <>
-            <dt>Package</dt>
-            <dd>{sub.packageName}</dd>
-          </>
-        ) : null}
         {sub.installedVersion || sub.fixedVersion ? (
           <>
             <dt>Version</dt>
             <dd>
               {sub.installedVersion ?? "?"} → {sub.fixedVersion ?? "no fix"}
-            </dd>
-          </>
-        ) : null}
-        {sub.filePath ? (
-          <>
-            <dt>Location</dt>
-            <dd>
-              {sub.filePath}
-              {sub.line != null ? `:${sub.line}` : ""}
             </dd>
           </>
         ) : null}
@@ -108,9 +173,10 @@ function SubIssueCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
             <dt>EPSS</dt>
             <dd data-testid="epss">
               {(sub.epss * 100).toFixed(1)}%
-              <div className="muted" data-testid="epss-attribution">
+              <span className="attribution" data-testid="epss-attribution">
+                {" "}
                 {sub.epssAttribution}
-              </div>
+              </span>
             </dd>
           </>
         ) : null}
@@ -118,62 +184,75 @@ function SubIssueCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
 
       {sub.scoreBreakdown && sub.scoreBreakdown.length ? (
         <>
-          <div className="muted">Score breakdown</div>
-          <ul className="breakdown">
-            {sub.scoreBreakdown.map((l, i) => (
-              <li key={i}>
-                <span>{l.detail}</span>
-                <span>{l.delta >= 0 ? `+${l.delta}` : l.delta}</span>
-              </li>
-            ))}
-          </ul>
+          <button className="disclosure" onClick={() => setShowBreakdown((v) => !v)}>
+            {showBreakdown ? "Hide score breakdown" : "Score breakdown"}
+          </button>
+          {showBreakdown ? (
+            <ul className="breakdown">
+              {sub.scoreBreakdown.map((l, i) => (
+                <li key={i}>
+                  <span>{l.detail}</span>
+                  <span>{l.delta >= 0 ? `+${l.delta}` : l.delta}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </>
       ) : null}
 
-      {/* status + triage actions */}
-      {sub.status === "open" ? (
-        <button onClick={() => setShowIgnore(true)}>Ignore…</button>
-      ) : sub.status === "ignored" ? (
-        <div className="stack" data-testid="ignored-block">
-          <div>
-            Ignored — <span className="badge sev-ignored">{sub.ignoreReason}</span>
-          </div>
-          {isSecscanYml ? (
-            <p className="muted" data-testid="secscanyml-msg">
-              Defined in the repository's <code>.secscan.yml</code>. Edit <code>.secscan.yml</code> in the repo to
-              change it.
-            </p>
-          ) : heldByRule ? (
-            <>
-              <p className="muted">
-                Rule scope <strong>{sub.ruleScope}</strong>
-                {sub.ruleReason ? ` · "${sub.ruleReason}"` : ""}
-                {sub.ruleCreatedBy ? ` · by ${sub.ruleCreatedBy}` : ""}
+      <div className="location-actions">
+        {sub.status === "open" ? (
+          <Button variant="secondary" size="sm" onClick={() => setShowIgnore(true)}>
+            Ignore…
+          </Button>
+        ) : sub.status === "ignored" ? (
+          <div className="stack" data-testid="ignored-block">
+            <div className="row">
+              <span className="chip chip-ignored">Ignored</span>
+              <span className="muted" title={sub.ignoreReason ?? undefined}>
+                {reasonLabel(sub.ignoreReason)}
+              </span>
+            </div>
+            {isSecscanYml ? (
+              <p className="muted" data-testid="secscanyml-msg">
+                Defined in the repository's <code>.secscan.yml</code>. Edit <code>.secscan.yml</code> in the repo to
+                change it.
               </p>
-              {unignore.error ? <ErrorBanner error={unignore.error} /> : null}
-              <button onClick={() => unignore.mutate()} disabled={unignore.isPending} data-testid="unignore">
-                {unignore.isPending ? "Unignoring…" : "Unignore (remove rule)"}
-              </button>
-            </>
-          ) : (
-            <p className="muted" data-testid="autocause-msg">
-              Auto-ignored by its cause ({sub.ignoreReason}). It clears automatically when the cause no longer
-              applies — at the next scan, or when the relevant setting changes. There is no manual unignore.
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="muted">
-          Solved <RelativeTime iso={sub.solvedAt} />
-        </div>
-      )}
-
-      <div style={{ marginTop: "0.4rem" }}>
-        <button className="badge badge-inactive" onClick={() => setShowHistory((v) => !v)}>
+            ) : heldByRule ? (
+              <>
+                <p className="muted">
+                  Rule scope <strong>{sub.ruleScope}</strong>
+                  {sub.ruleReason ? ` · "${sub.ruleReason}"` : ""}
+                  {sub.ruleCreatedBy ? ` · by ${sub.ruleCreatedBy}` : ""}
+                </p>
+                {unignore.error ? <ErrorBanner error={unignore.error} /> : null}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => unignore.mutate()}
+                  disabled={unignore.isPending}
+                  data-testid="unignore"
+                >
+                  {unignore.isPending ? "Unignoring…" : "Unignore (remove rule)"}
+                </Button>
+              </>
+            ) : (
+              <p className="muted" data-testid="autocause-msg">
+                Auto-ignored by its cause ({sub.ignoreReason}). It clears automatically when the cause no longer
+                applies — at the next scan, or when the relevant setting changes. There is no manual unignore.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="muted">
+            Solved <RelativeTime iso={sub.solvedAt} />
+          </div>
+        )}
+        <button className="disclosure" onClick={() => setShowHistory((v) => !v)}>
           {showHistory ? "Hide history" : "History"}
         </button>
-        {showHistory ? <History subId={sub.id} /> : null}
       </div>
+      {showHistory ? <History subId={sub.id} /> : null}
 
       {showIgnore ? <IgnoreDialog sub={sub} groupId={groupId} onClose={() => setShowIgnore(false)} /> : null}
     </div>
