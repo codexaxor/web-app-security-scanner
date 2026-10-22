@@ -35,3 +35,27 @@ for (const vp of VIEWPORTS) {
     }
   });
 }
+
+// Explicit light + dark theme captures (via prefers-color-scheme → System theme follows it) of the key screens
+// at 1440, so both token sets are reviewable (S10e item 10).
+const THEMED: [string, string][] = [
+  ["dashboard", "/dashboard"],
+  ["feed-panel", `/feed/${COMMONS_TEXT}`],
+  ["ignored", "/ignored"],
+  ["repositories", "/repositories"],
+];
+
+for (const scheme of ["light", "dark"] as const) {
+  test.describe(`themed ${scheme} 1440`, () => {
+    test.use({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+
+    for (const [name, path] of THEMED) {
+      test(`${name} ${scheme} 1440`, async ({ page }) => {
+        await signIn(page, path);
+        await page.waitForLoadState("networkidle");
+        await page.waitForTimeout(250);
+        await page.screenshot({ path: `./artifacts/screens/${name}-${scheme}-1440.png`, fullPage: true });
+      });
+    }
+  });
+}

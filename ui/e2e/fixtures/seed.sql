@@ -258,6 +258,25 @@ values ('50000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-0000000
         'fp-time-fixture', 'CVE-2024-99999', 'ignored', 'DEV_DEPENDENCY',
         now() - interval '3 days 10 hours', now() - interval '3 days 10 hours');
 
+-- M8 S10e: a group with a MIX of open and ignored sub-issues (2 open, 1 ignored) in an active repo, so the
+-- Feed shows openCount in Focus ("2") and "2 open · 1 ignored" in All (finding-count semantics regression).
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, severity_score,
+                         fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'secret', 'secret|mixed', 'Mixed open and ignored', 'open', 80,
+        30, now() - interval '1 hour');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, rule_id, file_path,
+                       status, score, ignore_reason, ignored_at, created_at) values
+  (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000011',
+   '20000000-0000-0000-0000-000000000002', 'secret', 'secret', 'fp-mix-o1', 'generic-api-key', 'src/A.java',
+   'open', 80, null, null, now() - interval '1 hour'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000011',
+   '20000000-0000-0000-0000-000000000002', 'secret', 'secret', 'fp-mix-o2', 'generic-api-key', 'src/B.java',
+   'open', 80, null, null, now() - interval '1 hour'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000011',
+   '20000000-0000-0000-0000-000000000002', 'secret', 'secret', 'fp-mix-ig', 'generic-api-key', 'src/C.java',
+   'ignored', 80, 'DEV_DEPENDENCY', now() - interval '1 hour', now() - interval '1 hour');
+
 -- ========================================================================================================
 -- WORKSPACE 2 — the isolation oracle (must NEVER appear in the UI or any count)
 -- ========================================================================================================

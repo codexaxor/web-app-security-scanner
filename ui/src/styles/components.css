@@ -367,6 +367,7 @@ a.stat-link:hover .stat-num {
 .chip {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   padding: 2px 9px;
   border-radius: var(--radius-pill);
   font-size: var(--fs-xs);
