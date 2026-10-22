@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
-import { relativeTime, titleCase } from "../lib/format";
+import { titleCase } from "../lib/format";
+import RelativeTime from "../components/RelativeTime";
 import ErrorBanner from "../components/ErrorBanner";
 
 const TYPE_LABEL: Record<string, string> = { sca: "SCA", sast: "SAST", secret: "Secret", iac: "IaC", eol: "EOL" };
@@ -93,7 +94,9 @@ export default function DashboardPage() {
               <td>{repoPath.get(s.repositoryId) ?? s.repositoryId}</td>
               <td>{s.trigger}</td>
               <td>{titleCase(s.status)}</td>
-              <td>{relativeTime(s.finishedAt ?? s.createdAt)}</td>
+              <td>
+                <RelativeTime iso={s.finishedAt ?? s.createdAt} />
+              </td>
             </tr>
           ))}
           {scans.data && scans.data.content.length === 0 ? (

@@ -3,7 +3,8 @@ import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type RepositoryView } from "../api";
 import { qk } from "../queryClient";
-import { relativeTime, titleCase } from "../lib/format";
+import { titleCase } from "../lib/format";
+import RelativeTime from "../components/RelativeTime";
 import SeverityBadges from "../components/SeverityBadges";
 import ScanButton from "../components/ScanButton";
 import RepoSettingsDialog from "../components/RepoSettingsDialog";
@@ -94,8 +95,8 @@ export default function RepositoriesPage() {
               <td data-testid={`ignored-${r.gitlabProjectId}`}>{r.ignoredCount}</td>
               <td>
                 {r.lastScan ? (
-                  <span title={r.lastScan.finishedAt ?? ""}>
-                    {titleCase(r.lastScan.status)} · {relativeTime(r.lastScan.finishedAt)}
+                  <span>
+                    {titleCase(r.lastScan.status)} · <RelativeTime iso={r.lastScan.finishedAt} />
                   </span>
                 ) : (
                   <span className="muted">Never scanned</span>

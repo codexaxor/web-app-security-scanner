@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type IgnoreRuleView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
-import { relativeTime } from "../lib/format";
+import RelativeTime from "../components/RelativeTime";
 import ErrorBanner from "../components/ErrorBanner";
 import CreateRuleDialog, { type RulePrefill } from "../components/CreateRuleDialog";
 
@@ -55,7 +55,9 @@ export default function IgnoredPage() {
                 {it.ruleScope ? <div className="muted">scope: {it.ruleScope}</div> : null}
               </td>
               <td>{it.createdBy ?? "auto"}</td>
-              <td data-testid="ignored-at">{relativeTime(it.ignoredAt)}</td>
+              <td data-testid="ignored-at">
+                <RelativeTime iso={it.ignoredAt} />
+              </td>
             </tr>
           ))}
           {items.data && items.data.content.length === 0 ? (

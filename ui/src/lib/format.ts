@@ -1,31 +1,51 @@
 // Small display helpers. All inputs are server data rendered as text (OD-13d).
 
-export function relativeTime(iso: string | null | undefined): string {
+/** Parse a server ISO timestamp to a Date, or null when absent/unparseable. */
+function parseInstant(iso: string | null | undefined): Date | null {
   if (!iso) {
+    return null;
+  }
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const RTF = new Intl.RelativeTimeFormat(undefined, { numeric: "always" });
+const ABS_DATE = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const EXACT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "long" });
+
+/**
+ * A single relative-time formatter (Intl.RelativeTimeFormat, a browser built-in — no dependency). Past and
+ * future both read naturally ("9 hours ago" / "in 9 hours"). Buckets: <60s → "just now"; minutes; hours; days;
+ * anything older than ~30 days collapses to an absolute date (browser locale). Null/invalid → "—".
+ */
+export function relativeTime(iso: string | null | undefined): string {
+  const d = parseInstant(iso);
+  if (!d) {
     return "—";
   }
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) {
-    return "—";
+  const diffMs = Date.now() - d.getTime(); // >0 = in the past
+  const absSec = Math.abs(diffMs) / 1000;
+  if (absSec < 60) {
+    return "just now";
   }
-  const secs = Math.round((Date.now() - then) / 1000);
-  const abs = Math.abs(secs);
-  const units: [number, string][] = [
-    [60, "s"],
-    [3600, "m"],
-    [86400, "h"],
-    [2592000, "d"],
-    [31536000, "mo"],
-  ];
-  if (abs < 60) {
-    return `${abs}s ago`;
+  const sign = diffMs >= 0 ? -1 : 1; // past → negative value → "… ago"
+  if (absSec < 3600) {
+    return RTF.format(sign * Math.round(absSec / 60), "minute");
   }
-  for (let i = 1; i < units.length; i++) {
-    if (abs < units[i][0]) {
-      return `${Math.round(abs / units[i - 1][0])}${units[i - 1][1]} ago`;
-    }
+  if (absSec < 86400) {
+    return RTF.format(sign * Math.round(absSec / 3600), "hour");
   }
-  return `${Math.round(abs / 31536000)}y ago`;
+  const days = absSec / 86400;
+  if (days < 30) {
+    return RTF.format(sign * Math.round(days), "day");
+  }
+  return ABS_DATE.format(d);
+}
+
+/** Exact local timestamp (browser locale, with timezone) for a title tooltip; null when absent/unparseable. */
+export function exactTime(iso: string | null | undefined): string | null {
+  const d = parseInstant(iso);
+  return d ? EXACT.format(d) : null;
 }
 
 export function fixTime(minutes: number | null | undefined): string {

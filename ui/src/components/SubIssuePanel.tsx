@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type SubIssueView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
-import { advisoryLink, relativeTime, titleCase } from "../lib/format";
+import { advisoryLink, titleCase } from "../lib/format";
+import RelativeTime from "./RelativeTime";
 import ErrorBanner from "./ErrorBanner";
 import IgnoreDialog from "./IgnoreDialog";
 
@@ -162,7 +163,9 @@ function SubIssueCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
           )}
         </div>
       ) : (
-        <div className="muted">Solved {relativeTime(sub.solvedAt)}</div>
+        <div className="muted">
+          Solved <RelativeTime iso={sub.solvedAt} />
+        </div>
       )}
 
       <div style={{ marginTop: "0.4rem" }}>
@@ -196,7 +199,9 @@ function History({ subId }: { subId: string }) {
             {e.fromStatus ?? "—"} → {titleCase(e.toStatus ?? "—")}
             {e.reasonCode ? ` (${e.reasonCode})` : ""} · {e.actor}
           </span>
-          <span className="muted">{relativeTime(e.at)}</span>
+          <span className="muted">
+            <RelativeTime iso={e.at} />
+          </span>
         </li>
       ))}
     </ul>
