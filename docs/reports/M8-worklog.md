@@ -10,16 +10,16 @@ G3 `npm run e2e` (S0, S3–S9; S1/S2 run the existing-screens smoke); G4 clean g
 
 | # | Change | Slice | Commit | Closed by (named test) |
 |---|---|---|---|---|
-| 1 | Repo activation rules + 409s | S1 | S1 | `RepositorySettingsIT` (round trip; detached→409 unchanged; scan-on-inactive→409 no scan) |
-| 2 | includeInactive default false (feed/summary/dashboard) | S2 | S2 | `FeedSearchIT`, `DashboardSummaryIT` (inactive excluded + line) |
-| 3 | 7-day counts: type+repo filters only, New=created_at<7d | S2 | S2 | `FeedSummaryIT` (window boundary; view-independent) |
-| 4 | nginx headers `always` + all locations | S0 | S0 | `e2e security.spec.ts` (5 cases: /, deep link, asset, 404, /api) |
-| 5 | rescoreRepository same lock/guard + concurrency test | S1 | S1 | `SensitivityRescoreIT`, `SensitivityRescoreConcurrencyIT` |
-| 6 | pin node + playwright by digest; pw non-root, no socket | S0 | S0 | `ui/Dockerfile` digest; `e2e/run-e2e.mjs` (pwuser, no socket, ro mount) |
-| 7 | workspace-2 complete seed dataset | S0/S2 | S2 | `e2e/fixtures/seed.sql` (complete ws2 + ws1; oracle in S4+) |
-| 8 | path-scope ignore matches IgnoreMatcher format | S6 | S6 | `e2e panel.spec` (path prefix hint; ignore leaves Focus) |
-| 9 | error handler: no stack traces; 401 entrypoint unchanged | S1 | S1 | `ApiErrorBodyIT` (400/404/409 shape, no trace; 401 no WWW-Authenticate) |
-| 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | S0,S1,S3 | `ScanCreatedAtIT` (R1/R4); `e2e onboarding.spec` (route restored after re-auth) |
+| 1 | Repo activation rules + 409s | S1 | af829d7 | `RepositorySettingsIT` (round trip; detached→409 unchanged; scan-on-inactive→409 no scan) |
+| 2 | includeInactive default false (feed/summary/dashboard) | S2 | fffe5de | `FeedSearchIT`, `DashboardSummaryIT` (inactive excluded + line) |
+| 3 | 7-day counts: type+repo filters only, New=created_at<7d | S2 | fffe5de | `FeedSummaryIT` (window boundary; view-independent) |
+| 4 | nginx headers `always` + all locations | S0 | 95ffccd | `e2e security.spec.ts` (5 cases: /, deep link, asset, 404, /api) |
+| 5 | rescoreRepository same lock/guard + concurrency test | S1 | af829d7 | `SensitivityRescoreIT`, `SensitivityRescoreConcurrencyIT` |
+| 6 | pin node + playwright by digest; pw non-root, no socket | S0 | 95ffccd | `ui/Dockerfile` digest; `e2e/run-e2e.mjs` (pwuser, no socket, ro mount) |
+| 7 | workspace-2 complete seed dataset | S0/S2 | fffe5de,1e1222a | `e2e/fixtures/seed.sql` (complete ws2 + ws1; oracle in S4+) |
+| 8 | path-scope ignore matches IgnoreMatcher format | S6 | 8135e03 | `e2e panel.spec` (path prefix hint; ignore leaves Focus) |
+| 9 | error handler: no stack traces; 401 entrypoint unchanged | S1 | af829d7 | `ApiErrorBodyIT` (400/404/409 shape, no trace; 401 no WWW-Authenticate) |
+| 10 | per-run e2e pg pw; ScanCreatedAtIT→R1/R4; post-signin route restore | S0/S1/S3 | 95ffccd,af829d7,a93bd97 | `ScanCreatedAtIT` (R1/R4); `e2e onboarding.spec` (route restored after re-auth) |
 
 ## Slices
 
@@ -178,3 +178,14 @@ GET /dashboard/summary; nothing is computed in the browser.
 - Tests: `e2e dashboard.spec` — totals/band counts UI = API = SQL, workspace isolation (the other workspace's
   critical finding is in a direct cross-workspace SQL count but never in the dashboard), scan-health count, type
   breakdown = API. Gate: typecheck/build/vitest/guard green; e2e below.
+
+### S9 — Finish ✓ (no /finish-milestone — Sajal's real-GitLab walkthrough comes first)
+- `./gradlew clean build --rerun-tasks` → BUILD SUCCESSFUL (app 305 + core 116 tests).
+- UI gate: `npm ci && npm run build && npm run typecheck && npm test (2 vitest) && npm run guard` all green.
+- E2E suite run **twice back-to-back**: 31 passed, all green, exit 0 both times — no flakes. Global security
+  assertions (0 console errors, 0 CSP violations, 0 non-origin requests, empty storage) clean on every test.
+- `npm audit` (ui): **0 vulnerabilities** (runtime and dev).
+- Docs: README + CLAUDE.md Commands (UI gate + `npm run e2e`); SPEC M8 build note (OD-16 cuts); DECISIONS
+  D-065..D-072 + the M8 deferred register; this work log. No migration, no scanner/hardening change.
+
+Final test counts: app **305**, core **116**, vitest **2**, Playwright e2e **31** (×2). No `/finish-milestone`.

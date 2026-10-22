@@ -326,6 +326,15 @@ instead of webhooks, because creating project hooks needs the write `api` scope.
 Visual reference: screenshots in `docs/reference/`. All list endpoints are paginated server-side; the Feed's default
 sort is severity desc, then first_seen desc.
 
+**M8 build note (D-065..D-072).** These screens are implemented in `ui/` (React + Vite + react-router + react-query;
+no chart/table/component framework — charts are CSS/SVG, tables are plain HTML with server pagination). All counts
+are server read models computed in SQL (`GET /issue-groups[/summary]`, `/sub-issues/{id}/events`,
+`/dashboard/summary`, repository rollups, `/scans[/{id}/warnings]`); the browser renders server numbers and all
+scanned data as text only (CSP-locked, OD-13). **Cut for M8 (D-069, deferred register):** editing an ignore rule
+in place (you delete and "create new" prefilled instead), group-level timeline, trends over time, export, snooze,
+teams, reachability, a per-issue detail page, and live scan logs. The repository-settings audit row lands with the
+M10 audit log.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository

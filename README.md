@@ -124,6 +124,10 @@ docker compose up -d postgres
 ./gradlew :app:bootRun --args='--spring.profiles.active=api'
 ./gradlew :app:bootRun --args='--spring.profiles.active=worker'
 cd ui && npm ci && npm run dev
+cd ui && npm run build && npm run typecheck && npm test && npm run guard  # UI gate: tsc, build, vitest, security guard
+cd ui && npm run e2e             # end-to-end UI tests: isolated `secscan-e2e` compose + Playwright-in-Docker
+                                 #   (own volume/ports, no worker/scanner); builds, seeds, runs, tears down -v.
+                                 #   Needs Docker; generates per-run secrets under ui/e2e/.auth (gitignored).
 ```
 
 The first admin is created on first `api` startup when `app_user` is empty and
