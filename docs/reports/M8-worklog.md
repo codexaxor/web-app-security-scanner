@@ -239,3 +239,44 @@ issue `StatusChip` ("Solved").
   (gitignored).
 - Oracle assertions unchanged; two non-oracle steps adjusted (Show-inactive toggle; delete-confirm). No
   migration, no scanner change, no new deps, CSP unchanged, numbers unchanged.
+
+## S10e — UX fixes from the live review + light theme
+
+From Sajal's incognito review on real data. No migration, no scanner change, no new deps, CSP unchanged, all
+existing oracle assertions unchanged.
+
+1. **Finding counts (`ecab860`):** `GET /issue-groups` rows carry `openCount`/`ignoredCount`/`solvedCount` (one
+   SQL `group by status`, no N+1) instead of a single total. Feed Focus shows `openCount`, All shows
+   "N open · M ignored", so the row count matches the Dashboard. `FeedSearchIT` asserts a mixed group's exact
+   per-status counts; e2e oracle: each Feed row's shown openCount == API openCount == SQL open sub-issues of
+   that group, and Σ Focus openCount == Dashboard findings total.
+2. **Dashboard type bars** render again — the fill span needed `display:block`. e2e: each fill has computed
+   width > 0 and widths are ordered by count.
+3. **Repositories open-by-severity** is one labeled non-wrapping line "C 1 · H 2 · M 2 · L 0" (zeros muted);
+   full path muted on its own line under the repo name (ellipsis). (`data-sev` count span unchanged for the
+   oracle.)
+4. **Side panel** no horizontal clipping: the location header keeps the path on its own line with the
+   SeverityPill right-aligned; long tokens (incl. the EPSS URL) wrap; `overflow-x:hidden`. e2e: panel
+   scrollWidth <= clientWidth at 1280 and 1440.
+5. **Typography:** advisory/description subtitles in the body font; monospace only for rule/CVE ids, paths and
+   versions.
+6. **App header:** Sign out never clipped (nav shrinks with `min-width:0`, `topbar-user` is `flex:none` +
+   `margin-left:auto`, topbar `min-height`). e2e: the Sign out button is fully inside the viewport at 1280.
+7. **Small text:** Ignored paths wrap after "/" (`<wbr>` per segment); dashboard warning chip "repo · N
+   warnings" (a `.chip` gap stops the flex layout trimming the separator); scan-health sentence
+   "N need attention — N failed/partial · M with warnings" / "… — all scans completed · M with warnings"
+   (the `scan-health-count` element still carries the total for the oracle).
+8. **Feed summary** band legend is a 2×2 grid (no orphaned "0 low").
+9. Screenshots re-taken (16 at 1440/1280 + 8 explicit light/dark captures of the 4 key screens at 1440).
+10. **Light theme (`ecab860`):** a Light/Dark/System control held in memory only (no web storage — the guard is
+   unchanged; a refresh resets to System). It sets `data-theme` on `<html>`; the token CSS already selects by
+   `[data-theme]` and `@media (prefers-color-scheme)`. AA contrast verified per theme (light and dark) in e2e;
+   toggling switches theme with no reload and storage stays empty.
+
+### S10e gates
+- G1 `./gradlew build` → BUILD SUCCESSFUL (app + core). G2 UI gate green (typecheck/build/10 vitest/guard, 44
+  files). `npm audit`: 0 vulnerabilities.
+- G3 `npm run e2e`: **70 Playwright tests** (54 S10 + 8 `s10e.spec` + 8 themed screenshots), run twice
+  back-to-back, all green, no flakes (one race fix after the first run — wait for the Feed rows before reading
+  their counts). Screenshots in `ui/e2e/artifacts/screens/` (gitignored).
+- No migration, no scanner change, no new deps, CSP unchanged, oracle assertions unchanged.
