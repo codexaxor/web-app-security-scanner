@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type IssueGroupView, type SubIssueView } from "../api";
+import { api, type IssueGroupView, type SubIssueView, type TriageEventView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
 import { advisoryLink, titleCase } from "../lib/format";
 import { humanizeRuleId, reasonLabel, typeLabel } from "../lib/labels";
@@ -66,7 +66,8 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
         <h2 className="panel-title">{title}</h2>
         {g ? (
           <div className="muted panel-sub">
-            <RepoName path={g.repositoryPath} showPath /> · {typeLabel(g.type)}
+            <RepoName path={g.repositoryPath} showPath />
+            {g.repositoryBranch ? ` · ${g.repositoryBranch}` : ""} · {typeLabel(g.type)}
           </div>
         ) : null}
       </div>
@@ -287,6 +288,17 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
   );
 }
 
+// A triage event in plain words. A BRANCH_CHANGED close/reopen (a branch switch, not a fix) reads as such and
+// names the branch now scanned (D-076); everything else shows the status transition and its reason code.
+function eventLabel(e: TriageEventView): string {
+  if (e.reasonCode === "BRANCH_CHANGED") {
+    const verb = e.toStatus === "solved" ? "Closed" : "Reopened";
+    return `${verb} — branch changed${e.branch ? ` (now scanning ${e.branch})` : ""}`;
+  }
+  const base = `${e.fromStatus ?? "—"} → ${titleCase(e.toStatus ?? "—")}`;
+  return e.reasonCode ? `${base} (${e.reasonCode})` : base;
+}
+
 function History({ subId }: { subId: string }) {
   const q = useQuery({
     queryKey: qk.subIssueEvents(subId, 0),
@@ -303,8 +315,7 @@ function History({ subId }: { subId: string }) {
       {q.data.content.map((e) => (
         <li key={e.id}>
           <span>
-            {e.fromStatus ?? "—"} → {titleCase(e.toStatus ?? "—")}
-            {e.reasonCode ? ` (${e.reasonCode})` : ""} · {e.actor}
+            {eventLabel(e)} · {e.actor}
           </span>
           <span className="muted">
             <RelativeTime iso={e.at} />

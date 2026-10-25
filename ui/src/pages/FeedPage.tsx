@@ -268,6 +268,7 @@ export default function FeedPage() {
                     </td>
                     <td>
                       <RepoName path={g.repositoryPath} />
+                      {g.repositoryBranch ? <span className="muted branch-label"> · {g.repositoryBranch}</span> : null}
                     </td>
                     <td>{fixTime(g.fixTimeMinutes)}</td>
                     <td>

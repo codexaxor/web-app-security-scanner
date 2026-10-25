@@ -1075,3 +1075,45 @@ button.health-item {
     grid-template-columns: 120px 1fr 40px;
   }
 }
+
+/* M8.1 (D-076): branch label on repo rows / feed / side panel, and the "Branch to scan" picker. */
+.branch-label {
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+.branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  margin-top: 6px;
+}
+.branch-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+}
+.branch-option:hover {
+  background: var(--surface-2);
+}
+.branch-option.is-selected {
+  background: var(--surface-3);
+  font-weight: 600;
+}
+.branch-name {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
