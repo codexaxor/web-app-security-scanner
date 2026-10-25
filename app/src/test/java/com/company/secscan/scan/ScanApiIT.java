@@ -53,6 +53,28 @@ class ScanApiIT extends AbstractGitLabIT {
     }
 
     @Test
+    void startSnapshotsTheEffectiveBranchOntoTheScan() {
+        Repository repo = seedRepository();   // default_branch "main", no scan_branch
+
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scan.branch()).isEqualTo("main");
+        assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("main");
+    }
+
+    @Test
+    void startSnapshotsTheConfiguredScanBranch() {
+        Repository repo = seedRepository();
+        repo.setScanBranch("dev");            // D-076: overrides the default
+        repositories.save(repo);
+
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scan.branch()).isEqualTo("dev");
+        assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("dev");
+    }
+
+    @Test
     void startingAgainReturnsTheSameInFlightScan() {
         Repository repo = seedRepository();
 

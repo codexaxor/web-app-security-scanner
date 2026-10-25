@@ -58,12 +58,20 @@ public class ScanService {
         Repository repo = requireScannable(repositoryId);
         return inFlight(repositoryId)
                 .map(ScanView::of)
-                .orElseGet(() -> enqueueRecoveringRace(repo.getId()));
+                .orElseGet(() -> enqueueRecoveringRace(repo.getId(), resolveBranch(repo)));
     }
 
-    private ScanView enqueueRecoveringRace(UUID repositoryId) {
+    /**
+     * The branch the scan will clone, snapshotted now (D-076): the configured {@code scan_branch}, else the GitLab
+     * default. Slice 3 (A6) upgrades this to refresh the current GitLab default when {@code scan_branch} is unset.
+     */
+    private String resolveBranch(Repository repo) {
+        return repo.effectiveBranch();
+    }
+
+    private ScanView enqueueRecoveringRace(UUID repositoryId, String branch) {
         try {
-            return ScanView.of(enqueuer.enqueueManual(repositoryId));
+            return ScanView.of(enqueuer.enqueueManual(repositoryId, branch));
         } catch (DataIntegrityViolationException race) {
             // A concurrent start won the uq_scan_active_per_repository race; return that scan.
             log.debug("Concurrent scan start for repository {}; returning the existing in-flight scan",

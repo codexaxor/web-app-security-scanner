@@ -230,8 +230,11 @@ public class ScanJobProcessor {
             cloneUrl = httpsCloneUrl(conn.getBaseUrl(), repo.getPathWithNamespace());
             networkDisabled = false;
         }
+        // The branch to clone was snapshotted onto the scan at enqueue (D-076); fall back to the repo default for
+        // any legacy scan row with no branch.
+        String branch = scan.getBranch() != null ? scan.getBranch() : repo.getDefaultBranch();
         return new ScannerLaunchSpec(scan.getId().toString(), props.getImage(), cloneUrl,
-                repo.getDefaultBranch(), props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
+                branch, props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
                 props.getTmpfsSize(), props.getMemory().toBytes(), props.getCpus(), props.getPidsLimit(),
                 networkDisabled, ws.ownerUserSpec(), props.getTimeout());
     }

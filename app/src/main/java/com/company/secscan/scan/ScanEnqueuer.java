@@ -25,8 +25,8 @@ class ScanEnqueuer {
     }
 
     @Transactional
-    Scan enqueueManual(UUID repositoryId) {
-        Scan scan = scans.saveAndFlush(Scan.manual(WORKSPACE, repositoryId));
+    Scan enqueueManual(UUID repositoryId, String branch) {
+        Scan scan = scans.saveAndFlush(Scan.manual(WORKSPACE, repositoryId, branch));
         jobs.saveAndFlush(new ScanJob(WORKSPACE, scan.getId()));
         return scan;
     }
