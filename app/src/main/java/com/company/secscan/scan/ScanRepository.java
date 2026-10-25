@@ -14,6 +14,9 @@ public interface ScanRepository extends JpaRepository<Scan, UUID> {
 
     Page<Scan> findByWorkspaceIdAndRepositoryId(UUID workspaceId, UUID repositoryId, Pageable pageable);
 
+    /** All scans in the workspace, newest-first — the workspace-wide scans list (OD-14 item 2). */
+    Page<Scan> findByWorkspaceId(UUID workspaceId, Pageable pageable);
+
     /** In-flight scans for a repository (queued or running): used to avoid enqueuing a duplicate. */
     List<Scan> findByWorkspaceIdAndRepositoryIdAndStatusIn(UUID workspaceId, UUID repositoryId,
                                                            List<String> statuses);

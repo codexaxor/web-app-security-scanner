@@ -43,6 +43,13 @@ class SastIgnoreChurnIT extends TriageSeedSupport {
                 .filter(s -> SubIssue.STATUS_OPEN.equals(s.getStatus()))
                 .toList();
         assertThat(openForRuleFile).isEmpty();
+
+        // GET /ignored carries the finding's line so the Ignored view can show file:line (M8 S10b/S10d).
+        var ignored = triage.listIgnored(0, 50);
+        assertThat(ignored.content()).anySatisfy(it -> {
+            assertThat(it.filePath()).isEqualTo("src/Security.java");
+            assertThat(it.line()).isEqualTo(10);
+        });
     }
 
     private SubIssue subBySnippet(UUID repo, String snippetHash) {

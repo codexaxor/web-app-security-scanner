@@ -326,6 +326,15 @@ instead of webhooks, because creating project hooks needs the write `api` scope.
 Visual reference: screenshots in `docs/reference/`. All list endpoints are paginated server-side; the Feed's default
 sort is severity desc, then first_seen desc.
 
+**M8 build note (D-065..D-072).** These screens are implemented in `ui/` (React + Vite + react-router + react-query;
+no chart/table/component framework — charts are CSS/SVG, tables are plain HTML with server pagination). All counts
+are server read models computed in SQL (`GET /issue-groups[/summary]`, `/sub-issues/{id}/events`,
+`/dashboard/summary`, repository rollups, `/scans[/{id}/warnings]`); the browser renders server numbers and all
+scanned data as text only (CSP-locked, OD-13). **Cut for M8 (D-069, deferred register):** editing an ignore rule
+in place (you delete and "create new" prefilled instead), group-level timeline, trends over time, export, snooze,
+teams, reachability, a per-issue detail page, and live scan logs. The repository-settings audit row lands with the
+M10 audit log.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
@@ -362,7 +371,7 @@ locally.
 | M5 | Scoring | Base scores, KEV + EPSS sync, adjustments, `score_breakdown`, fix time, CWE phrase table, re-score job | A KEV-listed CVE scores +5 with the reason visible in the API |
 | M6 | SAST, IaC, EOL | Opengrep with pinned rules + custom Spring/.NET rules; Checkov; EOL detector + sync | Each fixture triggers its expected rule; an old Spring Boot version raises an EOL issue |
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
-| M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers |
+| M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
 | M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner | A new commit is scanned within 15 min; nightly run completes for all repos |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 

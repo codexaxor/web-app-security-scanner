@@ -14,6 +14,140 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-075 M8 "Done when" verified on 2 repos (1 real + 1 fixture); 3-real-repo walkthrough → M8.5 (OD-21) (2026-10-25, accepted)
+Context: SPEC M8 "Done when" is "Walkthrough on 3 real repos matches API numbers". Sajal's real-data walkthrough
+(2026-10-22..25) was run against **core-keycloak** (a real GitLab repo) and **secscan-test-secrets** (a synthetic
+fixture), not three real repos. Every acceptance invariant was confirmed on that data (SQL = API = UI; the
+sub_issue status counts as oracle through ignore / EPSS On+Off / manual scan / unignore — see `docs/reports/M8.md`
+"Done-when check").
+Decision (OD-21 = option B — accept the deviation, finish M8, carry the shortfall): finish M8 on the two-repo
+walkthrough; onboarding and verifying **ib-api-v2** and a **third real repo** against the same invariants is the
+**first task of M8.5**. The M8 row in SPEC gets a note pointing here.
+Consequences: M8 ships with its UI and read models proven on real + fixture data; the literal "3 real repos" bar
+is met early in M8.5, not in M8. No code or behavior changes from this decision.
+
+## D-074 Finding taxonomy (level-2 categories + optional OWASP tags) is M8.5, not M8 (OD-20) (2026-10-25, accepted)
+Context: S10f shipped plain-English **level-1** type names everywhere (`ui/src/lib/labels.ts`: "Vulnerable
+dependency", "Hardcoded secret", "Insecure code", "Infrastructure misconfiguration", "End-of-life runtime").
+A richer **level-2** taxonomy (categories derived from CWE / secret type / IaC platform / ecosystem, plus optional
+OWASP Top 10 2025 tags) was discussed during the walkthrough.
+Decision (OD-20 = option A): the level-2 taxonomy is a **milestone M8.5** item with its own SPEC section and its
+own migration (**V20**; note V19 stays reserved for the IaC override already planned). Level-1 names are done and
+remain as shipped in S10f.
+Consequences: no taxonomy columns/migration land in M8; M8.5 owns the schema and SPEC text.
+
+## D-073 Duplicate-ignored-findings fix (OD-19) scheduled for M8.5 (2026-10-25, accepted)
+Context: `docs/reports/M8-S10b-duplicate-ignored-sast.md` root-caused OD-19 — absent-but-ignored findings
+accumulate forever after a fingerprint/snippet-hash shift, because reconcile's solve step is gated on
+`status='open'`, so a vanished *ignored* fingerprint is never closed while the new one is re-ignored. Open findings
+do not accumulate. The proposed fix touches reconcile/the D-063 resolver (domain rule 3), so it needed a human
+decision and was not built in M8.
+Decision: schedule OD-19 for **M8.5**. The fix = (1) solve an *ignored* finding absent from a scanner-complete
+scan when its hold is re-derivable, routed through the D-063 resolver and writing a `triage_event`; (2) a one-off
+maintenance pass (no migration) to retire rows already accumulated; (3) optionally reduce SAST fingerprint churn
+with a structural match key. Not a security issue (the live finding is tracked correctly; surplus rows are stale
+ignored clutter).
+Consequences: tracked as an M8.5 work item with a known root cause; no M8 reconcile change.
+
+## D-072 M8 test tooling, dev-only, never in the runtime image (OD-18) (2026-10-22, accepted)
+Context: M8 needs unit/component tests and browser E2E, but the SPA runtime image must stay minimal and the
+host is missing 3 Chromium shared libs (libxcomposite1/libxdamage1/libxrandr1; installing needs sudo).
+Decision: dev-only test tooling — **vitest 4.1.12** (+ **jsdom 28.1.0** DOM env, **@testing-library/react 16.3.3**)
+for unit/component tests; **@playwright/test 1.64.1** for E2E, run **inside the pinned Playwright image**
+`mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf`
+(approved — avoids host sudo/libs). The E2E oracle reads the e2e Postgres directly via **pg 8.23.1** (dev-only,
+required by the harness "direct SQL count" assertion). None of these ship in `ui/Dockerfile` (`.dockerignore`
+excludes `node_modules`/`e2e`). The Playwright container runs as **pwuser** (non-root), no docker socket, joined
+only to the `secscan-e2e` network, ui mounted read-only except `e2e/artifacts`.
+Consequences: fast local tests + faithful browser E2E with zero host changes; one more image to re-pin on bumps.
+
+## D-071 Walkthrough stays Sajal's manual job; the build makes it checkable (OD-17) (2026-10-22, accepted)
+Context: SPEC M8 "Done when" is a 3-real-repo walkthrough matching API numbers; that needs real GitLab + VPN.
+Decision: Claude does NOT run the walkthrough. Claude's job is to make it trivially checkable — every on-screen
+count is proven equal to the API and to direct SQL by named ITs + Playwright oracle, and the final report gives
+the exact command list Sajal runs (rebuild api/worker/ui on the default project, per-screen checks for
+core-keycloak + ib-api-v2 + a 3rd repo + secscan-test-secrets). No `/finish-milestone` until that passes.
+Consequences: the milestone's acceptance is a short manual confirmation, not a from-scratch manual exploration.
+
+## D-070 Repository settings: PATCH with immediate re-score for sensitivity (OD-15) (2026-10-22, accepted)
+Context: M8 needs per-repo settings (sensitivity, include-dev-deps, active) from the Repositories screen.
+Decision: `PATCH /api/v1/repositories/{id}` `{sensitivity?, includeDevDeps?, active?}`, workspace-scoped (repo
+outside workspace → 404). `sensitivity` ∈ {low,normal,high} else 400; a change triggers an **immediate per-repo
+re-score through the existing D-049 path** (`ReScoreService.rescoreRepository`, score-only — 0 `triage_event`,
+no status/fingerprint change; sensitivity is already a scorer input, verified P3). `includeDevDeps` is saved and
+takes effect at the **next scan** (no API-time triage — the D-063 carve-out is NOT widened). Activation
+(change 1): `active=false` sets `inactive_reason='DEACTIVATED_BY_USER'` and blocks new scans (POST scan on an
+inactive repo → 409, no job row); `active=true` succeeds **only** when `inactive_reason='DEACTIVATED_BY_USER'`
+AND `connection_id IS NOT NULL` (clears the reason), else 409 ("re-select the project via a connection"). The
+settings-change audit row is **deferred to M10**; M8 logs field names at INFO (no values). No migration
+(`inactive_reason` is free text in an existing column).
+Consequences: full per-repo tuning with correct scoring/lifecycle guarantees and no new table.
+
+## D-069 M8 cut list — what the UI does and does not include (OD-16) (2026-10-22, accepted)
+Context: M8 scope must be bounded against Aikido's full feature surface.
+Decision: **IN** — delete ignore rule (+ "create new" prefilled from the old rule); side-panel ignore with all 5
+scopes (subissue, group, path-prefix this repo, CVE this repo|global, rule this repo|global), reason required,
+confirm dialog for global scopes; unignore = delete the holding manual rule; `.secscan.yml` rule → show the 409
+"edit .secscan.yml" message; auto-ignored → reason code + how to clear, NO unignore button; per-sub-issue
+history; scan button with status polling to terminal then refetch; Dashboard current counts + scan health +
+recent scans; next/prev pagination. **OUT** — edit rule in place (no PUT), group-level timeline, trends over
+time, export, snooze, teams, reachability, a detail page, live logs. All OUT items go to the deferred register.
+Consequences: a focused, shippable UI; the OUT list is tracked, not forgotten.
+
+## D-068 M8 server read models, all workspace-scoped, counts in SQL (OD-14) (2026-10-22, accepted)
+Context: the UI must never compute counts in the browser; every screen number is a server read model.
+Decision: additive read models (no migration) in dedicated query services: repository rollups (open-by-severity,
+ignored count, last scan, last-scan warning count); `GET /scans/{id}/warnings` + workspace-wide `GET /scans`;
+feed `GET /issue-groups` gains `view=focus|all`, severity-band filter, `repositoryPath` per row and the
+documented sort **`severity_score desc NULLS LAST, first_seen_at desc, id`**; `GET /issue-groups/summary` (band
+counts + last-7-day New/Solved/Auto-ignored as distinct sub-issues "findings", honouring type+repo filters
+only — change 3); `GET /sub-issues/{id}/events`; `SubIssueView` gains rule fields (`ignoreRuleId/ruleScope/
+ruleReason/ruleCreatedBy`, null for auto causes); `GET /dashboard/summary`; and the insert-refresh fix so
+`createdAt` is non-null on POST scan / POST ignore-rule. Feed/summary/dashboard take `includeInactive` (default
+false) and exclude inactive repos' rows by default (change 2). Semantics: Focus = groups status open; All =
+open + ignored (solved excluded, only as counts); an all-ignored group has null score → shown "Ignored", no
+band, never in band totals. Bands on `severity_score`: Critical 90–100 / High 70–89 / Medium 40–69 / Low 1–39.
+Consequences: the browser renders server numbers only; zero new tables/migrations.
+
+## D-067 M8 security baseline (OD-13) (2026-10-22, accepted)
+Context: a security product's own UI must not become an attack surface.
+Decision: (a) Basic credentials live in JS memory only — never localStorage/sessionStorage/IndexedDB/cookies/
+URL/logs; a refresh re-signs-in; sign-out and any 401 clear credentials AND `queryClient.clear()`. (b) The
+server keeps the JSON 401 with **no** WWW-Authenticate, no CORS, same-origin only (already in `SecurityConfig`).
+(c) nginx (ui image) sends, ENFORCED with `always` and re-included into every location (change 4):
+`Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"`,
+`X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer`, and `Cache-Control no-store` on index.html; any
+Vite relaxation would STOP-and-report (handled: the module-preload polyfill is disabled so every script stays
+external `'self'`). (d) All scanned/feed data renders as TEXT ONLY — no `dangerouslySetInnerHTML`, no HTML/
+Markdown/`innerHTML`; outbound links (e.g. a CVE page) are built by our code from a regex-validated id, never
+from data. (e) A guard script (`ui/scripts/guard-forbidden.mjs`, in the UI gate) FAILS on
+`dangerouslySetInnerHTML`, `innerHTML`, `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`,
+`eval(`, `new Function(` anywhere in `ui/src`.
+Consequences: a locked-down SPA; error handler normalizes bodies without leaking stack traces (change 9).
+
+## D-066 M8 runtime UI dependencies — minimal, no frameworks (OD-12) (2026-10-22, accepted)
+Context: keep the SPA small and auditable.
+Decision: the ONLY runtime deps are **react-router 8.5.0** (declarative mode: `BrowserRouter`/`Routes`, imported
+from `react-router`; no framework mode, no SSR, no `react-router-dom`) and **@tanstack/react-query 5.104.5**. No
+chart lib, no table lib, no component/CSS framework, no state lib. Charts are plain CSS/SVG; tables are plain
+HTML with server-side pagination.
+Consequences: a tiny dependency surface; charts/tables are hand-built.
+
+## D-065 M8 frontend toolchain, pinned (OD-11) (2026-10-22, accepted)
+Context: M8 builds the real UI; the toolchain must be current, pinned and reproducible.
+Decision: **react 19.2.9**, **react-dom 19.2.9**, **vite 8.1.6**, **@vitejs/plugin-react 6.1.2** (peers vite ^8;
+its 3 extra peers are optional), **typescript 6.0.3** (NOT 7 — no stable programmatic API until 7.1, and
+typescript-eslint is incompatible). Exact versions pinned in `ui/package.json` + committed `package-lock.json`.
+The lockfile is generated with **npm 12** (the host's npm 10.9.4 crashes on vite 8's devtools optional-peer graph
+with an arborist `edgesOut` bug); `npm ci` — the gate command — succeeds with the bundled npm 10. `ui/Dockerfile`
+build stage is pinned by digest to `node:22.23.4-alpine@sha256:ce8d…ffadc` (node v22.23.4 ≥ 22.22, required by
+react-router 8.5.0 and vite 8; change 6). The nginx RUNTIME stage is likewise pinned by digest (SF-5):
+`nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10` (tag resolved
+2026-10-25). The build step is `npm ci` ONLY (no `|| npm install` fallback) so an out-of-sync lockfile fails the
+build instead of silently drifting.
+Consequences: a modern, reproducible build; re-pin node/nginx/npm notes on any bump.
+
 ## D-064 Default-dir/minified path exclusion does not apply to secret findings (2026-10-21, accepted)
 Context: M7 review. The SPEC default exclusions (`node_modules/ vendor/ dist/ build/ target/ bin/ obj/` and
 `*.min.js`/`*.min.css`) are noise-reduction for SCA/SAST/IaC, but a leaked CREDENTIAL in one of those paths (a key
@@ -1015,6 +1149,60 @@ Decision: `workspace_id` on every business table from day one.
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
   Add role gating when M10 introduces authorities. (M5 review N5.)
+- M8 deferred register (recorded 2026-10-22, for M9+):
+  - **OD-16 OUT (not built in M8):** edit ignore rule in place (no PUT — you delete and "create new" prefilled);
+    group-level timeline; trends over time; export; snooze; teams; reachability; a per-issue detail page; live
+    scan logs. Revisit per product priority.
+  - **Repository settings audit row → M10** (D-070): a settings change (sensitivity/include-dev-deps/active)
+    writes no audit row in M8; M10's audit log adds it. M8 logs field names at INFO (no values).
+  - **M3 gap "issues of an inactive repository stay open"** — resolved by OD-15/D-070 DISPLAY rules: an inactive
+    repo keeps its statuses (reconcile never runs) but its groups/sub-issues are excluded from Feed/Dashboard
+    totals by default, shown behind an "Inactive" filter + a visible "N inactive repos, M open findings" line.
+  - **OD-19 → M8.5 (D-073; investigation in `docs/reports/M8-S10b-duplicate-ignored-sast.md`):**
+    duplicate *ignored* sub-issues accumulate when a finding's fingerprint changes while it is ignored. Root
+    cause: the SAST fingerprint includes the normalized-snippet hash (scanner-computed), which shifts when the
+    Opengrep binary/rule bundle or the normalization algorithm changes (as it did on 2026-10-20, M6 `/review-pr`);
+    reconcile's solve step is gated on `status='open'` (`Reconciler.java:95`), so the vanished old fingerprint is
+    not closed ("ignored stays ignored") while the new one is re-ignored → two ignored rows. **Open findings do
+    NOT accumulate** (missing open → solved). Fix (scheduled M8.5, touches reconcile/resolver = domain rule 3):
+    (1) solve an *ignored* finding that is absent from a scanner-complete scan when its hold is
+    re-derivable (auto cause or rule/path/CVE-scope), routed through the D-063 resolver, writing a `triage_event`;
+    (2) a one-off maintenance pass (no migration) to retire the rows already accumulated; (3) optionally reduce
+    SAST fingerprint churn with a structural match key. Not a security issue (the live finding is tracked
+    correctly; surplus rows are stale ignored clutter).
+  - **OD-20 Finding taxonomy → M8.5 (D-074):** level-2 categories (from CWE / secret type / IaC platform /
+    ecosystem) + optional OWASP Top 10 2025 tags. New SPEC section + migration **V20** (V19 stays reserved for the
+    IaC override). Level-1 plain names already shipped in S10f (`ui/src/lib/labels.ts`).
+  - **OD-21 3-real-repo walkthrough → M8.5 (D-075):** M8 "Done when" was met on core-keycloak (real) +
+    secscan-test-secrets (fixture); onboarding + verifying **ib-api-v2** and a **3rd real repo** is the first M8.5
+    task.
+  - **IaC Checkov `check_name` ingest → later:** ingest Checkov's human-readable `check_name` so IaC titles are
+    human, not raw rule ids.
+  - **Languages refresh on each scan → later:** re-derive a repository's detected languages on every scan (today
+    they are not refreshed per scan).
+  - **Side panel less repetitive → later:** group affected locations more compactly in the side panel.
+  - **Theme (light/dark) preference persistence → M10 (user settings):** the S10e light theme is not yet persisted
+    per user; it lands with M10 user settings.
+  - **RESOLVED by SF-1 — the "Medium 65" stale panel header was a UI CACHE bug, not backend staleness.** The
+    side-panel header reads the group via `GET /issue-groups/{id}` (`["issue-group", id]`), but that query family
+    was NOT in any mutation's invalidation list, so after an API-time ignore the header kept its cached (open-era)
+    score while the sub-issue rows updated. The backend recompute is correct: `GroupRollupService` nulls
+    `severity_score` for an all-ignored group through every API-time path (manual triage, EPSS sweep) and the UI's
+    `SeverityPill` renders null as a neutral "—". Fix: SF-1 adds `issue-group` + `sub-issue-events` to all four
+    mutation kinds in `queryClient.ts`; SF-2 additionally makes the score-only rollup a column-scoped guarded
+    UPDATE so a concurrent re-score can never resurrect a score onto a just-ignored group. Proven by
+    `AllIgnoredGroupRollupIT`, `GroupScoreRollupRaceIT`, the `queryClient.test.ts` invalidation table and an
+    e2e (panel header flips to "Ignored" without reload). The earlier "report evidence only / investigate"
+    framing in `docs/reports/M8.md` was superseded; see M8.md's corrected "Follow-up fixes" section.
+  - **D-1 nginx master process runs as root → M10 (hardening):** the `ui` runtime image (`nginx:1.27-alpine`)
+    starts its master as root (workers drop to `nginx`). Switch to `nginxinc/nginx-unprivileged` (or an explicit
+    non-root user + high port) as part of the M10 container-hardening pass. Not changed in M8 (out of scope; the
+    image is already digest-pinned, read-only-friendly and only serves static files + proxies `/api`).
+  - **D-2 sensitivity re-score skips ignored findings; unignore keeps the old score until the next scan/re-score
+    → M8.5:** `ReScoreService.rescoreWorkspace`/`rescoreRepository` re-score only OPEN sub-issues (B1 guard), so a
+    finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
+    scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
+    for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.

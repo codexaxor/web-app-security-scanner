@@ -8,6 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 /**
  * A manual (or .secscan.yml-materialized) ignore rule (D-058). Users triage by scope: this sub-issue, this
@@ -52,6 +54,9 @@ public class IgnoreRule {
     @Column(name = "created_by", nullable = false)
     private String createdBy;
 
+    // DB default `now()`; @Generated(INSERT) reads it back after insert so POST /ignore-rules returns a
+    // non-null createdAt (OD-14 item 8).
+    @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 

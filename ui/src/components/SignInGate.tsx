@@ -1,12 +1,15 @@
-import { FormEvent, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { api, AuthRequiredError, clearCredentials, setCredentials } from "../api";
+import { useAuth } from "../auth";
+import Button from "./Button";
 
 /**
- * Minimal in-memory sign-in so the SPA can call the HTTP Basic-protected API. A real login arrives in a later
- * milestone; credentials here live only in memory for the session. We verify them against a protected endpoint
- * so a wrong email/password is reported here instead of failing silently on the first real call.
+ * In-memory sign-in (OD-13a). Credentials live only in memory for the session; a refresh re-signs-in. We verify
+ * them against a protected endpoint so a wrong email/password is reported here instead of failing on the first
+ * real call.
  */
-export default function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
+export default function SignInGate() {
+  const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,9 +21,8 @@ export default function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
     setBusy(true);
     setCredentials(email, password);
     try {
-      // A 200 from a protected endpoint means the credentials are accepted (empty list is fine); 401 throws.
-      await api.listConnections(0, 1);
-      onSignedIn();
+      await api.listConnections(0, 1); // a 200 means the credentials are accepted; 401 throws
+      signIn();
     } catch (err) {
       clearCredentials();
       setError(
@@ -34,21 +36,35 @@ export default function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "0.75rem", maxWidth: 360 }}>
-      <h2>Sign in</h2>
-      <p style={{ color: "#555", margin: 0 }}>Use the bootstrap admin credentials.</p>
-      <label>
-        Email
-        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
-      </label>
-      <label>
-        Password
-        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
-      </label>
-      {error && <p style={{ color: "#b00020", margin: 0 }}>{error}</p>}
-      <button type="submit" disabled={busy}>
+    <form onSubmit={submit} className="form">
+      <h1>Sign in</h1>
+      <p className="muted">Use the bootstrap admin credentials.</p>
+      <div className="field">
+        <label htmlFor="signin-email">Email</label>
+        <input
+          id="signin-email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          autoComplete="username"
+          required
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="signin-password">Password</label>
+        <input
+          id="signin-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          autoComplete="current-password"
+          required
+        />
+      </div>
+      {error && <p className="field-error">{error}</p>}
+      <Button type="submit" variant="primary" disabled={busy}>
         {busy ? "Signing in…" : "Continue"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -3,6 +3,7 @@ package com.company.secscan.scan;
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.scan.api.ScanWarningView;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,5 +42,22 @@ public class ScanController {
     @GetMapping("/scans/{scanId}")
     public ScanDetailView get(@PathVariable UUID scanId) {
         return service.get(scanId);
+    }
+
+    /** All scans in the workspace, newest first (OD-14 item 2). */
+    @GetMapping("/scans")
+    public PagedResponse<ScanView> listAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return service.listAll(page, size);
+    }
+
+    /** One scan's scan-health warnings (OD-14 item 2). */
+    @GetMapping("/scans/{scanId}/warnings")
+    public PagedResponse<ScanWarningView> warnings(
+            @PathVariable UUID scanId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return service.listWarnings(scanId, page, size);
     }
 }
