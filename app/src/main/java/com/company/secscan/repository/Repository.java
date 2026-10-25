@@ -40,6 +40,17 @@ public class Repository {
     @Column(name = "default_branch")
     private String defaultBranch;
 
+    // The branch to clone for this repository; NULL = follow the GitLab default branch (D-076). The actual
+    // cloned branch is snapshotted onto scan.branch at enqueue.
+    @Column(name = "scan_branch")
+    private String scanBranch;
+
+    // Set true when the last pre-clone check found the configured branch gone in GitLab (A5); cleared when a
+    // scan clones successfully or the branch is changed to an existing one (PATCH). Drives the UI "branch
+    // missing — choose another" warning (RepositoryView.branchMissing).
+    @Column(name = "branch_missing", nullable = false)
+    private boolean branchMissing = false;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
 
@@ -151,6 +162,35 @@ public class Repository {
         this.languages = languages == null ? new ArrayList<>() : new ArrayList<>(languages);
     }
 
+    /**
+     * Sets the branch to scan (D-076). {@code null} = follow the GitLab default branch. The caller validates the
+     * name and its existence in GitLab first. Changing the branch clears any stale branch-missing flag.
+     */
+    public void setScanBranch(String scanBranch) {
+        this.scanBranch = scanBranch;
+        this.branchMissing = false;
+    }
+
+    /** Updates the stored GitLab default branch (A6: on an enqueue-time refresh). No status change. */
+    public void updateDefaultBranch(String defaultBranch) {
+        this.defaultBranch = defaultBranch;
+    }
+
+    /** The branch the next scan will clone: the configured scan branch, or the GitLab default when unset. */
+    public String effectiveBranch() {
+        return scanBranch != null ? scanBranch : defaultBranch;
+    }
+
+    /** A5: the configured branch was gone at the last pre-clone check. */
+    public void markBranchMissing() {
+        this.branchMissing = true;
+    }
+
+    /** Clears the branch-missing flag (a successful clone). */
+    public void clearBranchMissing() {
+        this.branchMissing = false;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -173,6 +213,14 @@ public class Repository {
 
     public String getDefaultBranch() {
         return defaultBranch;
+    }
+
+    public String getScanBranch() {
+        return scanBranch;
+    }
+
+    public boolean isBranchMissing() {
+        return branchMissing;
     }
 
     public boolean isActive() {

@@ -25,6 +25,11 @@ public class TriageEvent {
     public static final String REASON_SEEN = "SEEN";
     public static final String REASON_REOPENED = "REOPENED";
     public static final String REASON_SOLVED_NOT_DETECTED = "SOLVED_NOT_DETECTED";
+    // D-076: a close/reopen caused by a branch switch (re-baseline), NOT a real fix or a genuine re-detection.
+    // A LIFECYCLE reason (like the three above), distinct from the auto-ignore reason codes in
+    // core.triage.ReasonCode (so CLAUDE.md hard rule 5's list is unchanged). Excluded from "Solved · 7d" and any
+    // future fix/MTTR metric.
+    public static final String REASON_BRANCH_CHANGED = "BRANCH_CHANGED";
 
     // M7: the reason written when a finding leaves `ignored` because its ignore was removed or its cause cleared
     // (manual unignore, a revoked .secscan.yml rule, or an auto-ignore whose cause is gone). Distinct from the

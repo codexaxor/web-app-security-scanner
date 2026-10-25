@@ -357,4 +357,11 @@ insert into triage_event (id, workspace_id, sub_issue_id, from_status, to_status
   (gen_random_uuid(), '00000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000099',
    'open', 'ignored', 'system', now());
 
+-- M8.1 (D-076): give seeded scans a branch (so the Dashboard Branch column is populated) and put web-portal on a
+-- non-default scan branch (so a repo row shows "· dev"). Additive updates only — no row counts change.
+update scan set branch = 'main' where branch is null;
+update repository set scan_branch = 'dev' where path_with_namespace = 'acme/web-portal';
+update scan set branch = 'dev'
+ where repository_id = (select id from repository where path_with_namespace = 'acme/web-portal');
+
 commit;

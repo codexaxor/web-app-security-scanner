@@ -125,7 +125,7 @@ class ProjectConnectionIT extends AbstractGitLabIT {
         assertThat(page.content().get(0).gitlabProjectId()).isEqualTo(PROJECT_ID);
         assertThat(page.content().get(0).selectable()).isTrue();
 
-        List<RepositoryView> selected = repositoryService.select(connId, List.of(PROJECT_ID));
+        List<RepositoryView> selected = repositoryService.select(connId, List.of(PROJECT_ID)).repositories();
         assertThat(selected).singleElement()
                 .satisfies(v -> {
                     assertThat(v.gitlabProjectId()).isEqualTo(PROJECT_ID);

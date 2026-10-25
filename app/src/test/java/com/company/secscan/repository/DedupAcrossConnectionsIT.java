@@ -90,11 +90,11 @@ class DedupAcrossConnectionsIT extends AbstractGitLabIT {
         CountDownLatch start = new CountDownLatch(1);
         Callable<List<RepositoryView>> viaGroup = () -> {
             start.await();
-            return repositoryService.select(groupConn, List.of(PROJECT_ID));
+            return repositoryService.select(groupConn, List.of(PROJECT_ID)).repositories();
         };
         Callable<List<RepositoryView>> viaProject = () -> {
             start.await();
-            return repositoryService.select(projectConn, List.of(PROJECT_ID));
+            return repositoryService.select(projectConn, List.of(PROJECT_ID)).repositories();
         };
         try {
             Future<List<RepositoryView>> f1 = pool.submit(viaGroup);

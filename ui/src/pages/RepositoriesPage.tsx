@@ -87,8 +87,14 @@ export default function RepositoriesPage() {
                   <td>
                     <div className="row">
                       <RepoName path={r.pathWithNamespace} showPath />
+                      {r.effectiveBranch ? (
+                        <span className="muted branch-label">· {r.effectiveBranch}</span>
+                      ) : null}
                       {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
                     </div>
+                    {r.branchMissing ? (
+                      <span className="expiry-warn">branch missing — choose another</span>
+                    ) : null}
                     {r.warningCount > 0 && r.lastScan ? (
                       <button
                         className="btn btn-ghost btn-sm chip-warn-link"

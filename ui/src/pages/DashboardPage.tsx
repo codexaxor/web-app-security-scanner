@@ -138,6 +138,7 @@ export default function DashboardPage() {
             <thead>
               <tr>
                 <th>Repository</th>
+                <th>Branch</th>
                 <th>Trigger</th>
                 <th>Status</th>
                 <th>Duration</th>
@@ -150,6 +151,7 @@ export default function DashboardPage() {
                   <td>
                     <RepoName path={repoById.get(s.repositoryId) ?? s.repositoryId} />
                   </td>
+                  <td>{s.branch ?? <span className="muted">—</span>}</td>
                   <td>{s.trigger}</td>
                   <td>
                     <ScanStatusChip status={s.status} />

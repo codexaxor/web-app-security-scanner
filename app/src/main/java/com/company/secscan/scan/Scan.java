@@ -52,6 +52,11 @@ public class Scan {
     @Column(name = "commit_sha")
     private String commitSha;
 
+    // The branch actually cloned for this scan, snapshotted at enqueue and never re-read later (D-076). Null for
+    // legacy rows with no known branch.
+    @Column(name = "branch")
+    private String branch;
+
     @Column(name = "status", nullable = false)
     private String status = STATUS_QUEUED;
 
@@ -83,16 +88,22 @@ public class Scan {
         // for JPA
     }
 
-    private Scan(UUID workspaceId, UUID repositoryId, String trigger) {
+    private Scan(UUID workspaceId, UUID repositoryId, String trigger, String branch) {
         this.workspaceId = workspaceId;
         this.repositoryId = repositoryId;
         this.trigger = trigger;
+        this.branch = branch;
         this.status = STATUS_QUEUED;
     }
 
-    /** A manually triggered scan (Start Scan button). */
+    /** A manually triggered scan (Start Scan button) cloning {@code branch} (snapshotted at enqueue, D-076). */
+    public static Scan manual(UUID workspaceId, UUID repositoryId, String branch) {
+        return new Scan(workspaceId, repositoryId, TRIGGER_MANUAL, branch);
+    }
+
+    /** A manually triggered scan with no known branch (legacy/test convenience). */
     public static Scan manual(UUID workspaceId, UUID repositoryId) {
-        return new Scan(workspaceId, repositoryId, TRIGGER_MANUAL);
+        return new Scan(workspaceId, repositoryId, TRIGGER_MANUAL, null);
     }
 
     public void markRunning() {
@@ -150,6 +161,10 @@ public class Scan {
 
     public String getCommitSha() {
         return commitSha;
+    }
+
+    public String getBranch() {
+        return branch;
     }
 
     public String getStatus() {

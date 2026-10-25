@@ -114,6 +114,13 @@ public class ReconcileService {
             }
         }
 
+        // D-076 re-baseline: a scanner whose branch differs from the branch at which it last successfully closed
+        // findings is re-baselining this scan — its switch-caused closes/reopens get REASON_BRANCH_CHANGED (not a
+        // fix / not a genuine re-detection). Only scanners that succeeded this scan can re-baseline, and only when
+        // both branches are known and differ. A failed scanner never advanced its last-closing branch, so it
+        // re-baselines on its NEXT success automatically (nothing is lost).
+        Set<String> rebaselineScanners = rebaselineScanners(scan, solvableScanners);
+
         List<ScanFinding> scanFindings = findings.findByScanId(scanId);
         Map<String, ScanFinding> findingByFp = new HashMap<>();
         List<Incoming> incoming = new ArrayList<>();
@@ -170,8 +177,10 @@ public class ReconcileService {
             copyDescriptive(findByFp(findingByFp, fp), sub);
             collectUnmapped(scorer.score(sub, sensitivity, triage.epssAutoIgnoreEnabled()), unmappedSecretRules);
             subIssues.save(sub);
+            String reason = rebaselineScanners.contains(sub.getScanner())
+                    ? TriageEvent.REASON_BRANCH_CHANGED : TriageEvent.REASON_REOPENED;
             events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_SOLVED,
-                    SubIssue.STATUS_OPEN, TriageEvent.REASON_REOPENED, scanId));
+                    SubIssue.STATUS_OPEN, reason, scanId));
             touchedGroups.add(sub.getGroupId());
         }
         for (String fp : plan.seen()) {
@@ -189,8 +198,10 @@ public class ReconcileService {
             SubIssue sub = subByFp.get(fp);
             sub.solve();
             subIssues.save(sub);
+            String reason = rebaselineScanners.contains(sub.getScanner())
+                    ? TriageEvent.REASON_BRANCH_CHANGED : TriageEvent.REASON_SOLVED_NOT_DETECTED;
             events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_OPEN,
-                    SubIssue.STATUS_SOLVED, TriageEvent.REASON_SOLVED_NOT_DETECTED, scanId));
+                    SubIssue.STATUS_SOLVED, reason, scanId));
             touchedGroups.add(sub.getGroupId());
         }
 
@@ -281,6 +292,31 @@ public class ReconcileService {
                     frozen.size());
         }
         return frozen;
+    }
+
+    /**
+     * The scanners re-baselining this scan (D-076): those that ran successfully AND whose last successful
+     * closing branch is known and differs from this scan's branch. When the scan has no branch, or a scanner has
+     * no prior closing scan, it does not re-baseline.
+     */
+    private Set<String> rebaselineScanners(Scan scan, Set<String> solvableScanners) {
+        String currentBranch = scan.getBranch();
+        if (currentBranch == null) {
+            return Set.of();
+        }
+        Set<String> rebaselining = new HashSet<>();
+        for (String scanner : solvableScanners) {
+            String priorBranch = scans.findLastClosingBranch(
+                    scan.getWorkspaceId(), scan.getRepositoryId(), scanner, scan.getId());
+            if (priorBranch != null && !priorBranch.equals(currentBranch)) {
+                rebaselining.add(scanner);
+            }
+        }
+        if (!rebaselining.isEmpty()) {
+            log.info("Scan {} re-baselines scanner(s) {} (closes/reopens → BRANCH_CHANGED).",  // N-2: ids, no branch name
+                    scan.getId(), rebaselining);
+        }
+        return rebaselining;
     }
 
     private IssueGroup upsertGroup(UUID workspaceId, UUID repositoryId, ScanFinding f) {
