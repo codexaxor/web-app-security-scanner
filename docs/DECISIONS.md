@@ -14,6 +14,41 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-075 M8 "Done when" verified on 2 repos (1 real + 1 fixture); 3-real-repo walkthrough → M8.5 (OD-21) (2026-10-25, accepted)
+Context: SPEC M8 "Done when" is "Walkthrough on 3 real repos matches API numbers". Sajal's real-data walkthrough
+(2026-10-22..25) was run against **core-keycloak** (a real GitLab repo) and **secscan-test-secrets** (a synthetic
+fixture), not three real repos. Every acceptance invariant was confirmed on that data (SQL = API = UI; the
+sub_issue status counts as oracle through ignore / EPSS On+Off / manual scan / unignore — see `docs/reports/M8.md`
+"Done-when check").
+Decision (OD-21 = option B — accept the deviation, finish M8, carry the shortfall): finish M8 on the two-repo
+walkthrough; onboarding and verifying **ib-api-v2** and a **third real repo** against the same invariants is the
+**first task of M8.5**. The M8 row in SPEC gets a note pointing here.
+Consequences: M8 ships with its UI and read models proven on real + fixture data; the literal "3 real repos" bar
+is met early in M8.5, not in M8. No code or behavior changes from this decision.
+
+## D-074 Finding taxonomy (level-2 categories + optional OWASP tags) is M8.5, not M8 (OD-20) (2026-10-25, accepted)
+Context: S10f shipped plain-English **level-1** type names everywhere (`ui/src/lib/labels.ts`: "Vulnerable
+dependency", "Hardcoded secret", "Insecure code", "Infrastructure misconfiguration", "End-of-life runtime").
+A richer **level-2** taxonomy (categories derived from CWE / secret type / IaC platform / ecosystem, plus optional
+OWASP Top 10 2025 tags) was discussed during the walkthrough.
+Decision (OD-20 = option A): the level-2 taxonomy is a **milestone M8.5** item with its own SPEC section and its
+own migration (**V20**; note V19 stays reserved for the IaC override already planned). Level-1 names are done and
+remain as shipped in S10f.
+Consequences: no taxonomy columns/migration land in M8; M8.5 owns the schema and SPEC text.
+
+## D-073 Duplicate-ignored-findings fix (OD-19) scheduled for M8.5 (2026-10-25, accepted)
+Context: `docs/reports/M8-S10b-duplicate-ignored-sast.md` root-caused OD-19 — absent-but-ignored findings
+accumulate forever after a fingerprint/snippet-hash shift, because reconcile's solve step is gated on
+`status='open'`, so a vanished *ignored* fingerprint is never closed while the new one is re-ignored. Open findings
+do not accumulate. The proposed fix touches reconcile/the D-063 resolver (domain rule 3), so it needed a human
+decision and was not built in M8.
+Decision: schedule OD-19 for **M8.5**. The fix = (1) solve an *ignored* finding absent from a scanner-complete
+scan when its hold is re-derivable, routed through the D-063 resolver and writing a `triage_event`; (2) a one-off
+maintenance pass (no migration) to retire rows already accumulated; (3) optionally reduce SAST fingerprint churn
+with a structural match key. Not a security issue (the live finding is tracked correctly; surplus rows are stale
+ignored clutter).
+Consequences: tracked as an M8.5 work item with a known root cause; no M8 reconcile change.
+
 ## D-072 M8 test tooling, dev-only, never in the runtime image (OD-18) (2026-10-22, accepted)
 Context: M8 needs unit/component tests and browser E2E, but the SPA runtime image must stay minimal and the
 host is missing 3 Chromium shared libs (libxcomposite1/libxdamage1/libxrandr1; installing needs sudo).
@@ -1120,18 +1155,44 @@ Decision: `workspace_id` on every business table from day one.
   - **M3 gap "issues of an inactive repository stay open"** — resolved by OD-15/D-070 DISPLAY rules: an inactive
     repo keeps its statuses (reconcile never runs) but its groups/sub-issues are excluded from Feed/Dashboard
     totals by default, shown behind an "Inactive" filter + a visible "N inactive repos, M open findings" line.
-  - **OD-19 PROPOSED (not built in M8; investigation in `docs/reports/M8-S10b-duplicate-ignored-sast.md`):**
+  - **OD-19 → M8.5 (D-073; investigation in `docs/reports/M8-S10b-duplicate-ignored-sast.md`):**
     duplicate *ignored* sub-issues accumulate when a finding's fingerprint changes while it is ignored. Root
     cause: the SAST fingerprint includes the normalized-snippet hash (scanner-computed), which shifts when the
     Opengrep binary/rule bundle or the normalization algorithm changes (as it did on 2026-10-20, M6 `/review-pr`);
     reconcile's solve step is gated on `status='open'` (`Reconciler.java:95`), so the vanished old fingerprint is
     not closed ("ignored stays ignored") while the new one is re-ignored → two ignored rows. **Open findings do
-    NOT accumulate** (missing open → solved). Proposed fix (touches reconcile/resolver = domain rule 3, so human
-    decision): (1) solve an *ignored* finding that is absent from a scanner-complete scan when its hold is
+    NOT accumulate** (missing open → solved). Fix (scheduled M8.5, touches reconcile/resolver = domain rule 3):
+    (1) solve an *ignored* finding that is absent from a scanner-complete scan when its hold is
     re-derivable (auto cause or rule/path/CVE-scope), routed through the D-063 resolver, writing a `triage_event`;
     (2) a one-off maintenance pass (no migration) to retire the rows already accumulated; (3) optionally reduce
     SAST fingerprint churn with a structural match key. Not a security issue (the live finding is tracked
     correctly; surplus rows are stale ignored clutter).
+  - **OD-20 Finding taxonomy → M8.5 (D-074):** level-2 categories (from CWE / secret type / IaC platform /
+    ecosystem) + optional OWASP Top 10 2025 tags. New SPEC section + migration **V20** (V19 stays reserved for the
+    IaC override). Level-1 plain names already shipped in S10f (`ui/src/lib/labels.ts`).
+  - **OD-21 3-real-repo walkthrough → M8.5 (D-075):** M8 "Done when" was met on core-keycloak (real) +
+    secscan-test-secrets (fixture); onboarding + verifying **ib-api-v2** and a **3rd real repo** is the first M8.5
+    task.
+  - **IaC Checkov `check_name` ingest → later:** ingest Checkov's human-readable `check_name` so IaC titles are
+    human, not raw rule ids.
+  - **Languages refresh on each scan → later:** re-derive a repository's detected languages on every scan (today
+    they are not refreshed per scan).
+  - **Side panel less repetitive → later:** group affected locations more compactly in the side panel.
+  - **Theme (light/dark) preference persistence → M10 (user settings):** the S10e light theme is not yet persisted
+    per user; it lands with M10 user settings.
+  - **Known issue — stale `issue_group.severity_score` on all-ignored groups (report evidence only, investigate):**
+    the side-panel header reads the `issue_group.severity_score` column raw (`SubIssuePanel.tsx` →
+    `IssueService.getGroup` → `IssueGroupView.of`). `GroupRollupService` defines that column as *max over the
+    currently-OPEN sub-issues* (null when none are open), so a correctly-recomputed all-ignored group is null and
+    the UI's `SeverityPill` then renders a neutral "—" (D-068). But every API-time maintenance path only recomputes
+    groups that still have an open sub-issue — the re-score job builds `touchedGroups` from OPEN subs only
+    (`ReScoreService.rescoreWorkspace`), the EPSS sweep recomputes only groups `touched` by that sweep
+    (`WorkspaceSettingsService`), manual triage only `touched` groups (`TriageService`). So the invariant
+    "all-ignored ⇒ severity_score null" is re-asserted *only* by a scan-time reconcile of that group; between
+    scans a group that reaches all-ignored can keep a stale non-null band. Observed in the walkthrough:
+    org.postgresql:postgresql (core-keycloak) header showed "Medium 65" while both its findings were ignored
+    (Medium 65 + High 82). Display-only staleness, not a data-integrity bug (sub-issue statuses and Feed band
+    totals are correct). Full write-up in `docs/reports/M8.md`.
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.

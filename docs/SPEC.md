@@ -371,7 +371,7 @@ locally.
 | M5 | Scoring | Base scores, KEV + EPSS sync, adjustments, `score_breakdown`, fix time, CWE phrase table, re-score job | A KEV-listed CVE scores +5 with the reason visible in the API |
 | M6 | SAST, IaC, EOL | Opengrep with pinned rules + custom Spring/.NET rules; Checkov; EOL detector + sync | Each fixture triggers its expected rule; an old Spring Boot version raises an EOL issue |
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
-| M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers |
+| M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
 | M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner | A new commit is scanned within 15 min; nightly run completes for all repos |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 
