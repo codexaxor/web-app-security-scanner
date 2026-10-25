@@ -29,7 +29,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -57,12 +59,14 @@ public class RepositoryService {
     // api-only bean (@Profile("api")); injected via a provider so the worker, which also creates this service,
     // starts without it. patch() runs only from the api controller, where the provider resolves.
     private final org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore;
+    private final TransactionTemplate txTemplate;
 
     public RepositoryService(GitLabClient client, GitlabConnectionRepository connections,
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
                              RepositoryUpserter upserter, TokenCipherHolder cipher,
                              RepositorySummaryService summaries,
-                             org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore) {
+                             org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore,
+                             PlatformTransactionManager txManager) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
@@ -71,6 +75,7 @@ public class RepositoryService {
         this.cipher = cipher;
         this.summaries = summaries;
         this.reScore = reScore;
+        this.txTemplate = new TransactionTemplate(txManager);
     }
 
     /**
@@ -122,9 +127,10 @@ public class RepositoryService {
         Map<Long, GitLabProject> byId = exposedProjects(conn, token).stream()
                 .collect(Collectors.toMap(GitLabProject::id, Function.identity()));
 
-        // Which submitted projects were ALREADY repositories before this call (B1 honest counts).
-        Set<Long> alreadySelectedBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
-                .map(Repository::getGitlabProjectId).collect(Collectors.toSet());
+        // State of each existing repository BEFORE this call (B1/SF-3 honest counts): present+active →
+        // "already selected"; present+inactive/detached → "reactivated"; absent → "added".
+        Map<Long, Boolean> activeBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .collect(Collectors.toMap(Repository::getGitlabProjectId, Repository::isActive));
 
         Set<Long> ids = Set.copyOf(gitlabProjectIds);
         // Validate the whole batch before writing anything, so a bad id selects nothing.
@@ -146,19 +152,23 @@ public class RepositoryService {
 
         List<RepositoryView> result = new ArrayList<>();
         int added = 0;
+        int reactivated = 0;
         int already = 0;
         for (Long id : ids) {
             GitLabProject p = byId.get(id);
             List<String> languages = safeLanguages(conn, token, id);
             Repository repo = upsertWithRaceRecovery(conn.getId(), id, p, languages);
             result.add(RepositoryView.of(repo, ownerOf(repo)));
-            if (alreadySelectedBefore.contains(id)) {
+            Boolean wasActive = activeBefore.get(id);
+            if (wasActive == null) {
+                added++;
+            } else if (wasActive) {
                 already++;
             } else {
-                added++;
+                reactivated++;    // was inactive/detached → the upsert reattaches + activates it (D-020)
             }
         }
-        return new SelectResult(added, already, result);
+        return new SelectResult(added, reactivated, already, result);
     }
 
     /**
@@ -221,23 +231,76 @@ public class RepositoryService {
      * still has a connection, else 409. A repository outside the workspace → 404.
      */
     /** Settings patch with no scan-branch change (convenience for callers that only touch other fields). */
-    @Transactional
     public RepositoryView patch(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active) {
         return patch(repositoryId, sensitivity, includeDevDeps, active, null);
     }
 
-    @Transactional
+    /**
+     * SF-2: no GitLab I/O inside a transaction. Phase 1 (no tx) parses + validates the scan-branch change,
+     * including the authoritative GitLab existence check; Phase 2 is a short write transaction that re-checks
+     * active and applies every field; Phase 3 re-scores (its own tx, D-049) and builds the view.
+     */
     public RepositoryView patch(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active,
                                 JsonNode scanBranch) {
-        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
-        boolean rescoreNeeded = false;
-
-        if (scanBranch != null) {                 // key present in the request body
-            applyScanBranch(repo, scanBranch);
-            log.info("Repository {} scanBranch set", repositoryId);
+        BranchOp branchOp = resolveBranchOp(repositoryId, scanBranch);   // no transaction; may do the GitLab call
+        boolean rescoreNeeded = Boolean.TRUE.equals(txTemplate.execute(status ->
+                applyPatchTx(repositoryId, sensitivity, includeDevDeps, active, branchOp)));
+        if (rescoreNeeded) {
+            // Immediate, score-only re-score through the existing D-049 path: 0 triage_event, no status change.
+            reScore.getObject().rescoreRepository(WORKSPACE, repositoryId);
         }
+        Repository repo = requireRepo(repositoryId);
+        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
+        return RepositoryView.of(repo, conn,
+                summaries.summaryOrEmpty(summaries.summariesByRepo(WORKSPACE), repositoryId));
+    }
 
+    private enum BranchOpKind { NONE, RESET, SET }
+
+    private record BranchOp(BranchOpKind kind, String value) {
+        static final BranchOp NONE = new BranchOp(BranchOpKind.NONE, null);
+        static final BranchOp RESET = new BranchOp(BranchOpKind.RESET, null);
+        static BranchOp set(String v) { return new BranchOp(BranchOpKind.SET, v); }
+    }
+
+    /**
+     * Phase 1 (no transaction, D-076): decide the scan-branch change and validate a SET against git ref-format
+     * AND existence in GitLab. JSON {@code null} resets to the default; a string sets after validation; any other
+     * JSON type is 400. Setting a non-null branch on an inactive repo is 409; a repo outside the workspace is 404.
+     */
+    private BranchOp resolveBranchOp(UUID repositoryId, JsonNode scanBranch) {
+        if (scanBranch == null) {
+            return BranchOp.NONE;                 // key absent → leave unchanged
+        }
+        if (scanBranch.isNull()) {
+            return BranchOp.RESET;                // explicit null → follow the GitLab default again
+        }
+        if (!scanBranch.isTextual()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "scanBranch must be a string or null.");
+        }
+        Repository repo = requireRepo(repositoryId);   // read-only load (404 if outside the workspace)
+        if (!repo.isActive()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Set the scan branch while the repository is active.");
+        }
+        String branch = scanBranch.asText();
+        if (!BranchName.isValid(branch)) {
+            throw new GitLabException(GitLabError.BRANCH_NOT_FOUND, "Not a valid branch name.");
+        }
+        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
+        if (conn != null && !isLocal(conn)) {
+            // Authoritative existence check OUTSIDE any transaction (SF-2). GitLab 404 → BRANCH_NOT_FOUND (→ 400).
+            String token = cipher.require().decrypt(conn.getTokenCiphertext());
+            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+        }
+        return BranchOp.set(branch);
+    }
+
+    /** Phase 2 (short write transaction): re-check active and apply every field. Returns whether to re-score. */
+    private boolean applyPatchTx(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active,
+                                 BranchOp branchOp) {
+        Repository repo = requireRepo(repositoryId);   // re-load inside the write tx
+        boolean rescoreNeeded = false;
         if (sensitivity != null) {
             if (!SENSITIVITIES.contains(sensitivity)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -255,46 +318,20 @@ public class RepositoryService {
             applyActivation(repo, active);
             log.info("Repository {} active set", repositoryId);
         }
+        switch (branchOp.kind()) {
+            case RESET -> repo.setScanBranch(null);
+            case SET -> {
+                if (!repo.isActive()) {    // re-check in the write tx (a concurrent change may have deactivated it)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Set the scan branch while the repository is active.");
+                }
+                repo.setScanBranch(branchOp.value());
+                log.info("Repository {} scanBranch set", repositoryId);
+            }
+            case NONE -> { /* unchanged */ }
+        }
         repositories.save(repo);
-
-        if (rescoreNeeded) {
-            // Immediate, score-only re-score through the existing D-049 path: 0 triage_event, no status change.
-            reScore.getObject().rescoreRepository(WORKSPACE, repositoryId);
-        }
-        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
-        RepositorySummaryService.RepositorySummary summary =
-                summaries.summaryOrEmpty(summaries.summariesByRepo(WORKSPACE), repositoryId);
-        return RepositoryView.of(repo, conn, summary);
-    }
-
-    /**
-     * Applies a {@code scanBranch} change (D-076). JSON {@code null} resets to the default branch; a string sets
-     * the branch after validating its name (git ref-format) and existence in GitLab (the authoritative check);
-     * any other JSON type is a 400. Setting a non-null branch on an inactive repository is a 409.
-     */
-    private void applyScanBranch(Repository repo, JsonNode scanBranch) {
-        if (scanBranch.isNull()) {
-            repo.setScanBranch(null);             // follow the GitLab default branch again
-            return;
-        }
-        if (!scanBranch.isTextual()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "scanBranch must be a string or null.");
-        }
-        if (!repo.isActive()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Set the scan branch while the repository is active.");
-        }
-        String branch = scanBranch.asText();
-        if (!BranchName.isValid(branch)) {
-            throw new GitLabException(GitLabError.BRANCH_NOT_FOUND, "Not a valid branch name.");
-        }
-        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
-        if (conn != null && !isLocal(conn)) {
-            // Authoritative existence check: GitLab 404 → BRANCH_NOT_FOUND (→ 400). Token never logged.
-            String token = cipher.require().decrypt(conn.getTokenCiphertext());
-            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
-        }
-        repo.setScanBranch(branch);
+        return rescoreNeeded;
     }
 
     private Repository requireRepo(UUID repositoryId) {

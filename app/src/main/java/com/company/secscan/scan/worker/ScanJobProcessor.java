@@ -143,12 +143,24 @@ public class ScanJobProcessor {
             if (!probeProvisionalAccess(repo, conn, token, workspaceId, jobId, scan.getId())) {
                 return;
             }
-            // A5 (D-076): verify the configured branch still exists BEFORE cloning. A definitive 404 fails the
-            // scan cleanly (no reconcile, closes nothing) and flags the repository branch-missing.
-            if (!isLocal(conn) && scan.getBranch() != null
-                    && !branchExists(repo, conn, token, scan.getBranch())) {
-                state.failBranchMissing(workspaceId, jobId, scan.getId(), repo.getId(), scan.getBranch());
-                return;
+            // A5 (D-076) / SF-4: verify the configured branch BEFORE cloning, disambiguating a GitLab 404.
+            if (!isLocal(conn) && scan.getBranch() != null) {
+                switch (branchVerdict(repo, conn, token, scan.getBranch())) {
+                    case MISSING -> {
+                        // Definite branch-not-found (project reachable): fail cleanly, flag branch-missing.
+                        state.failBranchMissing(workspaceId, jobId, scan.getId(), repo.getId(), scan.getBranch());
+                        return;
+                    }
+                    case PROJECT_UNREACHABLE -> {
+                        // Project 404 / no access: a distinct failure, NOT branch-missing.
+                        state.failPermanently(workspaceId, jobId, scan.getId(), "PROJECT_UNREACHABLE",
+                                "project not reachable while verifying the scan branch");
+                        return;
+                    }
+                    default -> {
+                        // OK, or a transient GitLab error (5xx / timeout / rate-limited): proceed with the clone.
+                    }
+                }
             }
             Path tokenFile = token == null ? null : ws.writeToken(token);
             ScannerLaunchSpec spec = buildSpec(scan, repo, conn, ws, tokenFile);
@@ -258,17 +270,36 @@ public class ScanJobProcessor {
         return conn.getBaseUrl() != null && conn.getBaseUrl().startsWith("file:");
     }
 
+    /** The pre-clone branch check outcome (SF-4). */
+    enum BranchVerdict { OK, MISSING, PROJECT_UNREACHABLE, TRANSIENT }
+
     /**
-     * A5 (D-076): whether the branch exists in GitLab. A definitive 404 ({@link GitLabError#BRANCH_NOT_FOUND})
-     * means missing. Any transient GitLab error (unreachable, rate-limited) is NOT treated as missing — the
-     * clone attempt proceeds (and may itself fail/retry) rather than wrongly flagging the branch gone.
+     * A5 (D-076) / SF-4: classify the configured branch before cloning, disambiguating GitLab's 404 (which it
+     * returns for BOTH a missing branch and a missing/unreadable project):
+     * <ul>
+     *   <li>{@code getBranch} OK → {@link BranchVerdict#OK};</li>
+     *   <li>{@code getBranch} 404 ({@link GitLabError#BRANCH_NOT_FOUND}) AND the project IS reachable
+     *       ({@code getProject} OK) → {@link BranchVerdict#MISSING} (definite branch-not-found);</li>
+     *   <li>{@code getBranch} 404 but the project is NOT reachable ({@code getProject} throws: 404 / no access /
+     *       error) → {@link BranchVerdict#PROJECT_UNREACHABLE} (do NOT flag branch-missing);</li>
+     *   <li>any other {@code getBranch} error (5xx / timeout / rate-limited / redirect) →
+     *       {@link BranchVerdict#TRANSIENT} (proceed with the clone rather than wrongly flagging the branch gone).</li>
+     * </ul>
      */
-    private boolean branchExists(Repository repo, GitlabConnection conn, String token, String branch) {
+    BranchVerdict branchVerdict(Repository repo, GitlabConnection conn, String token, String branch) {
         try {
             client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
-            return true;
+            return BranchVerdict.OK;
         } catch (GitLabException e) {
-            return e.getError() != GitLabError.BRANCH_NOT_FOUND;
+            if (e.getError() != GitLabError.BRANCH_NOT_FOUND) {
+                return BranchVerdict.TRANSIENT;
+            }
+            try {
+                client.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId());
+                return BranchVerdict.MISSING;              // project reachable, branch genuinely gone
+            } catch (GitLabException projectError) {
+                return BranchVerdict.PROJECT_UNREACHABLE;  // 404 was the project / no access, not the branch
+            }
         }
     }
 

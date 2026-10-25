@@ -172,7 +172,7 @@ public class IssueService {
             return Map.of();
         }
         Map<UUID, String> byScan = new java.util.HashMap<>();
-        for (var scan : scans.findAllById(scanIds)) {
+        for (var scan : scans.findByWorkspaceIdAndIdIn(WORKSPACE, scanIds)) {   // B-1: workspace-scoped (rule 1)
             byScan.put(scan.getId(), scan.getBranch());
         }
         return byScan;

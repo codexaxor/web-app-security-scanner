@@ -313,8 +313,8 @@ public class ReconcileService {
             }
         }
         if (!rebaselining.isEmpty()) {
-            log.info("Scan {} re-baselines scanner(s) {} onto branch {} (closes/reopens → BRANCH_CHANGED).",
-                    scan.getId(), rebaselining, currentBranch);
+            log.info("Scan {} re-baselines scanner(s) {} (closes/reopens → BRANCH_CHANGED).",  // N-2: ids, no branch name
+                    scan.getId(), rebaselining);
         }
         return rebaselining;
     }

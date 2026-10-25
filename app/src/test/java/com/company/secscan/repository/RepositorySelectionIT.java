@@ -130,6 +130,23 @@ class RepositorySelectionIT extends AbstractGitLabIT {
     }
 
     @Test
+    void reselectingADetachedRepositoryReactivatesItAndCountsItReactivated() {   // SF-3 / D-020
+        repositoryService.select(connId, List.of(101L));                    // added, active
+        Repository repo = repositories.findByWorkspaceIdAndGitlabProjectId(Workspace.DEFAULT_ID, 101L)
+                .orElseThrow();
+        repo.detachAndDeactivate("NO_ACCESSIBLE_CONNECTION");                // its connection was removed
+        repositories.save(repo);
+
+        var result = repositoryService.select(connId, List.of(101L));       // re-selected through a connection
+
+        assertThat(result.reactivated()).isEqualTo(1);
+        assertThat(result.added()).isZero();
+        assertThat(result.alreadySelected()).isZero();
+        assertThat(repositories.findByWorkspaceIdAndGitlabProjectId(Workspace.DEFAULT_ID, 101L)
+                .orElseThrow().isActive()).isTrue();
+    }
+
+    @Test
     void labelsUnreadableCodeHonestlyNotEmpty() {   // B2
         // Override the group-projects stub with a project that has code but an unreadable default branch.
         gitlab.stubProjects(GROUP_ID, "[{\"id\":201,\"path_with_namespace\":\"services/locked\","

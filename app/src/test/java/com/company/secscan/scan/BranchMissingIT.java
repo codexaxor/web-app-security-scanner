@@ -54,31 +54,55 @@ class BranchMissingIT extends AbstractScanWorkerIT {
         }
     }
 
-    @Test
-    void aMissingBranchFailsBeforeCloningAndClosesNothing() {
+    private Repository seed(long projectId, String branch) {
         gitlab = new GitLabWireMock();
-        gitlab.stubBranchStatus(9301L, "ghost", 404);   // the configured branch was deleted in GitLab
         String ciphertext = cipher.require().encrypt("glpat-test-token");
         GitlabConnection conn = connections.save(GitlabConnection.forGroup(
-                WORKSPACE, gitlab.baseUrl(), "svc", 9301L, ciphertext, "read_api,read_repository", null));
-        Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 9301L, "svc/app", "main",
+                WORKSPACE, gitlab.baseUrl(), "svc", projectId, ciphertext, "read_api,read_repository", null));
+        Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), projectId, "svc/app", "main",
                 List.of("Java")));
-        repo.setScanBranch("ghost");
+        repo.setScanBranch(branch);
         repositories.save(repo);
+        return repo;
+    }
 
+    private Scan runAndGet(Repository repo) {
         ScanView scan = scanService.startManual(repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
+        return scans.findById(scan.id()).orElseThrow();
+    }
 
-        Scan finished = scans.findById(scan.id()).orElseThrow();
+    @Test
+    void aMissingBranchFailsBeforeCloningAndClosesNothing() {   // SF-4: branch 404 but project reachable
+        Repository repo = seed(9301L, "ghost");
+        gitlab.stubBranchStatus(9301L, "ghost", 404);           // branch gone
+        gitlab.stubProjectById(9301L,
+                "{\"id\":9301,\"path_with_namespace\":\"svc/app\",\"default_branch\":\"main\",\"empty_repo\":false}");
+
+        Scan finished = runAndGet(repo);
+
         assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_FAILED);
         assertThat(finished.getFailReason()).isEqualTo("BRANCH_NOT_FOUND");
         assertThat(finished.getReconciledAt()).isNull();                 // no reconcile → closes nothing
-        assertThat(warnings.findByScanId(scan.id())).anySatisfy(w -> {
+        assertThat(warnings.findByScanId(finished.getId())).anySatisfy(w -> {
             assertThat(w.getCode()).isEqualTo("BRANCH_NOT_FOUND");
             assertThat(w.getMessage()).contains("ghost");
         });
         assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isTrue();
+    }
+
+    @Test
+    void anUnreachableProjectFailsDistinctlyWithoutFlaggingBranchMissing() {   // SF-4: branch 404 + project 404
+        Repository repo = seed(9302L, "ghost");
+        gitlab.stubBranchStatus(9302L, "ghost", 404);
+        gitlab.stubProjectStatus("9302", 404);                 // project itself not reachable / no access
+
+        Scan finished = runAndGet(repo);
+
+        assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_FAILED);
+        assertThat(finished.getFailReason()).isEqualTo("PROJECT_UNREACHABLE");
+        assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isFalse();
     }
 }

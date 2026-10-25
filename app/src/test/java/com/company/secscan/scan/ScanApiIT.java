@@ -31,6 +31,8 @@ class ScanApiIT extends AbstractGitLabIT {
     RepositoryRepository repositories;
     @Autowired
     GitlabConnectionRepository connections;
+    @Autowired
+    ScanEnqueuer enqueuer;
 
     private Repository seedRepository() {
         GitlabConnection conn = connections.save(GitlabConnection.forGroup(
@@ -72,6 +74,29 @@ class ScanApiIT extends AbstractGitLabIT {
 
         assertThat(scan.branch()).isEqualTo("dev");
         assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("dev");
+    }
+
+    @Test
+    void findByWorkspaceIdAndIdInIsWorkspaceScoped() {   // B-1
+        Repository repo = seedRepository();
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scans.findByWorkspaceIdAndIdIn(WORKSPACE, List.of(scan.id())))
+                .extracting(Scan::getId).containsExactly(scan.id());
+        assertThat(scans.findByWorkspaceIdAndIdIn(UUID.randomUUID(), List.of(scan.id()))).isEmpty();
+    }
+
+    @Test
+    void recordDefaultBranchUpdatesOnlyThatColumn() {   // SF-1
+        Repository repo = seedRepository();
+        repo.setSensitivity("high");
+        repositories.save(repo);
+
+        enqueuer.recordDefaultBranch(repo.getId(), "release");
+
+        Repository after = repositories.findById(repo.getId()).orElseThrow();
+        assertThat(after.getDefaultBranch()).isEqualTo("release");
+        assertThat(after.getSensitivity()).isEqualTo("high");   // not clobbered by a whole-entity save
     }
 
     @Test

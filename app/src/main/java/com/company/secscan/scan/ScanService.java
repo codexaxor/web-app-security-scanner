@@ -98,16 +98,22 @@ public class ScanService {
         try {
             String token = cipher.require().decrypt(conn.getTokenCiphertext());
             String current = gitlab.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId()).defaultBranch();
+            // N-2: a GitLab default we cannot validate is not trusted — keep the stored value and warn.
+            if (current != null && !BranchName.isValid(current)) {
+                log.warn("Repository {} GitLab default branch is not a valid ref name; keeping the stored default.",
+                        repo.getId());
+                return new BranchResolution(repo.getDefaultBranch(), true);
+            }
             if (current != null && !current.equals(repo.getDefaultBranch())) {
-                log.info("Repository {} default branch changed in GitLab: {} -> {}",
-                        repo.getId(), repo.getDefaultBranch(), current);
-                repo.updateDefaultBranch(current);
-                repositories.save(repo);
+                log.info("Repository {} default branch changed in GitLab; updating the stored default.",
+                        repo.getId());
+                // SF-1: column-scoped update in its own tx (no whole-entity save of the detached repo).
+                enqueuer.recordDefaultBranch(repo.getId(), current);
             }
             return new BranchResolution(current != null ? current : repo.getDefaultBranch(), false);
         } catch (RuntimeException e) {
             log.warn("Could not refresh the default branch for repository {} at enqueue ({}); scanning the last "
-                    + "known default '{}'.", repo.getId(), e.getClass().getSimpleName(), repo.getDefaultBranch());
+                    + "known default.", repo.getId(), e.getClass().getSimpleName());
             return new BranchResolution(repo.getDefaultBranch(), true);
         }
     }

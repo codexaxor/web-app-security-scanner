@@ -1,5 +1,6 @@
 package com.company.secscan.scan;
 
+import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -18,10 +19,12 @@ class ScanEnqueuer {
 
     private final ScanRepository scans;
     private final ScanJobRepository jobs;
+    private final RepositoryRepository repositories;
 
-    ScanEnqueuer(ScanRepository scans, ScanJobRepository jobs) {
+    ScanEnqueuer(ScanRepository scans, ScanJobRepository jobs, RepositoryRepository repositories) {
         this.scans = scans;
         this.jobs = jobs;
+        this.repositories = repositories;
     }
 
     @Transactional
@@ -29,5 +32,15 @@ class ScanEnqueuer {
         Scan scan = scans.saveAndFlush(Scan.manual(WORKSPACE, repositoryId, branch));
         jobs.saveAndFlush(new ScanJob(WORKSPACE, scan.getId()));
         return scan;
+    }
+
+    /**
+     * SF-1 (A6): persist a refreshed GitLab default branch with a column-scoped update in its own short
+     * transaction — never a whole-entity save of the detached {@link com.company.secscan.repository.Repository}
+     * that was read before the enqueue-time GitLab call (which could clobber a concurrent settings PATCH).
+     */
+    @Transactional
+    void recordDefaultBranch(UUID repositoryId, String branch) {
+        repositories.updateDefaultBranch(WORKSPACE, repositoryId, branch);
     }
 }

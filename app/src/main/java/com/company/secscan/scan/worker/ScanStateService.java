@@ -244,8 +244,7 @@ public class ScanStateService {
     public void failBranchMissing(UUID workspaceId, UUID jobId, UUID scanId, UUID repositoryId, String branch) {
         Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
         ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
-        log.warn("Scan {} failed (BRANCH_NOT_FOUND): branch '{}' not found for repository {}",
-                scanId, branch, repositoryId);
+        log.warn("Scan {} failed (BRANCH_NOT_FOUND) for repository {}", scanId, repositoryId);  // N-2: ids, no branch name
         scan.failWith("BRANCH_NOT_FOUND");
         job.markDone();
         warnings.save(new ScanWarning(workspaceId, repositoryId, scanId, "BRANCH_NOT_FOUND",
