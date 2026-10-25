@@ -110,17 +110,17 @@ class FeedSummaryIT extends AbstractGitLabIT {
     void branchChangedClosesAreExcludedFromSolvedSevenDay() {   // D-076
         Repository repo = seedRepo(8202L);
         UUID g = openGroup(repo.getId(), "crit", 95);
-        event(sub(g, repo.getId(), "fp-genuine"), "solved", "system", 1);   // a genuine solve → counts
-        branchChangedSolve(sub(g, repo.getId(), "fp-branch"), 1);           // a branch-switch close → excluded
+        event(sub(g, repo.getId(), "fp-genuine"), "solved", "system", 1);   // a genuine solve (reason set) → counts
+        solvedWithReason(sub(g, repo.getId(), "fp-nullreason"), null, 1);    // a solve with NULL reason → counts
+        solvedWithReason(sub(g, repo.getId(), "fp-branch"), TriageEvent.REASON_BRANCH_CHANGED, 1); // excluded
 
         FeedSummaryView s = service.feedSummary(null, null, "focus", false);
-        assertThat(s.solved()).isEqualTo(1);                               // only the genuine solve
+        assertThat(s.solved()).isEqualTo(2);   // genuine + null-reason; the branch-change close is excluded
     }
 
-    private void branchChangedSolve(UUID subId, int daysAgo) {
+    private void solvedWithReason(UUID subId, String reason, int daysAgo) {
         backdateSubCreatedAt(subId, 8);
-        UUID id = events.save(TriageEvent.system(WORKSPACE, subId, "open", "solved",
-                TriageEvent.REASON_BRANCH_CHANGED, null)).getId();
+        UUID id = events.save(TriageEvent.system(WORKSPACE, subId, "open", "solved", reason, null)).getId();
         jdbc.update("update triage_event set at = now() - (? || ' days')::interval where id = ?",
                 String.valueOf(daysAgo), id);
     }
