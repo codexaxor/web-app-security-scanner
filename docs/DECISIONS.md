@@ -14,6 +14,23 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-079 M8.1 errata (review clarifications; D-076/D-078 text unchanged) (2026-10-25, accepted)
+Context: the /review-pr round surfaced small inaccuracies/clarifications in D-076/D-078 wording. Those entries are
+not edited (log-integrity rule); this entry is the authority for the corrections.
+Decision (errata):
+- Real test names: the re-baseline proof is `RebaselineReconcileIT` (+ `ReconcilerRebaselineTest` was folded into
+  it — the pure `Reconciler` is branch-independent, so re-baseline is an app-layer reason-code concern); the
+  rotation-UI proof is `rotate.spec.ts`; branch-name parity is the shared `scanner-image/branch-vectors.json`
+  read by `BranchNameValidationTest` (Java) and `branch_vectors_test.py` (in-image shell).
+- API field names: the branch picker returns `isDefault` / `isProtected` (JSON), not `default`/`protected`.
+- A2 wording narrowed: safety is "the branch reaches git only as a single `--branch=<name>` argv element — never
+  through a shell, never interpolated into a URL or a file path; log lines reference scan/repository ids, not the
+  branch name" (a structurally-valid shell-metacharacter branch is accepted and harmless; GitLab existence is the
+  authoritative gate).
+- Branch-name length is counted in Unicode CODE POINTS (N-1), matching busybox `${#}` under `LC_ALL=C.UTF-8` in
+  the scanner image; proven by the shared vector set including `ü×255`/`×256` and astral cases.
+Consequences: documentation accuracy only; no behavior change.
+
 ## D-078 Connection token rotation in the UI (2026-10-25, accepted)
 Context: `gitlab_connection` tokens expire; D-063-era SPEC already shows a 14-day expiry banner and the backend
 `PUT /api/v1/gitlab/connections/{id}` (`GitLabController.java:49` → `GitLabConnectionService.update` →
@@ -1267,6 +1284,15 @@ Decision: `workspace_id` on every business table from day one.
     walkthrough: `notification` showed 108 SEEN where 88 were immediately closed by BRANCH_CHANGED). Options:
     count only findings on the currently-tracked branch, or annotate "(N closed by branch change)". Cosmetic
     (the open count is correct — 20 open on `dev`); scheduled with the other branch-switch display polish in M8.5.
+  - **Switch to a branch with no manifests → SCA never re-baselines → M8.5 (D-1, D-076):** a branch with no
+    dependency manifests makes a successful SCA scan non-authoritative (`closes_findings=false`, D-034), so the
+    old branch's SCA findings are never closed by the switch (they are not re-baselined and not solved). Resolve
+    with OD-19 in M8.5 (route the ignored/undetected-but-held close through the D-063 resolver). Open SCA findings
+    on such a switch simply persist until a branch with manifests is scanned.
+  - **M9 commit poller must snapshot `effectiveBranch()` (D-2, D-076):** when M9 adds commit polling / scheduled
+    scans, the enqueue path MUST resolve `repository.effectiveBranch()` (the configured `scan_branch`, else the
+    current GitLab default refreshed per A6) and snapshot it onto `scan.branch`, exactly like `ScanService
+    .startManual` — so scheduled scans honour the chosen branch and re-baseline correctly.
   - **Absent-but-ignored on a branch switch → M8.5 (OD-19 family, D-076):** when `scanBranch` switches, an
     *ignored* finding that is absent on the new branch stays ignored (rule 3), not solved — the same
     absent-but-ignored shape as OD-19. Resolve it together with OD-19 in M8.5 (route the ignored-and-absent close
