@@ -45,15 +45,17 @@ public class IssueService {
     private final TriageEventRepository triageEvents;
     private final IgnoreRuleRepository ignoreRules;
     private final RepositoryRepository repositories;
+    private final com.company.secscan.scan.ScanRepository scans;
 
     public IssueService(IssueGroupRepository groups, SubIssueRepository subIssues,
                         TriageEventRepository triageEvents, IgnoreRuleRepository ignoreRules,
-                        RepositoryRepository repositories) {
+                        RepositoryRepository repositories, com.company.secscan.scan.ScanRepository scans) {
         this.groups = groups;
         this.subIssues = subIssues;
         this.triageEvents = triageEvents;
         this.ignoreRules = ignoreRules;
         this.repositories = repositories;
+        this.scans = scans;
     }
 
     /** The Feed (OD-14 item 3): view (focus/all), optional band, type and repository filters, includeInactive. */
@@ -124,10 +126,14 @@ public class IssueService {
 
         Instant since = Instant.now().minus(SEVEN_DAYS);
         long newFindings = subIssues.countNewSince(WORKSPACE, repositoryId, typeFilter, includeInactive, since);
+        // "Solved · 7d" counts genuine solves only — a BRANCH_CHANGED close (a branch switch, not a fix) is
+        // excluded (D-076). (The exclusion is a no-op for the auto-ignored bucket, where BRANCH_CHANGED never
+        // appears.)
         long solved = triageEvents.countDistinctSubIssuesByTransitionSince(WORKSPACE,
-                SubIssue.STATUS_SOLVED, null, repositoryId, typeFilter, includeInactive, since);
+                SubIssue.STATUS_SOLVED, null, TriageEvent.REASON_BRANCH_CHANGED,
+                repositoryId, typeFilter, includeInactive, since);
         long autoIgnored = triageEvents.countDistinctSubIssuesByTransitionSince(WORKSPACE,
-                SubIssue.STATUS_IGNORED, "system", repositoryId, typeFilter, includeInactive, since);
+                SubIssue.STATUS_IGNORED, "system", null, repositoryId, typeFilter, includeInactive, since);
         return new FeedSummaryView(bands, total, newFindings, solved, autoIgnored);
     }
 
@@ -148,10 +154,25 @@ public class IssueService {
     public PagedResponse<TriageEventView> subIssueEvents(UUID subIssueId, int page, int size) {
         subIssues.findByIdAndWorkspaceId(subIssueId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such sub-issue."));
-        return PagedResponse.fromPage(triageEvents
-                .findByWorkspaceIdAndSubIssueIdOrderByAtDesc(WORKSPACE, subIssueId,
-                        PageRequest.of(Math.max(0, page), Math.max(1, size)))
-                .map(TriageEventView::of));
+        var pageResult = triageEvents.findByWorkspaceIdAndSubIssueIdOrderByAtDesc(WORKSPACE, subIssueId,
+                PageRequest.of(Math.max(0, page), Math.max(1, size)));
+        // Resolve the branch of each event's scan so the UI can render a BRANCH_CHANGED event in plain words
+        // (D-076). The scan ids come from this workspace's own events, so they are already workspace-scoped.
+        Map<UUID, String> branchByScan = scanBranches(pageResult.getContent());
+        return PagedResponse.fromPage(pageResult.map(e ->
+                TriageEventView.of(e, e.getScanId() == null ? null : branchByScan.get(e.getScanId()))));
+    }
+
+    private Map<UUID, String> scanBranches(List<TriageEvent> events) {
+        List<UUID> scanIds = events.stream().map(TriageEvent::getScanId).filter(Objects::nonNull).distinct().toList();
+        if (scanIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> byScan = new java.util.HashMap<>();
+        for (var scan : scans.findAllById(scanIds)) {
+            byScan.put(scan.getId(), scan.getBranch());
+        }
+        return byScan;
     }
 
     // --- internals ---

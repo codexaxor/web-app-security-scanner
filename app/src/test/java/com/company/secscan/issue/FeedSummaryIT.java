@@ -105,4 +105,23 @@ class FeedSummaryIT extends AbstractGitLabIT {
         // The 7-day buckets honour type+repo only, not the view: focus and all agree.
         assertThat(service.feedSummary(null, null, "all", false).newFindings()).isEqualTo(s.newFindings());
     }
+
+    @Test
+    void branchChangedClosesAreExcludedFromSolvedSevenDay() {   // D-076
+        Repository repo = seedRepo(8202L);
+        UUID g = openGroup(repo.getId(), "crit", 95);
+        event(sub(g, repo.getId(), "fp-genuine"), "solved", "system", 1);   // a genuine solve → counts
+        branchChangedSolve(sub(g, repo.getId(), "fp-branch"), 1);           // a branch-switch close → excluded
+
+        FeedSummaryView s = service.feedSummary(null, null, "focus", false);
+        assertThat(s.solved()).isEqualTo(1);                               // only the genuine solve
+    }
+
+    private void branchChangedSolve(UUID subId, int daysAgo) {
+        backdateSubCreatedAt(subId, 8);
+        UUID id = events.save(TriageEvent.system(WORKSPACE, subId, "open", "solved",
+                TriageEvent.REASON_BRANCH_CHANGED, null)).getId();
+        jdbc.update("update triage_event set at = now() - (? || ' days')::interval where id = ?",
+                String.valueOf(daysAgo), id);
+    }
 }
