@@ -1262,6 +1262,11 @@ Decision: `workspace_id` on every business table from day one.
     (2) a one-off maintenance pass (no migration) to retire the rows already accumulated; (3) optionally reduce
     SAST fingerprint churn with a structural match key. Not a security issue (the live finding is tracked
     correctly; surplus rows are stale ignored clutter).
+  - **Feed "New · 7d" over-counts across a branch switch → M8.5 (D-076):** "New · 7d" counts sub-issues by
+    `created_at`, so findings first seen on the PREVIOUS branch still count as "new" after a switch (Sajal's
+    walkthrough: `notification` showed 108 SEEN where 88 were immediately closed by BRANCH_CHANGED). Options:
+    count only findings on the currently-tracked branch, or annotate "(N closed by branch change)". Cosmetic
+    (the open count is correct — 20 open on `dev`); scheduled with the other branch-switch display polish in M8.5.
   - **Absent-but-ignored on a branch switch → M8.5 (OD-19 family, D-076):** when `scanBranch` switches, an
     *ignored* finding that is absent on the new branch stays ignored (rule 3), not solved — the same
     absent-but-ignored shape as OD-19. Resolve it together with OD-19 in M8.5 (route the ignored-and-absent close
@@ -1276,6 +1281,10 @@ Decision: `workspace_id` on every business table from day one.
   - **OD-21 3-real-repo walkthrough → M8.5 (D-075):** M8 "Done when" was met on core-keycloak (real) +
     secscan-test-secrets (fixture); onboarding + verifying **ib-api-v2** and a **3rd real repo** is the first M8.5
     task.
+  - **Scanner image tag reused with new content → per-digest tag (M10):** M8.1 rebuilt `secscan-scanner:8.21.2`
+    with changed `run-scan.sh`/`secscan-lib.sh` under the SAME tag (the content hash tracks drift, but the tag is
+    not immutable). The M10 weekly-rebuild / hardening pass should pin the scanner image by digest or bump the
+    tag per content change. Not changed now (out of M8.1 scope).
   - **IaC Checkov `check_name` ingest → later:** ingest Checkov's human-readable `check_name` so IaC titles are
     human, not raw rule ids.
   - **Languages refresh on each scan → later:** re-derive a repository's detected languages on every scan (today
