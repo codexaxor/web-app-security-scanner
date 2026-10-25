@@ -277,6 +277,52 @@ insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner,
    '20000000-0000-0000-0000-000000000002', 'secret', 'secret', 'fp-mix-ig', 'generic-api-key', 'src/C.java',
    'ignored', 80, 'DEV_DEPENDENCY', now() - interval '1 hour', now() - interval '1 hour');
 
+-- ---------- M8 review-fixes fixtures (each spec owns its own group; no coupling to shared groups) ----------
+
+-- SF-7: an SCA group with TWO different fixed versions across its OPEN sub-issues → the panel's fix line reads
+-- "Several fixed versions — see each location".
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, subtitle, status,
+                         severity_score, fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'sca', 'sca|multi-fix', 'org.example:multi-fix',
+        'Dependency with several fixes', 'open', 72, 60, now() - interval '2 hours');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, package,
+                       installed_version, fixed_version, file_path, status, score, created_at) values
+  ('50000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000001',
+   '40000000-0000-0000-0000-000000000012', '20000000-0000-0000-0000-000000000002', 'sca', 'sca', 'fp-mf1',
+   'CVE-2023-00001', 'org.example:multi-fix', '1.0.0', '1.2.3', 'pom.xml', 'open', 72, now() - interval '2 hours'),
+  ('50000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000001',
+   '40000000-0000-0000-0000-000000000012', '20000000-0000-0000-0000-000000000002', 'sca', 'sca', 'fp-mf2',
+   'CVE-2023-00002', 'org.example:multi-fix', '1.0.0', '4.5.6', 'pom.xml', 'open', 60, now() - interval '2 hours');
+
+-- N-10: a finding held ignored by the GLOBAL rule (...002, repository_id null, created_by user) → the panel's
+-- unignore asks for confirmation before removing an all-repositories rule.
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, first_seen_at)
+values ('40000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'secret', 'secret|global-held', 'Globally ignored secret',
+        'ignored', now() - interval '5 days');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, rule_id, file_path,
+                       status, ignore_reason, ignored_by_rule_id, ignored_at, created_at)
+values ('50000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000013', '20000000-0000-0000-0000-000000000002', 'secret', 'secret',
+        'fp-global-held', 'generic-password', 'src/G.java', 'ignored', 'IGNORE_RULE',
+        '60000000-0000-0000-0000-000000000002', now() - interval '5 days', now() - interval '5 days');
+
+-- SF-1: a dedicated OPEN group with a single open sub-issue. "Ignore group…" in the panel leaves it all-ignored;
+-- the header severity must switch to the neutral "Ignored" pill (no band) WITHOUT a reload (the query the panel
+-- header reads, ["issue-group", id], is now invalidated by the triage mutation).
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, severity_score,
+                         fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000002', 'sca', 'sca|allignore', 'All-ignore fixture', 'open', 80, 30,
+        now() - interval '2 hours');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, package,
+                       installed_version, fixed_version, status, score, created_at)
+values ('50000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000014', '20000000-0000-0000-0000-000000000002', 'sca', 'sca',
+        'fp-allignore', 'CVE-2023-00003', 'org.example:allignore', '1.0.0', '2.0.0', 'open', 80,
+        now() - interval '2 hours');
+
 -- ========================================================================================================
 -- WORKSPACE 2 — the isolation oracle (must NEVER appear in the UI or any count)
 -- ========================================================================================================

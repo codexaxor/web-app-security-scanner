@@ -4,7 +4,8 @@
 # --env-file. NEVER run `down -v` against the default project; teardown is `-p secscan-e2e ... down -v`.
 services:
   postgres:
-    image: postgres:16
+    # Pinned by digest (SF-4) for a reproducible e2e DB. Tag postgres:16 resolved to this digest on 2026-10-25.
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     environment:
       POSTGRES_DB: secscan
       POSTGRES_USER: secscan

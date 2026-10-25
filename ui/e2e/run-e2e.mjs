@@ -26,10 +26,21 @@ const PW_IMAGE =
 const b64 = () => randomBytes(32).toString("base64");
 const pw = () => randomBytes(24).toString("base64url");
 
+// SF-4: per-run secret VALUES are kept off the command line entirely (name-only `-e FOO` flags + child env), but
+// as defence-in-depth we also scrub any secret value from thrown error text / stack traces before printing.
+const SECRETS = [];
+function redact(s) {
+  let out = String(s);
+  for (const v of SECRETS) {
+    if (v) out = out.split(v).join("***");
+  }
+  return out;
+}
+
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: "inherit", ...opts });
   if (r.status !== 0 && !opts.allowFail) {
-    throw new Error(`${cmd} ${args.join(" ")} exited ${r.status}`);
+    throw new Error(redact(`${cmd} ${args.join(" ")} exited ${r.status}`));
   }
   return r.status ?? 1;
 }
@@ -65,6 +76,7 @@ async function main() {
     E2E_ADMIN_EMAIL: "admin@secscan.local",
     E2E_ADMIN_PASSWORD: pw(),
   };
+  SECRETS.push(env.E2E_POSTGRES_PASSWORD, env.E2E_ENCRYPTION_KEY, env.E2E_FINGERPRINT_KEY, env.E2E_ADMIN_PASSWORD);
   writeFileSync(ENV_FILE, Object.entries(env).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
   chmodSync(ENV_FILE, 0o600);
 
@@ -85,29 +97,47 @@ async function main() {
     console.log("[e2e] seeding");
     run(
       "docker",
+      // SF-4: name-only `-e PGPASSWORD` so the secret VALUE is never on the argv (invisible in `ps`); the value
+      // is passed through this child process's environment instead.
       ["compose", "-p", PROJECT, "--env-file", ENV_FILE, "-f", COMPOSE_FILE, "exec", "-T",
-        "-e", `PGPASSWORD=${env.E2E_POSTGRES_PASSWORD}`, "postgres",
+        "-e", "PGPASSWORD", "postgres",
         "psql", "-v", "ON_ERROR_STOP=1", "-U", "secscan", "-d", "secscan", "-f", "/dev/stdin"],
-      { stdio: ["pipe", "inherit", "inherit"], input: readFileSync(resolve(E2E_DIR, "fixtures", "seed.sql")) },
+      {
+        stdio: ["pipe", "inherit", "inherit"],
+        input: readFileSync(resolve(E2E_DIR, "fixtures", "seed.sql")),
+        env: { ...process.env, PGPASSWORD: env.E2E_POSTGRES_PASSWORD },
+      },
     );
 
-    // The Playwright container runs as pwuser (uid 1001); make the artifacts bind writable by it.
-    chmodSync(ARTIFACTS, 0o777);
+    // The Playwright container runs as pwuser (uid 1001) — a DIFFERENT uid from the host user who owns this bind
+    // mount, and we cannot chown to 1001 without root. So "other" (pwuser) needs rwx; group gets nothing. Mode
+    // 0o707 is the narrowest that lets pwuser write artifacts here (narrower than the previous 0o777). (SF-4)
+    chmodSync(ARTIFACTS, 0o707);
 
     console.log("[e2e] running Playwright (in Docker)");
     // Run the local Playwright binary directly (NOT `npx`, which would try to write an npm cache into the
     // read-only mount). The image provides the browsers; @playwright/test comes from the mounted node_modules.
     pwStatus = run(
       "docker",
+      // SF-4: the two SECRET env vars use name-only `-e` flags (value supplied via this process's env below), so
+      // they never appear on the argv. Non-secret vars keep the inline `KEY=value` form for clarity.
       ["run", "--rm", "--network", NETWORK, "--user", "pwuser", "--init",
         "-v", `${UI_DIR}:/ui:ro`, "-v", `${ARTIFACTS}:/ui/e2e/artifacts`,
         "-w", "/ui/e2e",
         "-e", "E2E_BASE_URL=http://ui:80",
-        "-e", `E2E_ADMIN_EMAIL=${env.E2E_ADMIN_EMAIL}`, "-e", `E2E_ADMIN_PASSWORD=${env.E2E_ADMIN_PASSWORD}`,
+        "-e", `E2E_ADMIN_EMAIL=${env.E2E_ADMIN_EMAIL}`, "-e", "E2E_ADMIN_PASSWORD",
         "-e", "PGHOST=postgres", "-e", "PGPORT=5432", "-e", "PGUSER=secscan",
-        "-e", `PGPASSWORD=${env.E2E_POSTGRES_PASSWORD}`, "-e", "PGDATABASE=secscan",
+        "-e", "PGPASSWORD", "-e", "PGDATABASE=secscan",
         PW_IMAGE, "node", "/ui/node_modules/@playwright/test/cli.js", "test", "--config=playwright.config.ts"],
-      { cwd: UI_DIR, allowFail: true },
+      {
+        cwd: UI_DIR,
+        allowFail: true,
+        env: {
+          ...process.env,
+          E2E_ADMIN_PASSWORD: env.E2E_ADMIN_PASSWORD,
+          PGPASSWORD: env.E2E_POSTGRES_PASSWORD,
+        },
+      },
     );
   } finally {
     console.log("[e2e] tearing down");
@@ -123,6 +153,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(redact(e?.stack ?? e?.message ?? e));
   process.exit(1);
 });

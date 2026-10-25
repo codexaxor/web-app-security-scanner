@@ -10,13 +10,19 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC = join(fileURLToPath(new URL(".", import.meta.url)), "..", "src");
-const EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".css", ".html"]);
+const EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".html"]);
 
 // Each pattern: a regex and the human reason. Word-boundary / call-shaped where it matters to avoid false hits
-// on unrelated identifiers (e.g. a CSS class literally named "eval" is not `eval(`).
+// on unrelated identifiers (e.g. a CSS class literally named "eval" is not `eval(`). Patterns are matched against
+// the WHOLE file text (N-7), so a construct split across lines (e.g. `document.\nwrite(`) is still caught; `\s`
+// spans newlines for that reason. Bracket-access forms (el["innerHTML"]) are covered alongside dot access.
 const FORBIDDEN = [
   [/dangerouslySetInnerHTML/, "dangerouslySetInnerHTML — render scanned data as text only (OD-13d)"],
-  [/\.innerHTML\b/, ".innerHTML — no raw HTML injection (OD-13d)"],
+  [/\.\s*innerHTML\b/, ".innerHTML — no raw HTML injection (OD-13d)"],
+  [/\.\s*outerHTML\b/, ".outerHTML — no raw HTML injection (OD-13d)"],
+  [/\[\s*['"]((inner)|(outer))HTML['"]\s*\]/, "[\"innerHTML\"]/[\"outerHTML\"] — no raw HTML injection (OD-13d)"],
+  [/\binsertAdjacentHTML\b/, "insertAdjacentHTML — no raw HTML injection (OD-13d)"],
+  [/document\s*\.\s*write\s*\(/, "document.write( — no raw HTML injection (OD-13d)"],
   [/\blocalStorage\b/, "localStorage — no client-side persistence (OD-13a)"],
   [/\bsessionStorage\b/, "sessionStorage — no client-side persistence (OD-13a)"],
   [/\bindexedDB\b/, "indexedDB — no client-side persistence (OD-13a)"],
@@ -44,17 +50,25 @@ try {
   process.exit(2);
 }
 
+// Scan the WHOLE file text (not line-by-line) so a forbidden construct split across lines is still caught (N-7).
+// The 1-based line number is derived from the match offset for a readable report.
+function lineAt(text, index) {
+  let line = 1;
+  for (let i = 0; i < index && i < text.length; i++) {
+    if (text[i] === "\n") line++;
+  }
+  return line;
+}
+
 for (const file of files) {
   const text = readFileSync(file, "utf8");
-  const lines = text.split(/\r?\n/);
-  lines.forEach((line, i) => {
-    for (const [re, reason] of FORBIDDEN) {
-      if (re.test(line)) {
-        console.error(`FORBIDDEN  ${file}:${i + 1}  ${reason}`);
-        failures++;
-      }
+  for (const [re, reason] of FORBIDDEN) {
+    const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (const m of text.matchAll(g)) {
+      console.error(`FORBIDDEN  ${file}:${lineAt(text, m.index)}  ${reason}`);
+      failures++;
     }
-  });
+  }
 }
 
 if (failures > 0) {
