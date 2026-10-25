@@ -15,10 +15,17 @@ import org.springframework.stereotype.Service;
 /**
  * Recomputes a group's derived status (M3) and its M5 rollup — {@code severity_score} = max open sub-issue
  * score, {@code fix_time_minutes} (see {@link #fixTimeMinutes}), and (sca/sast/iac) the subtitle from the worst
- * open sub-issue's CWE phrase (SPEC "Issue lifecycle"/"Grouping"/"Fix time"). Shared by scan-time reconcile and
- * the api re-score job so both roll groups up identically — except that the re-score path
- * ({@link #recomputeScoreRollup}) never writes {@code status}, which only reconcile owns (B1). Writes no
- * triage_event and never changes a sub-issue.
+ * open sub-issue's CWE phrase (SPEC "Issue lifecycle"/"Grouping"/"Fix time"). Two write shapes:
+ * <ul>
+ *   <li>scan-time reconcile ({@link #recompute}) owns {@code status} and persists the group via a normal
+ *       entity save (status + the three derived columns together);</li>
+ *   <li>the api re-score / sensitivity path ({@link #recomputeScoreRollup}) must NEVER write {@code status}
+ *       (B1) and must not clobber a concurrent reconcile, so it writes ONLY the derived columns through a
+ *       column-scoped {@code UPDATE … WHERE id = ? AND workspace_id = ? AND status = 'open'} (SF-2,
+ *       {@link IssueGroupRepository#updateScoreRollupIfOpen}) — a full-entity save would resurrect a stale
+ *       {@code status}/score onto a group another transaction has already flipped to ignored/solved.</li>
+ * </ul>
+ * Writes no triage_event and never changes a sub-issue.
  */
 @Service
 public class GroupRollupService {
@@ -64,16 +71,22 @@ public class GroupRollupService {
                 .max(Integer::compareTo).orElse(null);
 
         groups.findByIdAndWorkspaceId(groupId, workspaceId).ifPresent(g -> {
-            if (updateStatus) {
-                g.setStatus(deriveStatus(subs, open));
-            }
-            g.setSeverityScore(severity);
-            g.setFixTimeMinutes(fixTimeMinutes(g.getType(), open, fixConfig));
+            Integer fixTime = fixTimeMinutes(g.getType(), open, fixConfig);
             String subtitle = subtitleFor(g.getType(), worstOpen(open));
-            if (subtitle != null) {
-                g.setSubtitle(subtitle);
+            if (updateStatus) {
+                // Reconcile owns status: persist status + derived columns together via a normal save.
+                g.setStatus(deriveStatus(subs, open));
+                g.setSeverityScore(severity);
+                g.setFixTimeMinutes(fixTime);
+                if (subtitle != null) {
+                    g.setSubtitle(subtitle);
+                }
+                groups.save(g);
+            } else {
+                // Score-only path (SF-2): column-scoped UPDATE guarded by status='open'. Never writes status and
+                // cannot resurrect a score onto a group a concurrent reconcile has flipped to ignored/solved.
+                groups.updateScoreRollupIfOpen(groupId, workspaceId, severity, fixTime, subtitle);
             }
-            groups.save(g);
         });
     }
 

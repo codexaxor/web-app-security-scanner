@@ -1,3 +1,9 @@
 node_modules/
 dist/
 *.local
+
+# e2e: generated per-run secrets and test artifacts must never be committed (OD-13, change 6/10).
+e2e/.auth/
+e2e/artifacts/
+e2e/test-results/
+e2e/playwright-report/

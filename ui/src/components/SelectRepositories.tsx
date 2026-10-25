@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ConnectionView, Paged, ProjectView, RepositoryView } from "../api";
+import Button from "./Button";
+import RepoName from "./RepoName";
+import { EmptyState } from "./ui";
 
 const PAGE_SIZE = 50;
 
@@ -79,16 +82,16 @@ export default function SelectRepositories() {
   const label = (c: ConnectionView) =>
     `${c.targetType}: ${c.targetType === "group" ? c.groupFullPath : c.projectFullPath}`;
 
-  if (error) return <p style={{ color: "#b00020" }}>{error}</p>;
-  if (connections.length === 0) return <p>Add a GitLab connection first.</p>;
+  if (error) return <p className="field-error">{error}</p>;
+  if (connections.length === 0) return <EmptyState title="Add a GitLab connection first" />;
 
   return (
-    <section style={{ display: "grid", gap: "1.5rem" }}>
-      <div style={{ display: "grid", gap: "0.75rem" }}>
-        <h2>Select repositories</h2>
-        <label>
-          Connection{" "}
+    <div className="stack-4 onboarding-wide">
+      <div className="stack-4">
+        <div className="field">
+          <label htmlFor="sel-conn">Connection</label>
           <select
+            id="sel-conn"
             value={connectionId}
             onChange={(e) => {
               setConnectionId(e.target.value);
@@ -102,97 +105,113 @@ export default function SelectRepositories() {
               </option>
             ))}
           </select>
-        </label>
+        </div>
 
         {!data ? (
-          <p>Loading projects…</p>
+          <p className="muted">Loading projects…</p>
         ) : (
           <>
-            <p style={{ margin: 0, color: "#555" }}>
+            <p className="muted">
               {data.totalElements} projects · page {data.page + 1} of {Math.max(1, data.totalPages)}
             </p>
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Project</th>
+                    <th>Default branch</th>
+                    <th>Languages</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.content.map((p) => (
+                    <tr key={p.gitlabProjectId}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${p.pathWithNamespace}`}
+                          disabled={!p.selectable}
+                          checked={checked.has(p.gitlabProjectId)}
+                          onChange={() => toggle(p.gitlabProjectId)}
+                        />
+                      </td>
+                      <td>
+                        <RepoName path={p.pathWithNamespace} showPath />
+                      </td>
+                      <td>{p.defaultBranch ?? "—"}</td>
+                      <td>{p.languages.length ? p.languages.join(", ") : <span className="muted">Not detected</span>}</td>
+                      <td>
+                        {!p.selectable && <span className="expiry-warn">{p.notSelectableReason}</span>}
+                        {p.selectable && p.active && <span className="chip chip-solved">Selected</span>}
+                        {p.selectable && p.alreadySelected && !p.active && (
+                          <span className="chip chip-ignored">Inactive</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="row">
+              <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                Prev
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={page + 1 >= data.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+              <Button variant="primary" disabled={busy || checked.size === 0} onClick={select}>
+                Add {checked.size || ""} selected
+              </Button>
+              {saved !== null && <span className="ok-text">Added {saved} repositories.</span>}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="stack">
+        <h2 className="section-head">Selected repositories</h2>
+        {selected.length === 0 ? (
+          <EmptyState title="None selected yet">Pick projects above to start scanning them.</EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
               <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid #ccc" }}>
-                  <th></th>
-                  <th>Project</th>
-                  <th>Default branch</th>
-                  <th>Languages</th>
+                <tr>
+                  <th>Repository</th>
+                  <th>Connection</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {data.content.map((p) => (
-                  <tr key={p.gitlabProjectId} style={{ borderBottom: "1px solid #eee" }}>
+                {selected.map((r) => (
+                  <tr key={r.id}>
                     <td>
-                      <input
-                        type="checkbox"
-                        disabled={!p.selectable}
-                        checked={checked.has(p.gitlabProjectId)}
-                        onChange={() => toggle(p.gitlabProjectId)}
-                      />
+                      <RepoName path={r.pathWithNamespace} showPath />
                     </td>
-                    <td>{p.pathWithNamespace}</td>
-                    <td>{p.defaultBranch ?? "—"}</td>
-                    <td>{p.languages.join(", ") || "—"}</td>
+                    <td>{r.connectionLabel ?? <span className="muted">none</span>}</td>
                     <td>
-                      {!p.selectable && <span style={{ color: "#b06f00" }}>{p.notSelectableReason}</span>}
-                      {p.selectable && p.active && <span style={{ color: "#0a7d33" }}>selected</span>}
-                      {p.selectable && p.alreadySelected && !p.active && (
-                        <span style={{ color: "#777" }}>inactive</span>
+                      {r.active ? (
+                        <span className="chip chip-solved">Active</span>
+                      ) : (
+                        <span className="chip chip-ignored">
+                          Inactive{r.inactiveReason ? ` (${r.inactiveReason})` : ""}
+                        </span>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                Prev
-              </button>
-              <button disabled={page + 1 >= data.totalPages} onClick={() => setPage((p) => p + 1)}>
-                Next
-              </button>
-              <button disabled={busy || checked.size === 0} onClick={select}>
-                Add {checked.size || ""} selected
-              </button>
-              {saved !== null && <span style={{ color: "#0a7d33" }}>Added {saved} repositories.</span>}
-            </div>
-          </>
+          </div>
         )}
       </div>
-
-      <div style={{ display: "grid", gap: "0.5rem" }}>
-        <h3 style={{ margin: 0 }}>Selected repositories</h3>
-        {selected.length === 0 ? (
-          <p style={{ color: "#555" }}>None selected yet.</p>
-        ) : (
-          <table style={{ borderCollapse: "collapse", width: "100%" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #ccc" }}>
-                <th>Repository</th>
-                <th>Connection</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selected.map((r) => (
-                <tr key={r.id} style={{ borderBottom: "1px solid #eee" }}>
-                  <td>{r.pathWithNamespace}</td>
-                  <td>{r.connectionLabel ?? <span style={{ color: "#777" }}>none</span>}</td>
-                  <td>
-                    {r.active ? (
-                      <span style={{ color: "#0a7d33" }}>active</span>
-                    ) : (
-                      <span style={{ color: "#b06f00" }}>inactive{r.inactiveReason ? ` (${r.inactiveReason})` : ""}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </section>
+    </div>
   );
 }

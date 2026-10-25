@@ -19,6 +19,9 @@ public interface IgnoreRuleRepository extends JpaRepository<IgnoreRule, UUID> {
     /** One rule by id, workspace-scoped (so a rule from another tenant is never touched). */
     Optional<IgnoreRule> findByWorkspaceIdAndId(UUID workspaceId, UUID id);
 
+    /** The rules holding a page of sub-issues, workspace-scoped in SQL (N-1) — never loads a cross-tenant row. */
+    List<IgnoreRule> findByWorkspaceIdAndIdIn(UUID workspaceId, java.util.Collection<UUID> ids);
+
     /** The .secscan.yml-materialized system rules for one repository — the D-057 revoke lifecycle reconciles these. */
     List<IgnoreRule> findByWorkspaceIdAndRepositoryIdAndCreatedBy(UUID workspaceId, UUID repositoryId,
                                                                   String createdBy);

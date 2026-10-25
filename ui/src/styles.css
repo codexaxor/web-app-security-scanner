@@ -1,0 +1,5 @@
+/* Entry stylesheet (imported once by main.tsx). The design system lives in ./styles/* (S10c). CSP is
+ * `style-src 'self'`: these are same-origin CSS files bundled by Vite — no inline <style>, no relaxation. */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/components.css";

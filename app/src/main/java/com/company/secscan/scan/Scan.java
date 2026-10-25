@@ -10,7 +10,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 
 /**
@@ -71,6 +73,9 @@ public class Scan {
     @Column(name = "fail_reason")
     private String failReason;
 
+    // DB default `now()`; @Generated(INSERT) makes Hibernate read the value back after insert so a POST that
+    // returns the just-saved scan carries a non-null createdAt (OD-14 item 8 — the not-refreshed-after-insert bug).
+    @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 

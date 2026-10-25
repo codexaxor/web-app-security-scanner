@@ -11,13 +11,13 @@ import java.util.UUID;
  * (EXCLUDED_PATH / DEV_DEPENDENCY / …) has no rule, so {@code ruleReason}/{@code createdBy} are null.
  */
 public record IgnoredItemView(UUID subIssueId, UUID groupId, String type, String scanner, String vulnId,
-                              String ruleId, String packageName, String filePath, String reasonCode,
+                              String ruleId, String packageName, String filePath, Integer line, String reasonCode,
                               UUID ignoreRuleId, String ruleScope, String ruleReason, String createdBy,
                               Instant ignoredAt) {
 
     public static IgnoredItemView of(SubIssue s, IgnoreRule rule) {
         return new IgnoredItemView(s.getId(), s.getGroupId(), s.getType(), s.getScanner(), s.getVulnId(),
-                s.getRuleId(), s.getPackageName(), s.getFilePath(), s.getIgnoreReason(),
+                s.getRuleId(), s.getPackageName(), s.getFilePath(), s.getLine(), s.getIgnoreReason(),
                 rule == null ? null : rule.getId(), rule == null ? null : rule.getScope(),
                 rule == null ? null : rule.getReason(), rule == null ? null : rule.getCreatedBy(),
                 s.getIgnoredAt());

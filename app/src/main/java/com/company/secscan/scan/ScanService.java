@@ -1,11 +1,13 @@
 package com.company.secscan.scan;
 
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.api.Pagination;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanTaskView;
 import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.scan.api.ScanWarningView;
 import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.Optional;
@@ -13,7 +15,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,14 +36,16 @@ public class ScanService {
     private final ScanRepository scans;
     private final ScanTaskRepository tasks;
     private final ScanFindingRepository findings;
+    private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final ScanEnqueuer enqueuer;
 
     public ScanService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
-                       RepositoryRepository repositories, ScanEnqueuer enqueuer) {
+                       ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
+        this.warnings = warnings;
         this.repositories = repositories;
         this.enqueuer = enqueuer;
     }
@@ -75,9 +78,28 @@ public class ScanService {
     public PagedResponse<ScanView> listForRepository(UUID repositoryId, int page, int size) {
         requireScannable(repositoryId, false);
         return PagedResponse.fromPage(scans
-                .findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId,
-                        PageRequest.of(Math.max(0, page), Math.max(1, size)))
+                .findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId, Pagination.of(page, size))
                 .map(ScanView::of));
+    }
+
+    /** All scans in the workspace, newest-first, paginated (OD-14 item 2). Size capped at {@link Pagination#MAX_SIZE}. */
+    @Transactional(readOnly = true)
+    public PagedResponse<ScanView> listAll(int page, int size) {
+        return PagedResponse.fromPage(scans
+                .findByWorkspaceId(WORKSPACE, Pagination.of(page, size,
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC,
+                                "createdAt")))
+                .map(ScanView::of));
+    }
+
+    /** One scan's warnings, paginated (OD-14 item 2); 404 if the scan is not in this workspace. */
+    @Transactional(readOnly = true)
+    public PagedResponse<ScanWarningView> listWarnings(UUID scanId, int page, int size) {
+        scans.findByIdAndWorkspaceId(scanId, WORKSPACE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such scan."));
+        return PagedResponse.fromPage(warnings
+                .findByWorkspaceIdAndScanId(WORKSPACE, scanId, Pagination.of(page, size))
+                .map(ScanWarningView::of));
     }
 
     @Transactional(readOnly = true)

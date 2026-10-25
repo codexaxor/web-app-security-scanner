@@ -1,51 +1,30 @@
-import { useEffect, useState } from "react";
-import { api, hasCredentials } from "./api";
-import SignInGate from "./components/SignInGate";
-import ConnectGitLab from "./components/ConnectGitLab";
-import SelectRepositories from "./components/SelectRepositories";
+import { Navigate, Route, Routes } from "react-router";
+import Layout from "./components/Layout";
+import DashboardPage from "./pages/DashboardPage";
+import FeedPage from "./pages/FeedPage";
+import RepositoriesPage from "./pages/RepositoriesPage";
+import IgnoredPage from "./pages/IgnoredPage";
+import SettingsPage from "./pages/SettingsPage";
+import ConnectPage from "./pages/ConnectPage";
+import SelectPage from "./pages/SelectPage";
 
-type Tab = "connect" | "repositories";
-
+/** Declarative routes (react-router v8, BrowserRouter). The side panel is a nested route of the Feed so the
+ *  feed stays mounted behind it (/feed/:groupId). */
 export default function App() {
-  const [signedIn, setSignedIn] = useState(hasCredentials());
-  const [tab, setTab] = useState<Tab>("connect");
-  const [connected, setConnected] = useState(false);
-
-  useEffect(() => {
-    if (!signedIn) return;
-    api
-      .listConnections(0, 1)
-      .then((c) => {
-        if (c.totalElements > 0) {
-          setConnected(true);
-          setTab("repositories");
-        }
-      })
-      .catch(() => setSignedIn(false)); // 401 → need to sign in again
-  }, [signedIn]);
-
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
-      <h1>SecScan</h1>
-      {!signedIn ? (
-        <SignInGate onSignedIn={() => setSignedIn(true)} />
-      ) : (
-        <>
-          <nav style={{ display: "flex", gap: "1rem", margin: "1rem 0" }}>
-            <button onClick={() => setTab("connect")} disabled={tab === "connect"}>
-              Connect GitLab
-            </button>
-            <button onClick={() => setTab("repositories")} disabled={tab === "repositories" || !connected}>
-              Repositories
-            </button>
-          </nav>
-          {tab === "connect" ? (
-            <ConnectGitLab onChanged={(any) => setConnected(any)} />
-          ) : (
-            <SelectRepositories />
-          )}
-        </>
-      )}
-    </main>
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/feed" element={<FeedPage />} />
+        <Route path="/feed/:groupId" element={<FeedPage />} />
+        <Route path="/repositories" element={<RepositoriesPage />} />
+        <Route path="/ignored" element={<IgnoredPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/connect" element={<ConnectPage />} />
+        <Route path="/select" element={<SelectPage />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Route>
+    </Routes>
   );
 }
