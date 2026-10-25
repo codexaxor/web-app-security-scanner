@@ -14,6 +14,98 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-078 Connection token rotation in the UI (2026-10-25, accepted)
+Context: `gitlab_connection` tokens expire; D-063-era SPEC already shows a 14-day expiry banner and the backend
+`PUT /api/v1/gitlab/connections/{id}` (`GitLabController.java:49` → `GitLabConnectionService.update` →
+`ConnectionTokenWriter.rotate`) rotates a connection's token in-place (same target), re-verifying scopes/expiry.
+M8 shipped no UI for it, so an expiring token could only be rotated by an API call.
+Decision: each connection row in the Connect GitLab screen gains a **Rotate token** action opening a dialog with a
+single `type=password`, `autocomplete=off` token field. Submit calls the existing PUT; on success the row shows the
+new scopes/expiry. The token lives only in the dialog's local component state, is dropped on submit/close, is never
+echoed back by the server, never logged, never written to any browser storage (D-067), and never placed in a URL.
+A target mismatch (`CONNECTION_TARGET_MISMATCH`) or GitLab error maps to the existing error taxonomy and is shown
+inline. Proven by `ConnectionRotateUiE2E` (Playwright: rotate sends the PUT; token never visible after submit).
+Consequences: expiring tokens are rotated entirely in the UI; no new backend endpoint; no new dependency.
+
+## D-077 Migration numbering: V19 = M8.1 scan branch; earmarks move (2026-10-25, accepted)
+Context: D-074 reserved **V19** for the IaC severity override and **V20** for the level-2 taxonomy. M8.1 needs an
+additive migration now.
+Decision: **V19 = M8.1 scan branch** (`repository.scan_branch`, `scan.branch`). The earmarks move down one:
+the IaC severity override → **V20**, the level-2 taxonomy → **V21**. This supersedes the "V20 / V19 reserved"
+numbering mentioned in D-074 (D-074's text is left intact per the no-edit rule; this entry is the authority).
+Consequences: no change to any applied migration; M8.5's two migrations become V20/V21.
+
+## D-076 Branch to scan per repository, with re-baseline on switch (2026-10-25, accepted)
+Context: SecScan always clones the repository's GitLab default branch (`ScanJobProcessor.buildSpec` →
+`repo.getDefaultBranch()` → `SCAN_BRANCH` → `run-scan.sh` `git clone --single-branch --depth 1`). Sajal must scan
+`prime-focus-health/orionpilot/notification` on branch `dev` (its `main` is a 2-commit skeleton; real code is on
+`dev`). The container-facing plumbing already carries a branch argv-safely (docker-java API, no shell; token via a
+one-time file, D-014), but there is no per-repository choice, no per-scan snapshot, no validation and no
+branch-aware lifecycle.
+Decision:
+ 1. `repository.scan_branch` (nullable; **null = follow the GitLab default branch**). `scan.branch` = the branch
+    actually cloned, **snapshotted at enqueue and never re-read later**. Migration **V19** (additive; backfills
+    existing `scan.branch` from `repository.default_branch` where known; never edits V1–V18).
+ 2. Setting it: `PATCH /api/v1/repositories/{id}` accepts `scanBranch` (string or null). The server validates
+    (a) the ref-name with git's own `check-ref-format --branch` rules re-implemented in Java (**amendment A1**:
+    not a narrow regex — any character git allows is allowed, incl. `+ # , _ @` except `@{`, and unicode letters;
+    PLUS reject a leading `-`, ASCII control chars / NUL / newline, and length > 255), and (b) **existence in
+    GitLab** for that project (exact match against the branches API, URL-encoded lookup) — the authoritative check,
+    so every branch GitLab lists, and only those, can be chosen. Missing/invalid → `400 BRANCH_NOT_FOUND`; repo
+    outside workspace → `404`; inactive repo → `409`. `null` resets to default.
+ 3. Branch picker: `GET /api/v1/repositories/{id}/branches?search=&page=&size=` (size ≤ 100; `search` ≤ 100 chars
+    else 400, URL-encoded to GitLab) → `[{name, default, protected, lastCommitAt}]` via GitLab
+    `GET /projects/:id/repository/branches` (read_api, paginated). Branch names are external data, rendered as
+    **text only** (D-067). Tokens never logged; GitLab errors mapped to the existing taxonomy. **Amendment A3:** the
+    picker is a searchable combobox that pages beyond 100 branches (server-side `search` + pagination).
+ 4. Clone: the scanner clones `scan.branch` with `--single-branch --depth 1` and the branch as a **separate argv
+    element** via `--branch=<name>` (**amendment A2**: never a shell string, never interpolated into a URL / log /
+    file path). `run-scan.sh` re-validates the branch with the same rules (`secscan-lib.sh`) and refuses otherwise
+    (non-zero exit + scan warning). Container hardening is unchanged except this one validated argument (same
+    read-only rootfs, `--cap-drop=ALL`, no-new-privileges, CPU/mem/PID limits, non-root user, tmpfs, network).
+ 5. **Re-baseline on branch change** (domain rules 3/4/5 preserved): identity is branch-independent — the
+    fingerprint already excludes branch and line, so sub-issues stay loaded repo-wide. When a **scanner's** branch
+    differs from the branch at which that same scanner last successfully closed findings, reconcile runs that
+    scanner in *rebaseline mode*:
+    - fingerprints present on the new branch: normal reconcile (new → open, seen → update);
+    - open findings ABSENT on the new branch → **solved** with lifecycle reason `REASON_BRANCH_CHANGED` (not a
+      "fix");
+    - solved findings that reappear → **reopened** with `REASON_BRANCH_CHANGED` (approved: in rebaseline mode ALL
+      switch-caused closes AND reopens use `REASON_BRANCH_CHANGED`, regardless of the prior close reason);
+    - **ignored stays ignored** (rule 3) — an ignored finding absent on the new branch is NOT solved; it is held.
+      This is the OD-19 "absent-but-ignored" family and is resolved with OD-19 in M8.5 (deferred register);
+    - a failed/absent scanner closes NOTHING for that scanner; its rebaseline is **deferred to the next scan where
+      it succeeds**. Nothing is persisted specially — the per-scanner "last successful branch" is **derived from
+      existing scan/scan_task history** (`scan_task.status='ok' AND closes_findings`, newest reconciled), so a
+      failed scanner simply does not advance its last-success branch and still sees the difference next time;
+    - partial scans follow the same per-scanner rule.
+    `REASON_BRANCH_CHANGED` is a **lifecycle** reason (a new constant in `issue/TriageEvent.java` alongside
+    `SEEN`/`REOPENED`/`SOLVED_NOT_DETECTED`/`UNIGNORED`), **NOT** a `core.triage.ReasonCode` auto-ignore code — so
+    CLAUDE.md hard rule 5's list is unchanged; hard rule 4 (every status change writes a `triage_event`) is
+    honored. `triage_event.reason_code` is free text (no CHECK), so no constraint migration is needed.
+    Feed "Solved · 7d" and any future "fixed"/MTTR/fix-rate metric (M9) **EXCLUDE** `REASON_BRANCH_CHANGED` closes
+    (deferred register). History renders the event in plain words: "Closed — branch changed (<old> → <new>)", with
+    the fallback "Closed — branch changed (now scanning <new>)" when the old branch is not cheaply recoverable.
+ 6. Changing `scanBranch` while a scan for that repo is queued/running is allowed; the in-flight scan keeps its
+    snapshotted branch; the next scan uses the new one. The existing `uq_scan_active_per_repository` (one active
+    scan per repo) is unchanged. **Amendment A4:** `scanBranch` may change any number of times, in any order
+    (main → dev → staging → main, incl. back to null); each switch is honoured by the NEXT scan via re-baseline,
+    and a same-branch rescan adds zero triage events.
+ 7. **Amendment A5 (branch disappeared):** if the chosen branch was deleted in GitLab, the next scan fails cleanly
+    **before cloning** — a worker-side pre-clone existence check (GitLab branches API) writes `fail_reason` /
+    `scan_warning` "branch not found: <name>", runs no reconcile (closes NOTHING), and the repository is flagged
+    `branchMissing` so the UI shows "branch missing — choose another".
+ 8. **Amendment A6 (default follow):** with `scanBranch = null`, each scan uses GitLab's CURRENT default branch at
+    enqueue (refreshed via `GET /projects/:id`); if it differs from the stored value, `repository.default_branch`
+    is updated (no status change; INFO log with repo id + old/new), and the change is treated like a switch
+    (re-baseline), not mass "solved". On a GitLab failure at enqueue, the stored default is used and a
+    `scan_warning` is raised.
+Proven by `BranchNameValidationTest`, `RepositoryScanBranchIT`, `RepositoryBranchesIT`, `RebaselineReconcileIT` +
+`ReconcilerRebaselineTest`, `FeedSummaryIT`, `BranchMissingIT`, `BranchCloneScanIT`, and
+`scanner-image/run_scan_branch_test.py`.
+Consequences: per-repository branch selection with an audited, branch-aware lifecycle; one additive migration; no
+hardening/CSP/dependency change; the absent-but-ignored edge stays with OD-19 for M8.5.
+
 ## D-075 M8 "Done when" verified on 2 repos (1 real + 1 fixture); 3-real-repo walkthrough → M8.5 (OD-21) (2026-10-25, accepted)
 Context: SPEC M8 "Done when" is "Walkthrough on 3 real repos matches API numbers". Sajal's real-data walkthrough
 (2026-10-22..25) was run against **core-keycloak** (a real GitLab repo) and **secscan-test-secrets** (a synthetic
@@ -1170,6 +1262,14 @@ Decision: `workspace_id` on every business table from day one.
     (2) a one-off maintenance pass (no migration) to retire the rows already accumulated; (3) optionally reduce
     SAST fingerprint churn with a structural match key. Not a security issue (the live finding is tracked
     correctly; surplus rows are stale ignored clutter).
+  - **Absent-but-ignored on a branch switch → M8.5 (OD-19 family, D-076):** when `scanBranch` switches, an
+    *ignored* finding that is absent on the new branch stays ignored (rule 3), not solved — the same
+    absent-but-ignored shape as OD-19. Resolve it together with OD-19 in M8.5 (route the ignored-and-absent close
+    through the D-063 resolver with a `triage_event`). Open findings are unaffected (they rebaseline correctly).
+  - **"Fixed"/MTTR/fix-rate metrics must exclude `REASON_BRANCH_CHANGED` → M9 (D-076):** Feed "Solved · 7d"
+    already excludes branch-change closes; any future fix-rate / mean-time-to-remediate / "fixed in last N days"
+    metric (M9 scheduling dashboards or later) MUST likewise exclude `triage_event.reason_code =
+    'BRANCH_CHANGED'`, or a branch switch would inflate the fix numbers.
   - **OD-20 Finding taxonomy → M8.5 (D-074):** level-2 categories (from CWE / secret type / IaC platform /
     ecosystem) + optional OWASP Top 10 2025 tags. New SPEC section + migration **V20** (V19 stays reserved for the
     IaC override). Level-1 plain names already shipped in S10f (`ui/src/lib/labels.ts`).

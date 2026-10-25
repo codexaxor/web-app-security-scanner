@@ -95,8 +95,13 @@ everything after that runs in the worker on parsed JSON.
 1. **Trigger** — daily schedule, a new commit on the default branch (polled every 15 min), or the Start Scan button.
    Skip if the last completed scan has the same commit SHA and the same scanner/rule versions, unless forced.
 2. **Claim** — a worker claims the `scan_job` row (`SKIP LOCKED`), marks it running, records start time.
-3. **Clone** — inside the scanner container: shallow clone (`--depth 1`) of the default branch with the token passed
-   as an HTTP header, never in the URL or logs. Full-history clone only for the first secrets scan of a repo.
+3. **Clone** — inside the scanner container: shallow clone (`--single-branch --depth 1`) of the repository's
+   **configured scan branch** (`repository.scan_branch`, falling back to the GitLab default branch when unset;
+   snapshotted onto `scan.branch` at enqueue), the branch passed as a validated `--branch=<name>` argv element and
+   the token as an HTTP header — never in the URL or logs. Full-history clone only for the first secrets scan of a
+   repo. When a scan's branch differs from the branch a scanner last baselined, reconcile re-baselines that scanner
+   (findings absent on the new branch close as `BRANCH_CHANGED`, not a fix; reappearing ones reopen the same way;
+   ignored stays ignored) — see D-076.
 4. **Inventory** — list manifests and lockfiles, detect languages by file extension, read `.secscan.yml`, produce
    scan-health warnings (e.g. Gradle without lockfile, .NET without `packages.lock.json`).
 5. **Run scanners in parallel** — SCA, secrets, SAST, IaC, EOL detection. Each writes JSON/SARIF to `/out`, with its
@@ -335,6 +340,23 @@ in place (you delete and "create new" prefilled instead), group-level timeline, 
 teams, reachability, a per-issue detail page, and live scan logs. The repository-settings audit row lands with the
 M10 audit log.
 
+**M8.1 build note (D-076..D-078).** Per-repository **branch to scan**: `repository.scan_branch` (null = follow the
+GitLab default branch) is snapshotted onto `scan.branch` at enqueue and never re-read. The repository settings
+dialog gains a searchable "Branch to scan" combobox (first option "Default branch (<name>)", with default/protected
+chips) backed by `GET /api/v1/repositories/{id}/branches?search=&page=&size=`; saving sends
+`PATCH /api/v1/repositories/{id}` with `scanBranch` (validated by git's ref-name rules **and** existence in GitLab),
+and if the repo has completed scans it first shows the re-baseline explanation. `RepositoryView` exposes
+`scanBranch`, `effectiveBranch` (what the next scan will clone) and `branchMissing`; `ScanView` exposes `branch`.
+Repository rows, the Feed/side-panel repo label and the Dashboard recent-scans list show the branch (e.g.
+`notification · dev`; recent scans gains a Branch column). A **branch switch** re-baselines per scanner: findings
+absent on the new branch close as `BRANCH_CHANGED` (excluded from "Solved · 7d" and any future fix metric),
+reappearing ones reopen the same way, ignored stays ignored, and a failed scanner defers its re-baseline to its
+next success. The side-panel history renders `BRANCH_CHANGED` as "Closed — branch changed (<old> → <new>)". The
+Connect GitLab screen gains a **Rotate token** action per connection (D-078). Two selection-screen fixes: an
+already-selected project's checkbox is disabled ("Already selected") and the result reads "N added · M already
+selected"; a project whose code is unreadable is labelled honestly ("No access to repository code — check the token
+role") rather than "empty repository". No new dependency; CSP unchanged.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
@@ -372,6 +394,7 @@ locally.
 | M6 | SAST, IaC, EOL | Opengrep with pinned rules + custom Spring/.NET rules; Checkov; EOL detector + sync | Each fixture triggers its expected rule; an old Spring Boot version raises an EOL issue |
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
 | M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
+| M8.1 | Branch to scan per repository | Per-repo `scan_branch` + `scan.branch` snapshot (V19); branch picker endpoint + searchable UI combobox; git-ref-format + GitLab-existence validation; branch-aware re-baseline (`BRANCH_CHANGED`); token-rotation UI; two selection-screen bug fixes (B1 add-count, B2 empty-vs-no-access) — D-076..D-078 | `notification` scans branch `dev`; a branch switch re-baselines (closes "branch changed", Solved·7d unchanged) and a same-branch rescan adds 0 triage events; see the M8.1 section |
 | M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner | A new commit is scanned within 15 min; nightly run completes for all repos |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 
