@@ -100,6 +100,44 @@ class ApiErrorBodyIT extends AbstractGitLabIT {
     }
 
     @Test
+    void malformedJsonBodyIsA400WithoutEchoingTheBody() throws Exception {
+        Repository repo = seedRepo(9603L);
+        mvc.perform(patch("/api/v1/repositories/{id}", repo.getId())
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ this is not json "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("MALFORMED_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Request body is not readable."))
+                .andExpect(jsonPath("$.trace").doesNotExist());
+    }
+
+    @Test
+    void nonUuidPathParameterIsA400NamingOnlyTheParameter() throws Exception {
+        mvc.perform(get("/api/v1/issue-groups/{id}", "not-a-uuid").header("Authorization", auth))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_PARAMETER"))
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("groupId")))
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("not-a-uuid"))));
+    }
+
+    @Test
+    void unknownSeverityBandIsA400() throws Exception {
+        mvc.perform(get("/api/v1/issue-groups").param("band", "severe").header("Authorization", auth))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    void pageSizeIsClampedToTheDocumentedMaximum() throws Exception {
+        mvc.perform(get("/api/v1/scans").param("size", "9999").header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(200));
+    }
+
+    @Test
     void unauthenticatedStaysAJson401WithoutWwwAuthenticate() throws Exception {
         mvc.perform(get("/api/v1/repositories"))
                 .andExpect(status().isUnauthorized())

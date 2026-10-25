@@ -73,6 +73,8 @@ public class DashboardService {
     private ScanHealth scanHealth() {
         Map<UUID, RepositorySummary> rollups = summaries.summariesByRepo(WORKSPACE);
         List<RepoHealth> unhealthy = new ArrayList<>();
+        long failedPartial = 0;
+        long withWarnings = 0;
         for (Repository repo : repositories.findByWorkspaceId(WORKSPACE)) {
             if (!repo.isActive()) {
                 continue;
@@ -81,13 +83,21 @@ public class DashboardService {
             if (s == null || s.lastScan() == null) {
                 continue;
             }
-            boolean bad = UNHEALTHY.contains(s.lastScan().status()) || s.warningCount() > 0;
-            if (bad) {
+            boolean failed = UNHEALTHY.contains(s.lastScan().status());
+            boolean warned = s.warningCount() > 0;
+            if (failed || warned) {
                 unhealthy.add(new RepoHealth(repo.getPathWithNamespace(), s.lastScan().status(),
                         s.warningCount()));
             }
+            // Counted server-side so the UI renders the numbers directly (N-3). Failed/partial takes priority
+            // over warnings, matching how the UI groups the chips.
+            if (failed) {
+                failedPartial++;
+            } else if (warned) {
+                withWarnings++;
+            }
         }
-        return new ScanHealth(unhealthy.size(), unhealthy);
+        return new ScanHealth(unhealthy.size(), failedPartial, withWarnings, unhealthy);
     }
 
     private static Object[] first(List<Object[]> rows) {

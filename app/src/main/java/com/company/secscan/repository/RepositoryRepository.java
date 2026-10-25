@@ -60,7 +60,8 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
     @Query(value = """
             select distinct on (s.repository_id)
                    s.repository_id, s.id, s.status, s.finished_at,
-                   (select count(*) from scan_warning w where w.scan_id = s.id) as warning_count
+                   (select count(*) from scan_warning w where w.scan_id = s.id and w.workspace_id = :ws)
+                       as warning_count
             from scan s
             where s.workspace_id = :ws
             order by s.repository_id, s.created_at desc

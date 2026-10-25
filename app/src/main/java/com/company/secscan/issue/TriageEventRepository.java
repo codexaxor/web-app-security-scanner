@@ -28,7 +28,8 @@ public interface TriageEventRepository extends JpaRepository<TriageEvent, UUID> 
     @Query("""
             select count(distinct e.subIssueId)
             from TriageEvent e, SubIssue s, com.company.secscan.repository.Repository r
-            where e.workspaceId = :ws and s.id = e.subIssueId and r.id = s.repositoryId
+            where e.workspaceId = :ws and s.id = e.subIssueId and s.workspaceId = :ws
+              and r.id = s.repositoryId and r.workspaceId = :ws
               and e.toStatus = :toStatus and e.at >= :since
               and (:actor is null or e.actor = :actor)
               and (:repositoryId is null or s.repositoryId = :repositoryId)

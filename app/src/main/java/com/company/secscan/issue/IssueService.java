@@ -1,6 +1,7 @@
 package com.company.secscan.issue;
 
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.api.Pagination;
 import com.company.secscan.issue.api.FeedSummaryView;
 import com.company.secscan.issue.api.IssueGroupView;
 import com.company.secscan.issue.api.SubIssueView;
@@ -62,16 +63,18 @@ public class IssueService {
         int[] range = bandRange(band);
         var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), statusesFor(view),
                 range == null ? null : range[0], range == null ? null : range[1], includeInactive,
-                PageRequest.of(Math.max(0, page), Math.max(1, size)));
+                Pagination.of(page, size));
         Map<UUID, String> paths = repoPaths();
         Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
-        return PagedResponse.fromPage(pageResult.map(g -> toView(g, paths, counts)));
+        // Feed rows omit fixedVersions (an SCA-only, per-group detail shown in the side panel, not the table).
+        return PagedResponse.fromPage(pageResult.map(g -> toView(g, paths, counts, List.of())));
     }
 
     /** Build a view with its open/ignored/solved sub-issue counts (0,0,0 when the group has no sub-issue). */
-    private IssueGroupView toView(IssueGroup g, Map<UUID, String> paths, Map<UUID, long[]> counts) {
+    private IssueGroupView toView(IssueGroup g, Map<UUID, String> paths, Map<UUID, long[]> counts,
+                                  List<String> fixedVersions) {
         long[] c = counts.getOrDefault(g.getId(), new long[3]);
-        return IssueGroupView.of(g, paths.get(g.getRepositoryId()), c[0], c[1], c[2]);
+        return IssueGroupView.of(g, paths.get(g.getRepositoryId()), c[0], c[1], c[2], fixedVersions);
     }
 
     /**
@@ -102,7 +105,10 @@ public class IssueService {
     public IssueGroupView getGroup(UUID groupId) {
         IssueGroup g = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
-        return toView(g, repoPaths(), findingCounts(List.of(g)));
+        // SF-7: the distinct fixed versions across this group's OPEN sub-issues (SQL, workspace-scoped, nulls
+        // excluded). The panel renders "upgrade to <v>" for one, "see each location" for several, nothing for none.
+        List<String> fixedVersions = subIssues.findOpenFixedVersions(WORKSPACE, groupId);
+        return toView(g, repoPaths(), findingCounts(List.of(g)), fixedVersions);
     }
 
     /** The Feed summary bar (OD-14 item 4): band group counts for the view + 7-day finding buckets (change 3). */
@@ -161,8 +167,8 @@ public class IssueService {
         if (ruleIds.isEmpty()) {
             return Map.of();
         }
-        return ignoreRules.findAllById(ruleIds).stream()
-                .filter(r -> WORKSPACE.equals(r.getWorkspaceId()))
+        // Workspace-scoped in SQL (N-1, domain rule 1) — never load another tenant's rule row at all.
+        return ignoreRules.findByWorkspaceIdAndIdIn(WORKSPACE, ruleIds).stream()
                 .collect(Collectors.toMap(IgnoreRule::getId, Function.identity()));
     }
 
@@ -170,7 +176,10 @@ public class IssueService {
         return "all".equalsIgnoreCase(view) ? ALL_STATUSES : FOCUS_STATUSES;
     }
 
-    /** The inclusive [lo, hi] score range for a band name, or null for no band filter (blank/unknown). */
+    /**
+     * The inclusive [lo, hi] score range for a band name, or null for no band filter (blank). An unknown
+     * non-blank band is a client error → 400 (N-6), never silently treated as "all".
+     */
     private static int[] bandRange(String band) {
         if (!StringUtils.hasText(band)) {
             return null;
@@ -180,7 +189,8 @@ public class IssueService {
             case "high" -> new int[] {70, 89};
             case "medium" -> new int[] {40, 69};
             case "low" -> new int[] {1, 39};
-            default -> null;
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown severity band. Use critical, high, medium or low.");
         };
     }
 

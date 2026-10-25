@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -46,7 +47,7 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
      */
     @Query("""
             select g from IssueGroup g, Repository r
-            where g.workspaceId = :ws and r.id = g.repositoryId
+            where g.workspaceId = :ws and r.id = g.repositoryId and r.workspaceId = :ws
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
               and g.status in :statuses
@@ -77,7 +78,7 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
               sum(case when g.severityScore >= 1  and g.severityScore < 40 then 1 else 0 end),
               count(g)
             from IssueGroup g, Repository r
-            where g.workspaceId = :ws and r.id = g.repositoryId
+            where g.workspaceId = :ws and r.id = g.repositoryId and r.workspaceId = :ws
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
               and g.status in :statuses
@@ -88,4 +89,21 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
                         @Param("type") String type,
                         @Param("statuses") java.util.List<String> statuses,
                         @Param("includeInactive") boolean includeInactive);
+
+    /**
+     * SF-2: the score-only rollup write — ONLY the derived columns {@code severity_score}, {@code fix_time_minutes}
+     * and {@code subtitle}, and ONLY while the group is still {@code open}. A column-scoped UPDATE (never a
+     * full-entity save) guarded by {@code workspace_id} + {@code status = 'open'}: the re-score / sensitivity path
+     * must never write {@code status} and must not resurrect a score onto a group that a concurrent reconcile has
+     * flipped to {@code ignored}/{@code solved} in the window since the re-score read it (domain rule 3, B1).
+     * {@code subtitle} is left unchanged when {@code :subtitle} is null (an enrichment gap never blanks it).
+     * {@code clearAutomatically} drops the first-level cache so later reads see the new values. Returns rows
+     * updated (0 when the group is no longer open).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "update issue_group set severity_score = :severity, fix_time_minutes = :fixTime, "
+            + "subtitle = coalesce(:subtitle, subtitle) "
+            + "where id = :id and workspace_id = :ws and status = 'open'", nativeQuery = true)
+    int updateScoreRollupIfOpen(@Param("id") UUID id, @Param("ws") UUID ws, @Param("severity") Integer severity,
+                                @Param("fixTime") Integer fixTime, @Param("subtitle") String subtitle);
 }

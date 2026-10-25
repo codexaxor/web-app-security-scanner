@@ -27,7 +27,8 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            List<ScoreLine> scoreBreakdown, String cvss, String severityLabel, List<String> cwe,
                            String cwePhrase, Boolean inKev, BigDecimal epss, String epssAttribution,
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
-                           UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy) {
+                           UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
+                           boolean ruleGlobal) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
@@ -56,6 +57,8 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getId(),
                 rule == null ? null : rule.getScope(),
                 rule == null ? null : rule.getReason(),
-                rule == null ? null : rule.getCreatedBy());
+                rule == null ? null : rule.getCreatedBy(),
+                // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
+                rule != null && rule.getRepositoryId() == null);
     }
 }

@@ -242,11 +242,13 @@ public class TriageService {
                 ruleIds.add(s.getIgnoredByRuleId());
             }
         }
+        if (ruleIds.isEmpty()) {
+            return Map.of();
+        }
+        // Workspace-scoped in SQL (N-1, domain rule 1) — never load another tenant's rule row at all.
         Map<UUID, IgnoreRule> out = new HashMap<>();
-        for (IgnoreRule r : ignoreRules.findAllById(ruleIds)) {
-            if (WORKSPACE.equals(r.getWorkspaceId())) {
-                out.put(r.getId(), r);
-            }
+        for (IgnoreRule r : ignoreRules.findByWorkspaceIdAndIdIn(WORKSPACE, ruleIds)) {
+            out.put(r.getId(), r);
         }
         return out;
     }

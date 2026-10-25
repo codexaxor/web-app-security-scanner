@@ -19,7 +19,13 @@ public record DashboardSummaryView(BandCounts groupBands, long totalGroups,
     public record TypeCount(String type, long count) {
     }
 
-    public record ScanHealth(long unhealthyRepoCount, List<RepoHealth> repos) {
+    /**
+     * Scan health: the unhealthy repository count plus the server-computed split the UI renders directly —
+     * {@code failedPartialCount} (last scan failed or partial) and {@code withWarningsCount} (completed but
+     * raised warnings). The UI shows these numbers verbatim and never recounts the {@code repos} list (N-3).
+     */
+    public record ScanHealth(long unhealthyRepoCount, long failedPartialCount, long withWarningsCount,
+                             List<RepoHealth> repos) {
     }
 
     public record RepoHealth(String repositoryPath, String lastScanStatus, long warningCount) {

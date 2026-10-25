@@ -120,4 +120,16 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     int updateScoreColumnsIfOpen(@Param("id") UUID id, @Param("score") Integer score,
                                  @Param("breakdown") String breakdown, @Param("inKev") boolean inKev,
                                  @Param("epss") BigDecimal epss);
+
+    /**
+     * SF-7: the distinct fixed versions across one group's OPEN sub-issues (nulls excluded), workspace-scoped.
+     * The side panel turns this into the SCA "upgrade to &lt;v&gt;" fix line (one value), "see each location"
+     * (several) or no fix line (none). No version comparison — the ordering/choice is the UI's concern.
+     */
+    @Query("""
+            select distinct s.fixedVersion from SubIssue s
+            where s.workspaceId = :ws and s.groupId = :groupId and s.status = 'open'
+              and s.fixedVersion is not null
+            """)
+    List<String> findOpenFixedVersions(@Param("ws") UUID ws, @Param("groupId") UUID groupId);
 }

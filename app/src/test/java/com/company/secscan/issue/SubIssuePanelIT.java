@@ -66,6 +66,39 @@ class SubIssuePanelIT extends AbstractGitLabIT {
     }
 
     @Test
+    void getGroupReturnsTheDistinctFixedVersionsAcrossOpenSubIssues() {
+        UUID repoId = repo(8303L);
+        IssueGroup g = group(repoId);
+
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-1", "1.0.1"));
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-2", "1.0.1")); // dup → collapses to one distinct value
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-3", "2.0.0"));
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-4", null));    // no fix → excluded
+        SubIssue ignored = fixedVersionSub(g.getId(), repoId, "fp-5", "9.9.9");
+        ignored.ignore("IGNORE_RULE", null);                                  // not open → excluded
+        subIssues.save(ignored);
+
+        assertThat(service.getGroup(g.getId()).fixedVersions())
+                .containsExactlyInAnyOrder("1.0.1", "2.0.0");
+    }
+
+    @Test
+    void getGroupReturnsASingleFixedVersionWhenAllOpenSubsAgree() {
+        UUID repoId = repo(8304L);
+        IssueGroup g = group(repoId);
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-a", "3.1.4"));
+        subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-b", "3.1.4"));
+
+        assertThat(service.getGroup(g.getId()).fixedVersions()).containsExactly("3.1.4");
+    }
+
+    private SubIssue fixedVersionSub(UUID groupId, UUID repoId, String fp, String fixedVersion) {
+        SubIssue s = new SubIssue(WORKSPACE, groupId, repoId, "sca", "sca", fp, null);
+        s.setFixedVersion(fixedVersion);
+        return s;
+    }
+
+    @Test
     void ruleFieldsArePopulatedForARuleHeldFindingAndNullOtherwise() {
         UUID repoId = repo(8302L);
         IssueGroup g = group(repoId);
