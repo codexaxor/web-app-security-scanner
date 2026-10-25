@@ -7,21 +7,26 @@ import { humanizeRuleId, reasonLabel, typeLabel } from "../lib/labels";
 import RelativeTime from "./RelativeTime";
 import ErrorBanner from "./ErrorBanner";
 import IgnoreDialog from "./IgnoreDialog";
+import ConfirmDialog from "./ConfirmDialog";
 import Dialog from "./Dialog";
 import Button from "./Button";
 import SeverityPill from "./SeverityPill";
 import TypeBadge from "./TypeBadge";
 import RepoName from "./RepoName";
 
-/** Remediation line per issue type, from existing data only. */
-function remediation(group: IssueGroupView | undefined, subs: SubIssueView[]): string {
+/**
+ * Remediation line per issue type, from existing server data only. For SCA the fix comes from the group's
+ * server-computed distinct `fixedVersions` over OPEN sub-issues (SF-7): one → "upgrade to <v>", several →
+ * "see each location", none → no fix line at all (returns null). Other types keep their fixed guidance.
+ */
+function remediation(group: IssueGroupView | undefined, subs: SubIssueView[]): string | null {
   const type = group?.type ?? subs[0]?.type;
   if (type === "sca") {
     const pkg = group?.title ?? subs[0]?.packageName ?? "the dependency";
-    const fixed = subs.map((s) => s.fixedVersion).filter(Boolean);
-    return fixed.length
-      ? `Fix: upgrade ${pkg} to ${fixed[fixed.length - 1]}`
-      : `Fix: no fixed version is available yet for ${pkg}.`;
+    const fixed = group?.fixedVersions ?? [];
+    if (fixed.length === 1) return `Fix: upgrade ${pkg} to ${fixed[0]}`;
+    if (fixed.length > 1) return "Fix: several fixed versions — see each location below.";
+    return null; // no fixed version available → no fix line (SF-7)
   }
   if (type === "secret") return "Fix: rotate the exposed secret and remove it from the repository history.";
   if (type === "iac") return "Fix: correct the flagged infrastructure configuration.";
@@ -42,6 +47,9 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
   const subs = q.data?.content ?? [];
   const g = group.data;
   const title = g ? (g.type === "sast" ? humanizeRuleId(g.title) : g.title) : "Issue";
+  // N-3: the affected-locations count is the server total, not subs.length (which caps at the 100-row page).
+  const affected = q.data?.totalElements ?? subs.length;
+  const fixLine = g ? remediation(g, subs) : null;
 
   return (
     <Dialog title="Issue details" onClose={onClose} variant="drawer">
@@ -69,10 +77,10 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
 
         {g ? (
           <div className="group-head">
-            <div className="remediation">{remediation(g, subs)}</div>
+            {fixLine ? <div className="remediation">{fixLine}</div> : null}
             <div className="row-between">
-              <span className="muted">
-                {subs.length} affected location{subs.length === 1 ? "" : "s"}
+              <span className="muted" data-testid="affected-count">
+                {affected} affected location{affected === 1 ? "" : "s"}
               </span>
               {subs.length > 0 ? (
                 <Button variant="secondary" size="sm" onClick={() => setIgnoreGroup(true)}>
@@ -105,10 +113,14 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
   const [showIgnore, setShowIgnore] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [confirmUnignore, setConfirmUnignore] = useState(false);
 
   const unignore = useMutation({
     mutationFn: () => api.deleteIgnoreRule(sub.ignoreRuleId as string),
-    onSuccess: () => invalidateFor("triage"),
+    onSuccess: () => {
+      setConfirmUnignore(false);
+      return invalidateFor("triage");
+    },
   });
 
   const link = advisoryLink(sub.vulnId);
@@ -230,7 +242,7 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => unignore.mutate()}
+                  onClick={() => (sub.ruleGlobal ? setConfirmUnignore(true) : unignore.mutate())}
                   disabled={unignore.isPending}
                   data-testid="unignore"
                 >
@@ -256,6 +268,21 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
       {showHistory ? <History subId={sub.id} /> : null}
 
       {showIgnore ? <IgnoreDialog sub={sub} groupId={groupId} onClose={() => setShowIgnore(false)} /> : null}
+
+      {confirmUnignore ? (
+        <ConfirmDialog
+          title="Unignore across every repository?"
+          confirmLabel={unignore.isPending ? "Unignoring…" : "Unignore everywhere"}
+          busy={unignore.isPending}
+          onConfirm={() => unignore.mutate()}
+          onCancel={() => setConfirmUnignore(false)}
+        >
+          <p>
+            This ignore is a <strong>global</strong> rule (<code>{sub.ruleScope}</code>, all repositories). Removing
+            it re-opens this finding everywhere the rule applied, not just here.
+          </p>
+        </ConfirmDialog>
+      ) : null}
     </div>
   );
 }

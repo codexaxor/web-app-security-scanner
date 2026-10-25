@@ -1,23 +1,10 @@
-import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { AuthRequiredError } from "./api";
 
-// A single QueryClient for the app. A 401 anywhere (query or mutation) means the in-memory credentials are gone
-// or rejected: we hand it to onUnauthorized, which clears credentials AND the cache and drops the app back to
-// the sign-in gate (OD-13a). Credentials never touch storage, so a refresh naturally lands here too.
-let onUnauthorized: () => void = () => {};
-export function setUnauthorizedHandler(fn: () => void): void {
-  onUnauthorized = fn;
-}
-
-function handle(error: unknown): void {
-  if (error instanceof AuthRequiredError) {
-    onUnauthorized();
-  }
-}
-
+// A single QueryClient for the app. The unauthorized drop-to-sign-in is handled centrally in api.ts's request()
+// (SF-3): it fires on EVERY 401, so there is no need for a QueryCache/MutationCache onError hook here (that only
+// saw react-query-driven 401s and would double-fire). We keep the retry predicate: never retry a 401.
 export const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: handle }),
-  mutationCache: new MutationCache({ onError: handle }),
   defaultOptions: {
     queries: {
       retry: (count, error) => !(error instanceof AuthRequiredError) && count < 1,
@@ -38,35 +25,41 @@ export const qk = {
   feedSummary: (params: unknown) => ["feed-summary", params] as const,
   feedSummaryAll: ["feed-summary"] as const,
   group: (groupId: string) => ["issue-group", groupId] as const,
+  groupAll: ["issue-group"] as const,
   subIssues: (groupId: string, page: number) => ["sub-issues", groupId, page] as const,
   subIssuesAll: ["sub-issues"] as const,
   subIssueEvents: (subId: string, page: number) => ["sub-issue-events", subId, page] as const,
+  subIssueEventsAll: ["sub-issue-events"] as const,
   ignored: (page: number) => ["ignored", page] as const,
   ignoredAll: ["ignored"] as const,
   ignoreRules: (page: number) => ["ignore-rules", page] as const,
   ignoreRulesAll: ["ignore-rules"] as const,
   dashboard: (includeInactive: boolean) => ["dashboard", includeInactive] as const,
   dashboardAll: ["dashboard"] as const,
+  scansRecent: ["scans-recent"] as const,
   workspaceSettings: ["workspace-settings"] as const,
 };
 
 // --- Invalidation map -------------------------------------------------------------------------------
-// After a mutation, invalidate every query family a user could see change. Documented here so a new screen
-// cannot forget to refresh (R3/R5): any ignore/unignore/settings/scan/EPSS mutation refreshes the panel, the
-// feed rows + summary, the Ignored view, the Dashboard and the Repositories rollups.
-type MutationKind = "triage" | "settings" | "scan" | "workspaceSettings";
+// After a mutation, invalidate EVERY query family a user could see change — including the side panel's own
+// group header (`issue-group`) and per-sub-issue history (`sub-issue-events`), which SF-1 adds to all four
+// kinds (their omission was the "Medium 65" stale-header bug). Documented exactly so a new screen cannot
+// forget to refresh (R3/R5); the table-driven test in queryClient.test.ts asserts this map verbatim.
+export type MutationKind = "triage" | "settings" | "scan" | "workspaceSettings";
 
-const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
-  // ignore / unignore / delete-rule: statuses and every count move.
-  triage: [qk.subIssuesAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.ignoreRulesAll, qk.dashboardAll,
-    qk.repositoriesAll],
+export const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
+  // ignore / unignore / delete-rule: statuses and every count move, plus the open panel's header + history.
+  triage: [qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll,
+    qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll],
   // repo settings: sensitivity re-scores (scores/bands move), include-dev-deps/active change rollups + feed.
-  settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll],
-  // start scan / status poll reaching terminal: counts can change, rollups refresh.
-  scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll],
-  // EPSS toggle: LOW_EPSS auto-ignore + scoring tiers move feed/ignored/dashboard counts.
+  settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll,
+    qk.subIssueEventsAll, qk.groupAll],
+  // start scan / status poll reaching terminal: counts, statuses and the recent-scans list all move.
+  scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll,
+    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
+  // EPSS toggle: LOW_EPSS auto-ignore + scoring tiers move feed/ignored/dashboard/repo counts, panel + history.
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
-    qk.subIssuesAll],
+    qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll],
 };
 
 export function invalidateFor(kind: MutationKind): Promise<void> {

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type FeedParams, type IssueType, type Band, type View, type IssueGroupView } from "../api";
 import { qk } from "../queryClient";
 import { fixTime, titleCase } from "../lib/format";
+import { isUuid, oneOf } from "../lib/validate";
 import { humanizeRuleId, typeLabel } from "../lib/labels";
 import ErrorBanner from "../components/ErrorBanner";
 import SubIssuePanel from "../components/SubIssuePanel";
@@ -41,10 +42,18 @@ export default function FeedPage() {
   const navigate = useNavigate();
   const { groupId } = useParams();
 
-  const view = (params.get("view") as View) || "focus";
-  const band = (params.get("band") as Band) || undefined;
-  const type = (params.get("type") as IssueType) || undefined;
+  // N-8: validate enum params + ids BEFORE building any API path; an unknown value is a not-found page, no request.
+  const viewCheck = oneOf<View>(params.get("view"), ["focus", "all"]);
+  const bandCheck = oneOf<Band>(params.get("band"), BANDS);
+  const typeCheck = oneOf<IssueType>(params.get("type"), TYPES);
   const repositoryId = params.get("repositoryId") || undefined;
+  const repoOk = !repositoryId || isUuid(repositoryId);
+  const groupOk = !groupId || isUuid(groupId);
+  const invalid = !viewCheck.ok || !bandCheck.ok || !typeCheck.ok || !repoOk || !groupOk;
+
+  const view: View = (viewCheck.ok ? viewCheck.value : undefined) ?? "focus";
+  const band = bandCheck.ok ? bandCheck.value : undefined;
+  const type = typeCheck.ok ? typeCheck.value : undefined;
   const includeInactive = params.get("includeInactive") === "true";
   const page = Number(params.get("page") || "0");
 
@@ -61,12 +70,18 @@ export default function FeedPage() {
   const feed = useQuery({
     queryKey: qk.feed({ ...filters, page }),
     queryFn: () => api.listFeed({ ...filters, page, size: SIZE }),
+    enabled: !invalid,
   });
   const summary = useQuery({
     queryKey: qk.feedSummary(filters),
     queryFn: () => api.feedSummary(filters),
+    enabled: !invalid,
   });
-  const repos = useQuery({ queryKey: qk.repositories(0, 100), queryFn: () => api.listRepositories(0, 100) });
+  const repos = useQuery({
+    queryKey: qk.repositories(0, 100),
+    queryFn: () => api.listRepositories(0, 100),
+    enabled: !invalid,
+  });
 
   const s = summary.data;
   const bands = s?.bands ?? { critical: 0, high: 0, medium: 0, low: 0 };
@@ -76,6 +91,17 @@ export default function FeedPage() {
   }
 
   const rows = feed.data?.content ?? [];
+
+  if (invalid) {
+    return (
+      <section>
+        <PageHeader title="Feed" subtitle="One deduplicated, prioritized issue feed across your repositories." />
+        <EmptyState title="Page not found" testId="not-found">
+          That link isn't valid. <a href="/feed">Go to the Feed</a>.
+        </EmptyState>
+      </section>
+    );
+  }
 
   return (
     <section>

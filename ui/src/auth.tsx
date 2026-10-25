@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { clearCredentials, hasCredentials } from "./api";
-import { queryClient, setUnauthorizedHandler } from "./queryClient";
+import { clearCredentials, hasCredentials, setUnauthorizedHandler } from "./api";
+import { queryClient } from "./queryClient";
 
 /**
  * In-memory auth (OD-13a). `signedIn` mirrors whether credentials are held in memory (never storage). Any 401

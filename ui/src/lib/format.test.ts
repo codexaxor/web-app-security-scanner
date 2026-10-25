@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exactTime, relativeTime } from "./format";
+import { advisoryLink, exactTime, relativeTime } from "./format";
 
 // Fixed clock so the buckets are deterministic. Wording is the environment default locale (en-US here); the
 // assertions target the BUCKET (unit + rounded number), which is what the S10a bug was about.
@@ -59,6 +59,36 @@ describe("relativeTime", () => {
     expect(relativeTime(ahead(9 * HR))).toBe("in 9 hours");
     expect(relativeTime(ahead(2 * MIN))).toBe("in 2 minutes");
     expect(relativeTime(ahead(30 * S))).toBe("just now");
+  });
+});
+
+describe("advisoryLink", () => {
+  it("builds an NVD link only for a well-formed CVE id", () => {
+    expect(advisoryLink("CVE-2024-1234")).toBe("https://nvd.nist.gov/vuln/detail/CVE-2024-1234");
+    expect(advisoryLink("cve-2024-1234")).toBe("https://nvd.nist.gov/vuln/detail/CVE-2024-1234");
+  });
+
+  it("builds a GitHub advisory link only for a well-formed GHSA id", () => {
+    expect(advisoryLink("GHSA-wh77-3x4m-4q9g")).toBe("https://github.com/advisories/GHSA-WH77-3X4M-4Q9G");
+  });
+
+  it("returns null for anything that is not a recognised, exact id (no link rendered)", () => {
+    for (const bad of [
+      null,
+      undefined,
+      "",
+      "   ",
+      "javascript:alert(1)",
+      "CVE-2024-1", // too few digits
+      "CVE-2024-1/../x", // path-traversal-looking junk
+      "CVE-2024-1234 ", // trailing whitespace → not an exact match
+      " CVE-2024-1234", // leading whitespace
+      "https://evil.example/CVE-2024-1234",
+      "GHSA-xxxx", // malformed GHSA
+      "not-an-id",
+    ]) {
+      expect(advisoryLink(bad as string | null | undefined)).toBeNull();
+    }
   });
 });
 

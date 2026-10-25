@@ -46,9 +46,17 @@ export function ScanStatusChip({ status }: { status: string }) {
   return <span className={`chip ${cls}`}>{label}</span>;
 }
 
-export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+export function EmptyState({
+  title,
+  children,
+  testId,
+}: {
+  title: string;
+  children?: ReactNode;
+  testId?: string;
+}) {
   return (
-    <div className="empty">
+    <div className="empty" data-testid={testId}>
       <div className="empty-title">{title}</div>
       {children ? <div>{children}</div> : null}
     </div>

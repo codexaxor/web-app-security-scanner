@@ -97,6 +97,7 @@ export interface IssueGroupView {
   openCount: number;
   ignoredCount: number;
   solvedCount: number;
+  fixedVersions: string[];
 }
 
 export interface FeedSummaryView {
@@ -148,6 +149,7 @@ export interface SubIssueView {
   ruleScope: string | null;
   ruleReason: string | null;
   ruleCreatedBy: string | null;
+  ruleGlobal: boolean;
 }
 
 export interface TriageEventView {
@@ -216,6 +218,8 @@ export interface DashboardSummaryView {
   byType: { type: string; count: number }[];
   scanHealth: {
     unhealthyRepoCount: number;
+    failedPartialCount: number;
+    withWarningsCount: number;
     repos: { repositoryPath: string; lastScanStatus: string; warningCount: number }[];
   };
   inactive: { inactiveRepoCount: number; openFindingsInInactiveRepos: number };
@@ -274,6 +278,14 @@ export class ApiError extends Error {
 
 let authHeader: string | null = null;
 
+// SF-3: a single unauthorized handler invoked by request() on ANY 401 — so direct (non-react-query) calls in
+// ConnectGitLab / SelectRepositories drop to the sign-in gate too, not only queries/mutations. auth.tsx registers
+// it to clear credentials + the query cache. Default no-op so api.ts stays usable in isolation (e.g. unit tests).
+let onUnauthorized: () => void = () => {};
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
 export function setCredentials(email: string, password: string): void {
   authHeader = "Basic " + btoa(`${email}:${password}`);
 }
@@ -297,13 +309,24 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.status === 401) {
+    // Fire on EVERY 401, before throwing, so direct callers (not just react-query) drop to sign-in (SF-3).
+    onUnauthorized();
     throw new AuthRequiredError("Authentication required");
   }
   if (res.status === 204) {
     return undefined as T;
   }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  // N-4: a non-JSON body (e.g. an nginx HTML 502) must not blow up with a raw SyntaxError — fall back to null so
+  // the error banner shows a clean "Request failed (<status>)".
+  let data: { message?: string; error?: string } | null = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
   if (!res.ok) {
     const message = data?.message ?? `Request failed (${res.status})`;
     throw new ApiError(message, data?.error ?? null);

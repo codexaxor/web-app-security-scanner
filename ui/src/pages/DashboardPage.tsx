@@ -25,7 +25,7 @@ function duration(startedAt: string | null, finishedAt: string | null): string {
 
 export default function DashboardPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
-  const scans = useQuery({ queryKey: ["scans-recent"], queryFn: () => api.listScansAll(0, 10) });
+  const scans = useQuery({ queryKey: qk.scansRecent, queryFn: () => api.listScansAll(0, 10) });
   const repos = useQuery({ queryKey: qk.repositories(0, 100), queryFn: () => api.listRepositories(0, 100) });
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
@@ -72,8 +72,11 @@ export default function DashboardPage() {
         <p className="muted" data-testid="scan-health-count">
           {d?.scanHealth.unhealthyRepoCount ?? 0}{" "}
           {(d?.scanHealth.unhealthyRepoCount ?? 0) === 1 ? "repository needs" : "repositories need"} attention —{" "}
-          {failedPartial.length > 0 ? `${failedPartial.length} failed/partial` : "all scans completed"} ·{" "}
-          {withWarnings.length} with warning{withWarnings.length === 1 ? "" : "s"}
+          {(d?.scanHealth.failedPartialCount ?? 0) > 0
+            ? `${d?.scanHealth.failedPartialCount} failed/partial`
+            : "all scans completed"}{" "}
+          · {d?.scanHealth.withWarningsCount ?? 0} with warning
+          {(d?.scanHealth.withWarningsCount ?? 0) === 1 ? "" : "s"}
         </p>
       )}
       {healthRepos.length === 0 ? null : (
