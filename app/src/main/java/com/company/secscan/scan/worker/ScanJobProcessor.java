@@ -143,6 +143,13 @@ public class ScanJobProcessor {
             if (!probeProvisionalAccess(repo, conn, token, workspaceId, jobId, scan.getId())) {
                 return;
             }
+            // A5 (D-076): verify the configured branch still exists BEFORE cloning. A definitive 404 fails the
+            // scan cleanly (no reconcile, closes nothing) and flags the repository branch-missing.
+            if (!isLocal(conn) && scan.getBranch() != null
+                    && !branchExists(repo, conn, token, scan.getBranch())) {
+                state.failBranchMissing(workspaceId, jobId, scan.getId(), repo.getId(), scan.getBranch());
+                return;
+            }
             Path tokenFile = token == null ? null : ws.writeToken(token);
             ScannerLaunchSpec spec = buildSpec(scan, repo, conn, ws, tokenFile);
 
@@ -249,6 +256,20 @@ public class ScanJobProcessor {
 
     private static boolean isLocal(GitlabConnection conn) {
         return conn.getBaseUrl() != null && conn.getBaseUrl().startsWith("file:");
+    }
+
+    /**
+     * A5 (D-076): whether the branch exists in GitLab. A definitive 404 ({@link GitLabError#BRANCH_NOT_FOUND})
+     * means missing. Any transient GitLab error (unreachable, rate-limited) is NOT treated as missing — the
+     * clone attempt proceeds (and may itself fail/retry) rather than wrongly flagging the branch gone.
+     */
+    private boolean branchExists(Repository repo, GitlabConnection conn, String token, String branch) {
+        try {
+            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+            return true;
+        } catch (GitLabException e) {
+            return e.getError() != GitLabError.BRANCH_NOT_FOUND;
+        }
     }
 
     private static boolean accessDenied(GitLabError error) {

@@ -37,6 +37,15 @@ OSV_CONFIG=/etc/secscan/osv-scanner.toml
 BRANCH="${SCAN_BRANCH:-}"
 DEPTH="${SCAN_CLONE_DEPTH:-1}"
 
+# Defense in depth (D-076 A2/A4): re-validate the requested branch with the same rules as the app and refuse an
+# invalid one BEFORE git runs. The branch only ever reaches git as a single --branch=<name> argv element below.
+if [ -n "$BRANCH" ] && ! valid_branch_name "$BRANCH"; then
+    jq -nc --arg err "invalid branch name (refused by run-scan.sh)" \
+        '{schemaVersion:1, cloneFailed:true, error:$err, scanners:[]}' > "$OUT/result.json"
+    echo "run-scan.sh: refusing invalid branch name" >&2
+    exit 11
+fi
+
 GIT_VERSION="$(git --version | awk '{print $3}')"
 BETTERLEAKS_VERSION="$(betterleaks version 2>/dev/null || echo unknown)"
 
@@ -55,8 +64,10 @@ if [ -s "$TOKEN_FILE" ]; then
 fi
 
 set +e
+# The branch is a single validated --branch=<name> argv element (never interpolated into a shell string, URL or
+# log line; D-076 A2). The equals form means a value is never parsed as a git option.
 # shellcheck disable=SC2086
-git clone --depth "$DEPTH" --single-branch ${BRANCH:+--branch "$BRANCH"} "$SCAN_CLONE_URL" "$CHECKOUT" 2>"$WORK/clone.err"
+git clone --depth "$DEPTH" --single-branch ${BRANCH:+--branch="$BRANCH"} "$SCAN_CLONE_URL" "$CHECKOUT" 2>"$WORK/clone.err"
 CLONE_EXIT=$?
 set -e
 # The token header lives only here; drop it immediately after the clone.

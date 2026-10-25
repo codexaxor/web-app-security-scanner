@@ -158,6 +158,22 @@ val scopeInventoryTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-076 gate: the scanner's branch-name validator (scanner-image/secscan-lib.sh valid_branch_name) must match the
+// Java core.scan.BranchName rules; host-run under the DEFAULT build (stdlib unittest + POSIX sh), like above.
+val runScanBranchTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the run-scan.sh branch-name validator's Python unit tests (D-076)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("secscan-lib.sh")).withPropertyName("secscanLib")
+    inputs.file(scannerDir.resolve("run_scan_branch_test.py")).withPropertyName("runScanBranchTest")
+    val marker = layout.buildDirectory.file("run-scan-branch-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "run_scan_branch_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, runScanBranchTest)
 }

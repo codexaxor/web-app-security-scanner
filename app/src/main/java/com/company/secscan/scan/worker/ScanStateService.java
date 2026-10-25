@@ -85,6 +85,14 @@ public class ScanStateService {
         scan.finish(terminalStatus);
         scans.save(scan);
 
+        // A successful clone means the configured branch exists; clear any stale branch-missing flag (A5, D-076).
+        repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(r -> {
+            if (r.isBranchMissing()) {
+                r.clearBranchMissing();
+                repositories.save(r);
+            }
+        });
+
         // EOL enrichment (review BUG 1/2): classify EOL candidates against the eol_cycle cache BEFORE persisting
         // — only genuine, covered issues (past-EOL / ending-soon, cycle normalized to the feed key) are stored;
         // an uncovered detection is dropped with a warning. Never-false-solve is enforced PER (product,cycle) in
@@ -223,6 +231,29 @@ public class ScanStateService {
         log.error("Scan {} failed (not retried, {}): {}", scanId, failCode, reason);
         scan.failWith(failCode);
         job.markFailed();
+        scans.save(scan);
+        jobs.save(job);
+    }
+
+    /**
+     * A5 (D-076): the configured scan branch no longer exists in GitLab. Fail the scan cleanly BEFORE cloning —
+     * no reconcile runs, so nothing is closed — record a {@code BRANCH_NOT_FOUND} scan warning and flag the
+     * repository {@code branchMissing} so the UI prompts for another branch.
+     */
+    @Transactional
+    public void failBranchMissing(UUID workspaceId, UUID jobId, UUID scanId, UUID repositoryId, String branch) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId).orElseThrow();
+        ScanJob job = jobs.findByIdAndWorkspaceId(jobId, workspaceId).orElseThrow();
+        log.warn("Scan {} failed (BRANCH_NOT_FOUND): branch '{}' not found for repository {}",
+                scanId, branch, repositoryId);
+        scan.failWith("BRANCH_NOT_FOUND");
+        job.markDone();
+        warnings.save(new ScanWarning(workspaceId, repositoryId, scanId, "BRANCH_NOT_FOUND",
+                "branch not found: " + branch, null));
+        repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(r -> {
+            r.markBranchMissing();
+            repositories.save(r);
+        });
         scans.save(scan);
         jobs.save(job);
     }

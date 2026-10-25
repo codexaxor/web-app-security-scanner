@@ -25,6 +25,47 @@ secret_preview() {
     unset _secret _len _rest _p
 }
 
+# valid_branch_name <name>
+#   Exit 0 when <name> is a branch name git would accept as a `--branch` shorthand, matching the Java
+#   core.scan.BranchName rules (D-076 A1/A2): not empty, length <= 255, no leading '-', no leading/trailing '/',
+#   no trailing '.', not the single '@', no '..' / '//' / '@{', none of the chars space ~ ^ : ? * [ \ or any
+#   control character, and no slash-separated component beginning with '.' or ending with '.lock'. Any character
+#   git allows (incl. + # , _ @ and unicode) is accepted — safety comes from passing the branch as a single
+#   --branch=<name> argv element (A2), never a shell string. Exit 1 otherwise. Never echoes the name.
+valid_branch_name() {
+    _b="$1"
+    [ -n "$_b" ] || { unset _b; return 1; }
+    [ "${#_b}" -le 255 ] || { unset _b; return 1; }
+    [ "$_b" = "@" ] && { unset _b; return 1; }
+    case "$_b" in
+        -*|/*|*/|*.) unset _b; return 1 ;;
+        *..*|*//*|*@{*) unset _b; return 1 ;;
+        *' '*|*'~'*|*'^'*|*':'*|*'?'*|*'*'*|*'['*|*'\'*) unset _b; return 1 ;;
+    esac
+    # Any control character (tab, newline, CR, DEL, ...) is forbidden. Strip the C0 controls (0x00-0x1F) and DEL
+    # (0x7F); if anything was removed the name is invalid. (grep is line-oriented and would miss an embedded
+    # newline, so compare against a stripped copy instead.)
+    _stripped=$(printf '%s' "$_b" | LC_ALL=C tr -d '\000-\037\177')
+    if [ "$_stripped" != "$_b" ]; then
+        unset _b _stripped
+        return 1
+    fi
+    unset _stripped
+    # Per-component rules: no component begins with '.' or ends with '.lock'.
+    _rest="$_b"
+    while [ -n "$_rest" ]; do
+        case "$_rest" in
+            */*) _comp="${_rest%%/*}"; _rest="${_rest#*/}" ;;
+            *) _comp="$_rest"; _rest="" ;;
+        esac
+        case "$_comp" in
+            ''|.*|*.lock) unset _b _rest _comp; return 1 ;;
+        esac
+    done
+    unset _b _rest _comp
+    return 0
+}
+
 # nuget_version_unresolved <version>
 #   Exit 0 (true) when a NuGet <PackageReference> version string is NOT a concrete pinned version that OSV can
 #   match statically — an MSBuild property ($(..)), a version range (contains [ ] ( ) or a comma), a floating
