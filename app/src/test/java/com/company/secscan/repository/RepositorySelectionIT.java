@@ -71,7 +71,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
         ProjectView empty = page.content().stream()
                 .filter(p -> p.gitlabProjectId() == 108).findFirst().orElseThrow();
         assertThat(empty.selectable()).isFalse();
-        assertThat(empty.notSelectableReason()).isEqualTo("empty repository");
+        assertThat(empty.notSelectableReason()).isEqualTo("Empty repository (no commits yet).");  // B2
 
         ProjectView webPortal = page.content().stream()
                 .filter(p -> p.gitlabProjectId() == 103).findFirst().orElseThrow();
@@ -90,7 +90,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void selectPersistsRepositoriesPerWorkspace() {
-        List<RepositoryView> selected = repositoryService.select(connId, List.of(101L, 102L, 103L));
+        List<RepositoryView> selected = repositoryService.select(connId, List.of(101L, 102L, 103L)).repositories();
         assertThat(selected).hasSize(3);
         assertThat(selected).allMatch(v -> v.connectionId().equals(connId));
         assertThat(selected).allMatch(v -> "group".equals(v.connectionTargetType()));
@@ -118,5 +118,27 @@ class RepositorySelectionIT extends AbstractGitLabIT {
     void cannotSelectArchivedProject() {
         assertThatThrownBy(() -> repositoryService.select(connId, List.of(106L)))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void reportsAddedVsAlreadySelectedCounts() {   // B1
+        repositoryService.select(connId, List.of(101L, 102L));
+        var result = repositoryService.select(connId, List.of(101L, 103L));
+        assertThat(result.added()).isEqualTo(1);            // 103 is new
+        assertThat(result.alreadySelected()).isEqualTo(1);  // 101 was already selected
+        assertThat(result.repositories()).hasSize(2);
+    }
+
+    @Test
+    void labelsUnreadableCodeHonestlyNotEmpty() {   // B2
+        // Override the group-projects stub with a project that has code but an unreadable default branch.
+        gitlab.stubProjects(GROUP_ID, "[{\"id\":201,\"path_with_namespace\":\"services/locked\","
+                + "\"default_branch\":null,\"empty_repo\":false,\"archived\":false}]");
+
+        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 50);
+        ProjectView locked = page.content().stream()
+                .filter(p -> p.gitlabProjectId() == 201).findFirst().orElseThrow();
+        assertThat(locked.selectable()).isFalse();
+        assertThat(locked.notSelectableReason()).contains("No access to repository code");
     }
 }

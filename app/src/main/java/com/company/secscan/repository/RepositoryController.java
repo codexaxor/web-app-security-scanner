@@ -5,8 +5,8 @@ import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositorySettingsRequest;
 import com.company.secscan.repository.api.RepositoryView;
 import com.company.secscan.repository.api.SelectRepositoriesRequest;
+import com.company.secscan.repository.api.SelectResult;
 import jakarta.validation.Valid;
-import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -28,7 +28,7 @@ public class RepositoryController {
     }
 
     @PostMapping
-    public List<RepositoryView> select(@Valid @RequestBody SelectRepositoriesRequest req) {
+    public SelectResult select(@Valid @RequestBody SelectRepositoriesRequest req) {
         return service.select(req.connectionId(), req.gitlabProjectIds());
     }
 

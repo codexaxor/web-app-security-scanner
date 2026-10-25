@@ -11,6 +11,7 @@ import com.company.secscan.gitlab.api.ProjectView;
 import com.company.secscan.gitlab.dto.GitLabProject;
 import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositoryView;
+import com.company.secscan.repository.api.SelectResult;
 import com.company.secscan.scan.BranchName;
 import com.company.secscan.workspace.Workspace;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -100,7 +101,7 @@ public class RepositoryService {
                     p.defaultBranch(),
                     p.isEmpty() ? List.of() : safeLanguages(conn, token, p.id()),
                     !p.isEmpty(),
-                    p.isEmpty() ? "empty repository" : null,
+                    p.notSelectableReason(),   // B2: honest "empty" vs "no access to code"
                     existing != null,
                     existing != null && existing.isActive()));
         }
@@ -115,11 +116,15 @@ public class RepositoryService {
      * {@link #upsertWithRaceRecovery}) rather than failing the request. The whole batch is validated first, so a
      * bad project id selects nothing.
      */
-    public List<RepositoryView> select(UUID connectionId, List<Long> gitlabProjectIds) {
+    public SelectResult select(UUID connectionId, List<Long> gitlabProjectIds) {
         GitlabConnection conn = requireConnection(connectionId);
         String token = cipher.require().decrypt(conn.getTokenCiphertext());
         Map<Long, GitLabProject> byId = exposedProjects(conn, token).stream()
                 .collect(Collectors.toMap(GitLabProject::id, Function.identity()));
+
+        // Which submitted projects were ALREADY repositories before this call (B1 honest counts).
+        Set<Long> alreadySelectedBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .map(Repository::getGitlabProjectId).collect(Collectors.toSet());
 
         Set<Long> ids = Set.copyOf(gitlabProjectIds);
         // Validate the whole batch before writing anything, so a bad id selects nothing.
@@ -140,13 +145,20 @@ public class RepositoryService {
         }
 
         List<RepositoryView> result = new ArrayList<>();
+        int added = 0;
+        int already = 0;
         for (Long id : ids) {
             GitLabProject p = byId.get(id);
             List<String> languages = safeLanguages(conn, token, id);
             Repository repo = upsertWithRaceRecovery(conn.getId(), id, p, languages);
             result.add(RepositoryView.of(repo, ownerOf(repo)));
+            if (alreadySelectedBefore.contains(id)) {
+                already++;
+            } else {
+                added++;
+            }
         }
-        return result;
+        return new SelectResult(added, already, result);
     }
 
     /**
