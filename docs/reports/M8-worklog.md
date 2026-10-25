@@ -306,3 +306,56 @@ No migration, no scanner/ingest change, no new deps, CSP unchanged, oracle asser
 - G3 `npm run e2e`: **74 Playwright tests** (70 + 2 `s10f.spec` + 2 feed-secret screenshots), run twice
   back-to-back, all green, no flakes. 26 screenshots (incl. light+dark Feed/Dashboard for label review) in
   `ui/e2e/artifacts/screens/`.
+
+## S11 — /review-pr fixes (on 30a605e)
+
+Seven structural fixes + ten nits + two deferred-register entries from the `/review-pr` round. No migration, no
+scanner change, no new runtime deps, CSP unchanged, oracle semantics unchanged. Three code commits + one docs
+commit.
+
+Commits:
+- `ab081db` fix(app): backend — SF-2, SF-7 (server), N-1, N-2, N-3 (server fields), N-4, N-5, N-6 + ITs
+  (`AllIgnoredGroupRollupIT`, `GroupScoreRollupRaceIT`, `SubIssuePanelIT` fixed-versions, `ApiErrorBodyIT`
+  malformed-body / non-UUID / unknown-band / size-clamp).
+- `b290f33` fix(ui): frontend — SF-1, SF-6, SF-3, SF-7 (UI), N-3 (UI), N-8, N-10 + vitest
+  (`queryClient.test.ts` table-driven map; `api.test.ts` 401 + non-JSON; `format.test.ts` advisoryLink).
+- `73ec598` build(ui): SF-4, SF-5, N-7 + e2e (`review-fixes.spec.ts`) + seed fixtures.
+- docs commit: this work log, `docs/reports/M8.md` ("Follow-up fixes" + corrected known-issue), `docs/DECISIONS.md`
+  (D-065 nginx digest; deferred register SF-1 correction, D-1 nginx-root→M10, D-2 unignore-score→M8.5).
+
+What each item did:
+- **SF-1** The "Medium 65" stale panel header was a UI cache bug, not backend staleness: the panel's
+  `["issue-group", id]` header query was never invalidated. Added `issue-group` + `sub-issue-events` to all four
+  mutation kinds. Backend recompute already nulls `severity_score` for an all-ignored group (proven by
+  `AllIgnoredGroupRollupIT`) and `SeverityPill` renders null as "—".
+- **SF-2** `GroupRollupService.recomputeScoreRollup` no longer saves the whole entity; it writes only
+  severity/fix-time/subtitle via `IssueGroupRepository.updateScoreRollupIfOpen` guarded by
+  `workspace_id + status='open'`. Two-transaction latch IT (`GroupScoreRollupRaceIT`) proves no resurrection.
+- **SF-3** `api.ts request()` fires one unauthorized handler on any 401 (covers direct ConnectGitLab/
+  SelectRepositories calls); `queryClient` no longer double-handles. Non-JSON error bodies yield a clean banner.
+- **SF-4** e2e secrets never on the argv (name-only `-e` + child env), errors redacted, artifacts mode 0o707,
+  e2e postgres pinned by digest.
+- **SF-5** nginx pinned by digest; `npm ci` only.
+- **SF-6** invalidation map completed (EPSS→repositories; scan→ignored/sub-issues/issue-group/recent-scans);
+  recent-scans key moved into `qk`; comment made true; table-driven test.
+- **SF-7** `GET /issue-groups/{id}` returns distinct open `fixedVersions`; UI shows one/several/none.
+- **N-1** SQL-scoped rule lookup. **N-2** workspace-scoped joins. **N-3** no browser-computed counts.
+- **N-4** 400 bodies for malformed JSON / type mismatch, no rejected values; api.ts JSON.parse guarded.
+- **N-5** list size capped at 200 (`api.Pagination`). **N-6** unknown band → 400.
+- **N-7** whole-file guard, `.mjs/.cjs`, outerHTML/insertAdjacentHTML/document.write/bracket access.
+- **N-8** route id/enum validation → not-found, no request. **N-10** confirm before global unignore.
+- **D-1** nginx master as root → M10 (nginx-unprivileged). **D-2** unignore keeps old score until next
+  scan/re-score → M8.5.
+
+### S11 gates
+- G1 `./gradlew clean build --rerun-tasks`: **BUILD SUCCESSFUL (11m32s) — core 116 + app 316 = 432 tests, 0
+  failures, 0 skipped** (app +10: AllIgnoredGroupRollupIT 3, GroupScoreRollupRaceIT 1, SubIssuePanelIT +2,
+  ApiErrorBodyIT +4).
+- G2 UI gate (`npm run build && typecheck && test && guard`): vite build ok; typecheck clean; vitest **22 passed
+  (3 files)**; guard **clean (46 files, 0 forbidden)**.
+- G3 `npm run e2e` run **twice** (isolated `secscan-e2e`, `down -v` each): **79 Playwright tests passed** each run
+  (74 + 5 `review-fixes.spec.ts`), 0 failures, no flakes. Disk guard honoured (build cache pruned; `/` stayed
+  ≥ 10 GB, above the 8 GB hard stop).
+- Confirmations: no migration, no scanner-image change, no new runtime deps, CSP unchanged, oracle tests
+  unchanged (the new e2e fixtures are dedicated groups in ib-api-v2; existing count oracles compare UI = API = SQL
+  dynamically and were untouched).

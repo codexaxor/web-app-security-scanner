@@ -142,8 +142,11 @@ typescript-eslint is incompatible). Exact versions pinned in `ui/package.json` +
 The lockfile is generated with **npm 12** (the host's npm 10.9.4 crashes on vite 8's devtools optional-peer graph
 with an arborist `edgesOut` bug); `npm ci` — the gate command — succeeds with the bundled npm 10. `ui/Dockerfile`
 build stage is pinned by digest to `node:22.23.4-alpine@sha256:ce8d…ffadc` (node v22.23.4 ≥ 22.22, required by
-react-router 8.5.0 and vite 8; change 6).
-Consequences: a modern, reproducible build; re-pin node/npm notes on any bump.
+react-router 8.5.0 and vite 8; change 6). The nginx RUNTIME stage is likewise pinned by digest (SF-5):
+`nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10` (tag resolved
+2026-10-25). The build step is `npm ci` ONLY (no `|| npm install` fallback) so an out-of-sync lockfile fails the
+build instead of silently drifting.
+Consequences: a modern, reproducible build; re-pin node/nginx/npm notes on any bump.
 
 ## D-064 Default-dir/minified path exclusion does not apply to secret findings (2026-10-21, accepted)
 Context: M7 review. The SPEC default exclusions (`node_modules/ vendor/ dist/ build/ target/ bin/ obj/` and
@@ -1180,19 +1183,26 @@ Decision: `workspace_id` on every business table from day one.
   - **Side panel less repetitive → later:** group affected locations more compactly in the side panel.
   - **Theme (light/dark) preference persistence → M10 (user settings):** the S10e light theme is not yet persisted
     per user; it lands with M10 user settings.
-  - **Known issue — stale `issue_group.severity_score` on all-ignored groups (report evidence only, investigate):**
-    the side-panel header reads the `issue_group.severity_score` column raw (`SubIssuePanel.tsx` →
-    `IssueService.getGroup` → `IssueGroupView.of`). `GroupRollupService` defines that column as *max over the
-    currently-OPEN sub-issues* (null when none are open), so a correctly-recomputed all-ignored group is null and
-    the UI's `SeverityPill` then renders a neutral "—" (D-068). But every API-time maintenance path only recomputes
-    groups that still have an open sub-issue — the re-score job builds `touchedGroups` from OPEN subs only
-    (`ReScoreService.rescoreWorkspace`), the EPSS sweep recomputes only groups `touched` by that sweep
-    (`WorkspaceSettingsService`), manual triage only `touched` groups (`TriageService`). So the invariant
-    "all-ignored ⇒ severity_score null" is re-asserted *only* by a scan-time reconcile of that group; between
-    scans a group that reaches all-ignored can keep a stale non-null band. Observed in the walkthrough:
-    org.postgresql:postgresql (core-keycloak) header showed "Medium 65" while both its findings were ignored
-    (Medium 65 + High 82). Display-only staleness, not a data-integrity bug (sub-issue statuses and Feed band
-    totals are correct). Full write-up in `docs/reports/M8.md`.
+  - **RESOLVED by SF-1 — the "Medium 65" stale panel header was a UI CACHE bug, not backend staleness.** The
+    side-panel header reads the group via `GET /issue-groups/{id}` (`["issue-group", id]`), but that query family
+    was NOT in any mutation's invalidation list, so after an API-time ignore the header kept its cached (open-era)
+    score while the sub-issue rows updated. The backend recompute is correct: `GroupRollupService` nulls
+    `severity_score` for an all-ignored group through every API-time path (manual triage, EPSS sweep) and the UI's
+    `SeverityPill` renders null as a neutral "—". Fix: SF-1 adds `issue-group` + `sub-issue-events` to all four
+    mutation kinds in `queryClient.ts`; SF-2 additionally makes the score-only rollup a column-scoped guarded
+    UPDATE so a concurrent re-score can never resurrect a score onto a just-ignored group. Proven by
+    `AllIgnoredGroupRollupIT`, `GroupScoreRollupRaceIT`, the `queryClient.test.ts` invalidation table and an
+    e2e (panel header flips to "Ignored" without reload). The earlier "report evidence only / investigate"
+    framing in `docs/reports/M8.md` was superseded; see M8.md's corrected "Follow-up fixes" section.
+  - **D-1 nginx master process runs as root → M10 (hardening):** the `ui` runtime image (`nginx:1.27-alpine`)
+    starts its master as root (workers drop to `nginx`). Switch to `nginxinc/nginx-unprivileged` (or an explicit
+    non-root user + high port) as part of the M10 container-hardening pass. Not changed in M8 (out of scope; the
+    image is already digest-pinned, read-only-friendly and only serves static files + proxies `/api`).
+  - **D-2 sensitivity re-score skips ignored findings; unignore keeps the old score until the next scan/re-score
+    → M8.5:** `ReScoreService.rescoreWorkspace`/`rescoreRepository` re-score only OPEN sub-issues (B1 guard), so a
+    finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
+    scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
+    for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
