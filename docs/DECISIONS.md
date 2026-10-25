@@ -14,6 +14,41 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-081 Roadmap after M8.1 (OD-24 = A) (2026-10-26, accepted)
+Context: the 2026-10-26 intake added UI uplift, multi-provider sources, container image scanning and git-history
+secret items on top of the M8.5 commitments (D-073, D-074, D-075).
+Decision, in order:
+ (1) M8.5 correctness + taxonomy: OD-19 family (incl. M8.1 D-1 and absent-but-ignored after a branch switch),
+     level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on
+     unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, and the D-075 real-repo walkthrough. UI
+     polish is moved OUT of M8.5.
+ (2) M8.6 UI uplift: new app shell, Repositories list redesign (clickable rows), repository detail page
+     (issues / scans / settings, coverage banner), issue side panel clarity (summary, how-to-fix, sub-issues
+     grouped by location), secret context (type-specific fix guidance, link to file line and commit). Compact
+     side-panel locations moves here from M8.5.
+ (3) M8.7 sources: gitlab.com + GitHub + public repositories in one workspace (D-080).
+ (4) M9 scheduling as planned, provider-aware (poller per provider; still snapshots effectiveBranch()).
+ (5) Container image scanning: registry-agnostic (any OCI registry incl. self-hosted), public images
+     first-class, spike before build. Milestone number assigned when scheduled.
+ (6) Secrets in git history + author attribution: later, needs its own lifecycle decision.
+Consequences: M9's poller is built once, provider-aware; M8.6 screens leave room for a provider icon; deferred
+register rows move as listed in step 5.
+Revisit when: a deadline needs the UI first (then swap M8.5 and M8.6).
+
+## D-080 Workspaces are not per provider; one workspace holds many source connections (OD-23 = C) (2026-10-26, accepted)
+Context: SecScan moves from self-managed GitLab only to self-managed GitLab + gitlab.com + GitHub + public
+repositories. Aikido ties each workspace to one Git provider (multiple providers = multiple workspaces, no
+cross-workspace feed).
+Decision: a workspace may hold any number of source connections of any provider; their repositories share one
+feed, rollups and ignore rules. Repository identity becomes provider + host + the provider's id (not the bare
+GitLab project id). Multi-workspace (a switcher) is a later tenancy/team feature tied to M10 users and roles,
+never a per-provider split.
+Consequences: a future migration generalises connection and repository identity; one adapter per provider
+(GitLab exists, GitHub new); host policy per connection; all hard rules unchanged (workspace_id, D-004, D-030,
+TLS always verified, tokens entered only in the UI).
+Revisit when: a client needs hard data separation before M10, or a provider cannot fit the generic connection
+model.
+
 ## D-079 M8.1 errata (review clarifications; D-076/D-078 text unchanged) (2026-10-25, accepted)
 Context: the /review-pr round surfaced small inaccuracies/clarifications in D-076/D-078 wording. Those entries are
 not edited (log-integrity rule); this entry is the authority for the corrections.
@@ -1292,7 +1327,8 @@ Decision: `workspace_id` on every business table from day one.
   - **M9 commit poller must snapshot `effectiveBranch()` (D-2, D-076):** when M9 adds commit polling / scheduled
     scans, the enqueue path MUST resolve `repository.effectiveBranch()` (the configured `scan_branch`, else the
     current GitLab default refreshed per A6) and snapshot it onto `scan.branch`, exactly like `ScanService
-    .startManual` — so scheduled scans honour the chosen branch and re-baseline correctly.
+    .startManual` — so scheduled scans honour the chosen branch and re-baseline correctly. **M9 poller must be
+    provider-aware (D-080):** build one poller per provider; it still snapshots `effectiveBranch()`.
   - **Absent-but-ignored on a branch switch → M8.5 (OD-19 family, D-076):** when `scanBranch` switches, an
     *ignored* finding that is absent on the new branch stays ignored (rule 3), not solved — the same
     absent-but-ignored shape as OD-19. Resolve it together with OD-19 in M8.5 (route the ignored-and-absent close
@@ -1315,7 +1351,8 @@ Decision: `workspace_id` on every business table from day one.
     human, not raw rule ids.
   - **Languages refresh on each scan → later:** re-derive a repository's detected languages on every scan (today
     they are not refreshed per scan).
-  - **Side panel less repetitive → later:** group affected locations more compactly in the side panel.
+  - **Side panel less repetitive (compact side-panel locations) → M8.6 (D-081 (2)):** group affected locations
+    more compactly in the side panel.
   - **Theme (light/dark) preference persistence → M10 (user settings):** the S10e light theme is not yet persisted
     per user; it lands with M10 user settings.
   - **RESOLVED by SF-1 — the "Medium 65" stale panel header was a UI CACHE bug, not backend staleness.** The
@@ -1338,6 +1375,25 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- Post-M8.1 deferred register moves (recorded 2026-10-26, D-080/D-081):
+  - **Sajal's UI polish list (2026-10-25 walkthrough feedback) → M8.6 (D-081 (2)):** carried with the compact
+    side-panel locations row above.
+  - **secret git-history scanning → the D-081 (6) milestone (later):** full git-history secret scan (the D-025
+    gap) plus author attribution; needs its own lifecycle decision (OD-29).
+  - **container image scanning → the D-081 (5) milestone:** registry-agnostic OCI (any registry incl.
+    self-hosted), public images first-class, spike before build; milestone number assigned when scheduled.
+  - **GitHub / gitlab.com / public repositories → M8.7 (D-080):** multiple source connections of any provider
+    in one workspace, one shared feed.
+- Post-M8.1 open decisions (recorded 2026-10-26):
+  - **OD-22 Which real repositories satisfy D-075** (is `notification` the 3rd real repo?) [M8.5, first task].
+  - **OD-25 App shell navigation:** left sidebar vs restyled top nav [M8.6].
+  - **OD-26 Deep links to a file line / commit on the source host:** amend D-067 (links only from stored host +
+    project + validated commit SHA + encoded path) [M8.6].
+  - **OD-27 Migration numbering if the IaC severity override (V20 per D-077) is not in M8.5:** Flyway would need
+    out-of-order to add V20 after V21 [M8.5].
+  - **OD-28 Container scan engine + registry auth model** (spike decides) [containers].
+  - **OD-29 Git-history secrets:** lifecycle (cannot be solved by deletion) + author attribution privacy (name
+    only vs name + email) [later].
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
