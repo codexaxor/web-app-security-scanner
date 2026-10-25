@@ -136,7 +136,7 @@ export default function FeedPage() {
           <div className="card-head">
             <span className="stat-label">
               Solved · 7d
-              <InfoTip text="Findings moved to solved in the last 7 days (missing from a scan whose scanner succeeded)." />
+              <InfoTip text="Findings moved to solved in the last 7 days (missing from a scan whose scanner succeeded). Branch changes are excluded." />
             </span>
           </div>
           <div className="stat-num" data-testid="solved-7d">

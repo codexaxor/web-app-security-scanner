@@ -24,7 +24,11 @@ export default function RepoSettingsDialog({
   const [active, setActive] = useState(repo.active);
   const [scanBranch, setScanBranch] = useState<string | null>(repo.scanBranch);
 
-  const branchChanged = scanBranch !== repo.scanBranch;
+  // N-6: picking the branch equal to the current effective default while the repo already follows the default
+  // (scanBranch null) is NOT a change — no PATCH, no re-baseline warning.
+  const branchChanged =
+    scanBranch !== repo.scanBranch &&
+    !(repo.scanBranch === null && scanBranch === repo.effectiveBranch);
   // D-076: changing the branch of a repository that has already been scanned re-baselines its findings.
   const willReBaseline = branchChanged && repo.lastScan !== null;
 

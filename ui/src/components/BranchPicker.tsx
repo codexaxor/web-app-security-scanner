@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import Button from "./Button";
@@ -21,11 +21,21 @@ export default function BranchPicker({
   onChange: (branch: string | null) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(0);
 
+  // N-6: debounce the server-side search (~300 ms) so typing does not fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebounced(search);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const q = useQuery({
-    queryKey: ["repo-branches", repoId, search, page],
-    queryFn: () => api.listRepositoryBranches(repoId, search, page, 100),
+    queryKey: ["repo-branches", repoId, debounced, page],
+    queryFn: () => api.listRepositoryBranches(repoId, debounced, page, 100),
   });
 
   const defaultLabel = `Default branch${defaultBranch ? ` (${defaultBranch})` : ""}`;
@@ -39,10 +49,7 @@ export default function BranchPicker({
         placeholder="Search branches…"
         autoComplete="off"
         value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPage(0);
-        }}
+        onChange={(e) => setSearch(e.target.value)}
       />
       <div className="branch-list" role="listbox" aria-label="Branch to scan">
         <button

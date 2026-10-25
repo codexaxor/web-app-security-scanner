@@ -188,6 +188,7 @@ export interface BranchView {
 
 export interface SelectResult {
   added: number;
+  reactivated: number;
   alreadySelected: number;
   repositories: RepositoryView[];
 }
