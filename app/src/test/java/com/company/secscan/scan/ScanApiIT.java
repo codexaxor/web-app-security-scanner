@@ -31,6 +31,8 @@ class ScanApiIT extends AbstractGitLabIT {
     RepositoryRepository repositories;
     @Autowired
     GitlabConnectionRepository connections;
+    @Autowired
+    ScanEnqueuer enqueuer;
 
     private Repository seedRepository() {
         GitlabConnection conn = connections.save(GitlabConnection.forGroup(
@@ -50,6 +52,51 @@ class ScanApiIT extends AbstractGitLabIT {
         ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
         assertThat(job.getState()).isEqualTo(ScanJob.STATE_QUEUED);
         assertThat(job.getAttempts()).isZero();
+    }
+
+    @Test
+    void startSnapshotsTheEffectiveBranchOntoTheScan() {
+        Repository repo = seedRepository();   // default_branch "main", no scan_branch
+
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scan.branch()).isEqualTo("main");
+        assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("main");
+    }
+
+    @Test
+    void startSnapshotsTheConfiguredScanBranch() {
+        Repository repo = seedRepository();
+        repo.setScanBranch("dev");            // D-076: overrides the default
+        repositories.save(repo);
+
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scan.branch()).isEqualTo("dev");
+        assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("dev");
+    }
+
+    @Test
+    void findByWorkspaceIdAndIdInIsWorkspaceScoped() {   // B-1
+        Repository repo = seedRepository();
+        ScanView scan = service.startManual(repo.getId());
+
+        assertThat(scans.findByWorkspaceIdAndIdIn(WORKSPACE, List.of(scan.id())))
+                .extracting(Scan::getId).containsExactly(scan.id());
+        assertThat(scans.findByWorkspaceIdAndIdIn(UUID.randomUUID(), List.of(scan.id()))).isEmpty();
+    }
+
+    @Test
+    void recordDefaultBranchUpdatesOnlyThatColumn() {   // SF-1
+        Repository repo = seedRepository();
+        repo.setSensitivity("high");
+        repositories.save(repo);
+
+        enqueuer.recordDefaultBranch(repo.getId(), "release");
+
+        Repository after = repositories.findById(repo.getId()).orElseThrow();
+        assertThat(after.getDefaultBranch()).isEqualTo("release");
+        assertThat(after.getSensitivity()).isEqualTo("high");   // not clobbered by a whole-entity save
     }
 
     @Test

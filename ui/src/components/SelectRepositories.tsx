@@ -19,7 +19,9 @@ export default function SelectRepositories() {
   const [selected, setSelected] = useState<RepositoryView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState<number | null>(null);
+  const [saved, setSaved] = useState<{ added: number; reactivated: number; alreadySelected: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     api
@@ -67,7 +69,7 @@ export default function SelectRepositories() {
     setSaved(null);
     try {
       const result = await api.selectRepositories(connectionId, [...checked]);
-      setSaved(result.length);
+      setSaved({ added: result.added, reactivated: result.reactivated, alreadySelected: result.alreadySelected });
       setChecked(new Set());
       const d = await api.listProjects(connectionId, page, PAGE_SIZE);
       setData(d);
@@ -132,7 +134,8 @@ export default function SelectRepositories() {
                         <input
                           type="checkbox"
                           aria-label={`Select ${p.pathWithNamespace}`}
-                          disabled={!p.selectable}
+                          disabled={!p.selectable || (p.alreadySelected && p.active)}
+                          title={p.alreadySelected && p.active ? "Already selected" : undefined}
                           checked={checked.has(p.gitlabProjectId)}
                           onChange={() => toggle(p.gitlabProjectId)}
                         />
@@ -169,7 +172,13 @@ export default function SelectRepositories() {
               <Button variant="primary" disabled={busy || checked.size === 0} onClick={select}>
                 Add {checked.size || ""} selected
               </Button>
-              {saved !== null && <span className="ok-text">Added {saved} repositories.</span>}
+              {saved !== null && (
+                <span className="ok-text">
+                  {saved.added} {saved.added === 1 ? "repository" : "repositories"} added
+                  {saved.reactivated > 0 ? ` · ${saved.reactivated} reactivated` : ""}
+                  {saved.alreadySelected > 0 ? ` · ${saved.alreadySelected} already selected` : ""}
+                </span>
+              )}
             </div>
           </>
         )}

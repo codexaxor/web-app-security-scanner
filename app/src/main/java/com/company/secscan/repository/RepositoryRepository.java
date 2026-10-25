@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -30,6 +31,15 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
 
     /** Count of inactive repositories — the dashboard inactive line (OD-14 item 7). */
     long countByWorkspaceIdAndActive(UUID workspaceId, boolean active);
+
+    /**
+     * Column-scoped update of just {@code default_branch} (SF-1, A6): refresh the stored GitLab default without a
+     * whole-entity save of a possibly-stale detached {@link Repository}, so a concurrent settings PATCH committed
+     * during the enqueue-time GitLab call is never clobbered. Workspace-scoped (domain rule 1).
+     */
+    @Modifying
+    @Query("update Repository r set r.defaultBranch = :branch where r.id = :id and r.workspaceId = :ws")
+    int updateDefaultBranch(@Param("ws") UUID ws, @Param("id") UUID id, @Param("branch") String branch);
 
     // --- Repositories-screen rollups (OD-14 item 1). All counts computed in SQL, workspace-scoped. Rows are
     // Object[]: [repository_id (UUID), ...]. The service assembles them into a per-repo summary. ---

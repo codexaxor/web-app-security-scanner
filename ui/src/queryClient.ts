@@ -51,9 +51,10 @@ export const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   // ignore / unignore / delete-rule: statuses and every count move, plus the open panel's header + history.
   triage: [qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll,
     qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll],
-  // repo settings: sensitivity re-scores (scores/bands move), include-dev-deps/active change rollups + feed.
+  // repo settings: sensitivity re-scores (scores/bands move), include-dev-deps/active change rollups + feed; a
+  // scan-branch change (D-076) also moves the scans/recent list (branch column) and the repo row's branch label.
   settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll],
+    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   // start scan / status poll reaching terminal: counts, statuses and the recent-scans list all move.
   scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll,
     qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],

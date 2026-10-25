@@ -18,6 +18,9 @@ public record RepositoryView(
         long gitlabProjectId,
         String pathWithNamespace,
         String defaultBranch,
+        String scanBranch,
+        String effectiveBranch,
+        boolean branchMissing,
         List<String> languages,
         boolean active,
         String sensitivity,
@@ -44,7 +47,8 @@ public record RepositoryView(
 
     public static RepositoryView of(Repository r, GitlabConnection connection, RepositorySummary summary) {
         return new RepositoryView(r.getId(), r.getGitlabProjectId(), r.getPathWithNamespace(),
-                r.getDefaultBranch(), r.getLanguages(), r.isActive(), r.getSensitivity(), r.isIncludeDevDeps(),
+                r.getDefaultBranch(), r.getScanBranch(), r.effectiveBranch(), r.isBranchMissing(),
+                r.getLanguages(), r.isActive(), r.getSensitivity(), r.isIncludeDevDeps(),
                 r.getConnectionId(),
                 connection == null ? null : connection.getTargetType(),
                 connection == null ? null : connection.targetPath(),

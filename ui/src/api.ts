@@ -65,6 +65,9 @@ export interface RepositoryView {
   gitlabProjectId: number;
   pathWithNamespace: string;
   defaultBranch: string | null;
+  scanBranch: string | null;
+  effectiveBranch: string | null;
+  branchMissing: boolean;
   languages: string[];
   active: boolean;
   sensitivity: string;
@@ -87,6 +90,7 @@ export interface IssueGroupView {
   id: string;
   repositoryId: string;
   repositoryPath: string;
+  repositoryBranch: string | null;
   type: IssueType;
   title: string;
   subtitle: string | null;
@@ -159,6 +163,7 @@ export interface TriageEventView {
   actor: string;
   reasonCode: string | null;
   scanId: string | null;
+  branch: string | null;
   at: string;
 }
 
@@ -168,9 +173,24 @@ export interface ScanView {
   trigger: string;
   status: string;
   commitSha: string | null;
+  branch: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string | null;
+}
+
+export interface BranchView {
+  name: string;
+  isDefault: boolean;
+  isProtected: boolean;
+  lastCommitAt: string | null;
+}
+
+export interface SelectResult {
+  added: number;
+  reactivated: number;
+  alreadySelected: number;
+  repositories: RepositoryView[];
 }
 
 export interface ScanWarningView {
@@ -243,6 +263,8 @@ export interface RepositorySettingsPatch {
   sensitivity?: string;
   includeDevDeps?: boolean;
   active?: boolean;
+  // D-076: omit to leave unchanged; a string sets the scan branch; explicit null resets to the GitLab default.
+  scanBranch?: string | null;
 }
 
 export interface Paged<T> {
@@ -351,9 +373,14 @@ export const api = {
       `/api/v1/gitlab/connections/${connectionId}/projects?page=${page}&size=${size}`,
     ),
   selectRepositories: (connectionId: string, gitlabProjectIds: number[]) =>
-    request<RepositoryView[]>("POST", "/api/v1/repositories", { connectionId, gitlabProjectIds }),
+    request<SelectResult>("POST", "/api/v1/repositories", { connectionId, gitlabProjectIds }),
   listRepositories: (page: number, size: number) =>
     request<Paged<RepositoryView>>("GET", `/api/v1/repositories?page=${page}&size=${size}`),
+  listRepositoryBranches: (repositoryId: string, search: string, page: number, size: number) =>
+    request<Paged<BranchView>>(
+      "GET",
+      `/api/v1/repositories/${repositoryId}/branches?search=${encodeURIComponent(search)}&page=${page}&size=${size}`,
+    ),
 
   // --- M8 ---
   patchRepository: (id: string, patch: RepositorySettingsPatch) =>

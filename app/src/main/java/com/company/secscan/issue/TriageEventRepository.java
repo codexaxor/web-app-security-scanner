@@ -32,6 +32,7 @@ public interface TriageEventRepository extends JpaRepository<TriageEvent, UUID> 
               and r.id = s.repositoryId and r.workspaceId = :ws
               and e.toStatus = :toStatus and e.at >= :since
               and (:actor is null or e.actor = :actor)
+              and (:excludeReason is null or coalesce(e.reasonCode, '') <> :excludeReason)
               and (:repositoryId is null or s.repositoryId = :repositoryId)
               and (:type is null or s.type = :type)
               and (:includeInactive = true or r.active = true)
@@ -39,6 +40,7 @@ public interface TriageEventRepository extends JpaRepository<TriageEvent, UUID> 
     long countDistinctSubIssuesByTransitionSince(@Param("ws") UUID ws,
                                                  @Param("toStatus") String toStatus,
                                                  @Param("actor") String actor,
+                                                 @Param("excludeReason") String excludeReason,
                                                  @Param("repositoryId") UUID repositoryId,
                                                  @Param("type") String type,
                                                  @Param("includeInactive") boolean includeInactive,

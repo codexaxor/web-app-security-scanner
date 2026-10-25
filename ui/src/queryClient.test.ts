@@ -9,7 +9,7 @@ const EXPECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   triage: [qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll,
     qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll],
   settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll],
+    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll,
     qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
