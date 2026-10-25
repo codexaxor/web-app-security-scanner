@@ -2,6 +2,10 @@ package com.company.secscan.scan;
 
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.api.Pagination;
+import com.company.secscan.config.TokenCipherHolder;
+import com.company.secscan.gitlab.GitLabClient;
+import com.company.secscan.gitlab.GitlabConnection;
+import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.api.ScanDetailView;
@@ -39,15 +43,22 @@ public class ScanService {
     private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final ScanEnqueuer enqueuer;
+    private final GitLabClient gitlab;
+    private final GitlabConnectionRepository connections;
+    private final TokenCipherHolder cipher;
 
     public ScanService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
-                       ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer) {
+                       ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer,
+                       GitLabClient gitlab, GitlabConnectionRepository connections, TokenCipherHolder cipher) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
         this.warnings = warnings;
         this.repositories = repositories;
         this.enqueuer = enqueuer;
+        this.gitlab = gitlab;
+        this.connections = connections;
+        this.cipher = cipher;
     }
 
     /**
@@ -56,22 +67,64 @@ public class ScanService {
      */
     public ScanView startManual(UUID repositoryId) {
         Repository repo = requireScannable(repositoryId);
-        return inFlight(repositoryId)
-                .map(ScanView::of)
-                .orElseGet(() -> enqueueRecoveringRace(repo.getId(), resolveBranch(repo)));
+        Optional<ScanView> inFlight = inFlight(repositoryId).map(ScanView::of);
+        if (inFlight.isPresent()) {
+            return inFlight.get();
+        }
+        BranchResolution branch = resolveBranch(repo);
+        return enqueueRecoveringRace(repo.getId(), branch);
+    }
+
+    /** The branch to clone, and whether a GitLab refresh at enqueue failed (A6 → a scan warning). */
+    private record BranchResolution(String branch, boolean refreshFailed) {
     }
 
     /**
-     * The branch the scan will clone, snapshotted now (D-076): the configured {@code scan_branch}, else the GitLab
-     * default. Slice 3 (A6) upgrades this to refresh the current GitLab default when {@code scan_branch} is unset.
+     * The branch the scan will clone, snapshotted now (D-076): the configured {@code scan_branch} verbatim, or —
+     * when following the default (A6) — the CURRENT GitLab default branch, refreshed via the API at enqueue so a
+     * default-branch change is treated like a switch (re-baseline). The refreshed value updates
+     * {@code repository.default_branch} (INFO log, no status change). On a GitLab failure (or a local connection)
+     * the last-known stored default is used; a failure also flags a scan warning.
      */
-    private String resolveBranch(Repository repo) {
-        return repo.effectiveBranch();
+    private BranchResolution resolveBranch(Repository repo) {
+        if (repo.getScanBranch() != null) {
+            return new BranchResolution(repo.getScanBranch(), false);
+        }
+        GitlabConnection conn = repo.getConnectionId() == null ? null
+                : connections.findByIdAndWorkspaceId(repo.getConnectionId(), WORKSPACE).orElse(null);
+        if (conn == null || isLocal(conn)) {
+            return new BranchResolution(repo.getDefaultBranch(), false);
+        }
+        try {
+            String token = cipher.require().decrypt(conn.getTokenCiphertext());
+            String current = gitlab.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId()).defaultBranch();
+            if (current != null && !current.equals(repo.getDefaultBranch())) {
+                log.info("Repository {} default branch changed in GitLab: {} -> {}",
+                        repo.getId(), repo.getDefaultBranch(), current);
+                repo.updateDefaultBranch(current);
+                repositories.save(repo);
+            }
+            return new BranchResolution(current != null ? current : repo.getDefaultBranch(), false);
+        } catch (RuntimeException e) {
+            log.warn("Could not refresh the default branch for repository {} at enqueue ({}); scanning the last "
+                    + "known default '{}'.", repo.getId(), e.getClass().getSimpleName(), repo.getDefaultBranch());
+            return new BranchResolution(repo.getDefaultBranch(), true);
+        }
     }
 
-    private ScanView enqueueRecoveringRace(UUID repositoryId, String branch) {
+    private static boolean isLocal(GitlabConnection conn) {
+        return conn.getBaseUrl() != null && conn.getBaseUrl().startsWith("file:");
+    }
+
+    private ScanView enqueueRecoveringRace(UUID repositoryId, BranchResolution branch) {
         try {
-            return ScanView.of(enqueuer.enqueueManual(repositoryId, branch));
+            Scan scan = enqueuer.enqueueManual(repositoryId, branch.branch());
+            if (branch.refreshFailed()) {
+                warnings.save(new ScanWarning(WORKSPACE, repositoryId, scan.getId(), "DEFAULT_BRANCH_UNAVAILABLE",
+                        "Could not refresh the default branch from GitLab; scanning the last known default branch.",
+                        null));
+            }
+            return ScanView.of(scan);
         } catch (DataIntegrityViolationException race) {
             // A concurrent start won the uq_scan_active_per_repository race; return that scan.
             log.debug("Concurrent scan start for repository {}; returning the existing in-flight scan",
