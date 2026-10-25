@@ -9,6 +9,7 @@ import {
 } from "../api";
 import Button from "./Button";
 import ConfirmDialog from "./ConfirmDialog";
+import RotateTokenDialog from "./RotateTokenDialog";
 import { Card, EmptyState } from "./ui";
 
 /**
@@ -26,6 +27,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const [result, setResult] = useState<ConnectionTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConnectionView | null>(null);
+  const [rotating, setRotating] = useState<ConnectionView | null>(null);
   const [removal, setRemoval] = useState<ConnectionRemovalResult | null>(null);
 
   async function refresh() {
@@ -112,6 +114,9 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
                         </span>
                       </td>
                       <td style={{ textAlign: "right" }}>
+                        <Button variant="secondary" size="sm" disabled={busy} onClick={() => setRotating(c)}>
+                          Rotate token
+                        </Button>{" "}
                         <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirm(c)}>
                           Remove
                         </Button>
@@ -237,6 +242,14 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
             reassigned to another connection for the same target, or deactivated if none remains (D-020).
           </p>
         </ConfirmDialog>
+      ) : null}
+
+      {rotating ? (
+        <RotateTokenDialog
+          connection={rotating}
+          onClose={() => setRotating(null)}
+          onRotated={() => refresh()}
+        />
       ) : null}
     </div>
   );
