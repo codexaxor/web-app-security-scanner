@@ -66,17 +66,20 @@ public class IssueService {
         var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), statusesFor(view),
                 range == null ? null : range[0], range == null ? null : range[1], includeInactive,
                 Pagination.of(page, size));
-        Map<UUID, String> paths = repoPaths();
+        Map<UUID, Repository> repos = repoById();
         Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
         // Feed rows omit fixedVersions (an SCA-only, per-group detail shown in the side panel, not the table).
-        return PagedResponse.fromPage(pageResult.map(g -> toView(g, paths, counts, List.of())));
+        return PagedResponse.fromPage(pageResult.map(g -> toView(g, repos, counts, List.of())));
     }
 
     /** Build a view with its open/ignored/solved sub-issue counts (0,0,0 when the group has no sub-issue). */
-    private IssueGroupView toView(IssueGroup g, Map<UUID, String> paths, Map<UUID, long[]> counts,
+    private IssueGroupView toView(IssueGroup g, Map<UUID, Repository> repos, Map<UUID, long[]> counts,
                                   List<String> fixedVersions) {
         long[] c = counts.getOrDefault(g.getId(), new long[3]);
-        return IssueGroupView.of(g, paths.get(g.getRepositoryId()), c[0], c[1], c[2], fixedVersions);
+        Repository repo = repos.get(g.getRepositoryId());
+        String path = repo == null ? null : repo.getPathWithNamespace();
+        String branch = repo == null ? null : repo.effectiveBranch();   // D-076: the branch this repo scans
+        return IssueGroupView.of(g, path, branch, c[0], c[1], c[2], fixedVersions);
     }
 
     /**
@@ -110,7 +113,7 @@ public class IssueService {
         // SF-7: the distinct fixed versions across this group's OPEN sub-issues (SQL, workspace-scoped, nulls
         // excluded). The panel renders "upgrade to <v>" for one, "see each location" for several, nothing for none.
         List<String> fixedVersions = subIssues.findOpenFixedVersions(WORKSPACE, groupId);
-        return toView(g, repoPaths(), findingCounts(List.of(g)), fixedVersions);
+        return toView(g, repoById(), findingCounts(List.of(g)), fixedVersions);
     }
 
     /** The Feed summary bar (OD-14 item 4): band group counts for the view + 7-day finding buckets (change 3). */
@@ -177,9 +180,9 @@ public class IssueService {
 
     // --- internals ---
 
-    private Map<UUID, String> repoPaths() {
+    private Map<UUID, Repository> repoById() {
         return repositories.findByWorkspaceId(WORKSPACE).stream()
-                .collect(Collectors.toMap(Repository::getId, Repository::getPathWithNamespace));
+                .collect(Collectors.toMap(Repository::getId, Function.identity()));
     }
 
     private Map<UUID, IgnoreRule> rulesFor(List<SubIssue> subs) {
