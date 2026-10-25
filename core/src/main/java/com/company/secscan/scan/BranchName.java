@@ -23,13 +23,14 @@ package com.company.secscan.scan;
  * </ul>
  *
  * <p>Hardening extras (A1): reject a leading {@code -}, NUL / newline / carriage-return (already covered by the
- * control-char rule) and any name longer than {@value #MAX_LENGTH} bytes.
+ * control-char rule) and any name longer than {@value #MAX_LENGTH} <em>Unicode code points</em> (N-1 — matched to
+ * busybox's character-counting {@code ${#}} in the scanner image, not UTF-16 units or bytes).
  *
  * <p>Pure (no Spring, no I/O).
  */
 public final class BranchName {
 
-    /** Maximum accepted length, in characters (A1). */
+    /** Maximum accepted length, in Unicode code points (A1/N-1). */
     public static final int MAX_LENGTH = 255;
 
     private BranchName() {
@@ -37,8 +38,8 @@ public final class BranchName {
 
     /** True if {@code name} is a branch name git would accept as a {@code --branch} shorthand (plus A1 extras). */
     public static boolean isValid(String name) {
-        if (name == null || name.isEmpty() || name.length() > MAX_LENGTH) {
-            return false;
+        if (name == null || name.isEmpty() || name.codePointCount(0, name.length()) > MAX_LENGTH) {
+            return false;   // length in code points (N-1), to match busybox ${#} in the scanner image
         }
         if (name.charAt(0) == '-') {           // A1: would look like a git option
             return false;

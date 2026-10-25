@@ -158,22 +158,33 @@ val scopeInventoryTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
-// D-076 gate: the scanner's branch-name validator (scanner-image/secscan-lib.sh valid_branch_name) must match the
-// Java core.scan.BranchName rules; host-run under the DEFAULT build (stdlib unittest + POSIX sh), like above.
-val runScanBranchTest by tasks.registering(Exec::class) {
+// D-076 gate (SF-5): the scanner's branch-name validator (secscan-lib.sh valid_branch_name) must agree with the
+// Java core.scan.BranchName rules on the SHARED scanner-image/branch-vectors.json, and run-scan.sh must refuse an
+// invalid SCAN_BRANCH before git. Run INSIDE the built image (busybox sh + the shipped scripts), not host dash,
+// under LC_ALL=C.UTF-8 so busybox counts code points (N-1). Runs as --user 0 so the test can write /out and
+// /work for the run-scan.sh refusal check — this exercises run-scan.sh LOGIC only; the production runtime user
+// (USER 10001) and the container hardening are unchanged and tested elsewhere.
+val branchVectorsInImageTest by tasks.registering(Exec::class) {
     group = "verification"
-    description = "Run the run-scan.sh branch-name validator's Python unit tests (D-076)."
+    description = "Run the branch-vector parity + run-scan.sh refusal test inside the scanner image (D-076/SF-5)."
+    dependsOn(buildScannerImage)
     val scannerDir = rootProject.file("scanner-image")
-    workingDir = scannerDir
     inputs.file(scannerDir.resolve("secscan-lib.sh")).withPropertyName("secscanLib")
-    inputs.file(scannerDir.resolve("run_scan_branch_test.py")).withPropertyName("runScanBranchTest")
-    val marker = layout.buildDirectory.file("run-scan-branch-test.ok")
+    inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
+    inputs.file(scannerDir.resolve("branch-vectors.json")).withPropertyName("branchVectors")
+    inputs.file(scannerDir.resolve("branch_vectors_test.py")).withPropertyName("branchVectorsTest")
+    val marker = layout.buildDirectory.file("branch-vectors-in-image-test.ok")
     outputs.file(marker)
-    environment("PYTHONDONTWRITEBYTECODE", "1")
-    commandLine("python3", "-B", "run_scan_branch_test.py")
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-e", "LC_ALL=C.UTF-8", "-e", "BRANCH_VECTORS=/host/branch-vectors.json",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/branch_vectors_test.py",
+    )
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, runScanBranchTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, branchVectorsInImageTest)
 }
