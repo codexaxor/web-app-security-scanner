@@ -1,5 +1,6 @@
 package com.company.secscan.gitlab;
 
+import com.company.secscan.gitlab.dto.GitLabBranch;
 import com.company.secscan.gitlab.dto.GitLabGroup;
 import com.company.secscan.gitlab.dto.GitLabProject;
 import com.company.secscan.gitlab.dto.GitLabTokenInfo;
@@ -120,7 +121,69 @@ public class GitLabClient {
         }, GitLabError.NOT_FOUND);
     }
 
+    /** A single project by numeric id (A6 default-branch refresh); 404 → {@link GitLabError#PROJECT_NOT_FOUND}. */
+    public GitLabProject getProject(String baseUrl, String token, long projectId) {
+        return call(() -> client(baseUrl, token).get().uri("/projects/{id}", projectId)
+                        .retrieve().body(GitLabProject.class),
+                GitLabError.PROJECT_NOT_FOUND);
+    }
+
+    /**
+     * One page of a project's branches (D-076 branch picker). {@code search} is optional server-side filtering,
+     * {@code page} is 1-based (GitLab's convention) and {@code perPage} is capped by GitLab at 100. Returns the
+     * page plus the total counts GitLab reports in its {@code x-total} / {@code x-total-pages} headers.
+     */
+    public Paged<GitLabBranch> listBranches(String baseUrl, String token, long projectId, String search,
+                                            int page, int perPage) {
+        return call(() -> {
+            ResponseEntity<List<GitLabBranch>> resp = client(baseUrl, token).get()
+                    .uri(b -> {
+                        var u = b.path("/projects/{id}/repository/branches")
+                                .queryParam("per_page", Math.min(perPage, PER_PAGE))
+                                .queryParam("page", Math.max(page, 1));
+                        if (search != null && !search.isBlank()) {
+                            u = u.queryParam("search", search);   // RestClient URL-encodes the value
+                        }
+                        return u.build(projectId);
+                    })
+                    .retrieve()
+                    .toEntity(new ParameterizedTypeReference<List<GitLabBranch>>() {});
+            List<GitLabBranch> body = resp.getBody() == null ? List.of() : resp.getBody();
+            long total = parseLong(header(resp.getHeaders(), "x-total"), body.size());
+            int totalPages = (int) parseLong(header(resp.getHeaders(), "x-total-pages"), 1);
+            return new Paged<>(body, total, totalPages);
+        }, GitLabError.PROJECT_NOT_FOUND);
+    }
+
+    /**
+     * Confirms a branch exists in the project (exact match), returning it. The branch is URL-encoded into the
+     * path. 404 → {@link GitLabError#BRANCH_NOT_FOUND}. This is the AUTHORITATIVE existence check for setting a
+     * scan branch (D-076.2b).
+     */
+    public GitLabBranch getBranch(String baseUrl, String token, long projectId, String branch) {
+        // Pre-encode the branch (encodes '/') then pass an absolute URI so RestClient does not encode it again.
+        URI uri = URI.create(apiBase(baseUrl) + "/projects/" + projectId + "/repository/branches/"
+                + URLEncoder.encode(branch, StandardCharsets.UTF_8));
+        return call(() -> client(baseUrl, token).get().uri(uri).retrieve().body(GitLabBranch.class),
+                GitLabError.BRANCH_NOT_FOUND);
+    }
+
+    /** One page of a GitLab list call, with the totals from its response headers. */
+    public record Paged<T>(List<T> items, long totalElements, int totalPages) {
+    }
+
     // --- internals ---
+
+    private static long parseLong(String value, long fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
 
     private RestClient client(String baseUrl, String token) {
         // SSRF guard: require https and an allowed host before any outbound call (D-018).

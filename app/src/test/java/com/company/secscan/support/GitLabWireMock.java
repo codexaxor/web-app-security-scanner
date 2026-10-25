@@ -28,6 +28,11 @@ public final class GitLabWireMock {
         return "http://localhost:" + server.port();
     }
 
+    /** The underlying server, for request verification in tests. */
+    public WireMockServer server() {
+        return server;
+    }
+
     public void stop() {
         if (server.isRunning()) {
             server.stop();
@@ -103,6 +108,37 @@ public final class GitLabWireMock {
     public GitLabWireMock stubLanguages(long projectId, String bodyJson) {
         server.stubFor(get(urlEqualTo("/api/v4/projects/" + projectId + "/languages"))
                 .willReturn(json(bodyJson)));
+        return this;
+    }
+
+    /** Stub {@code GET /projects/:id} (numeric id) with a project body (A6 default-branch refresh). */
+    public GitLabWireMock stubProjectById(long projectId, String body) {
+        server.stubFor(get(urlEqualTo("/api/v4/projects/" + projectId)).willReturn(json(body)));
+        return this;
+    }
+
+    /** Stub one page of {@code GET /projects/:id/repository/branches} with x-total / x-total-pages headers. */
+    public GitLabWireMock stubBranches(long projectId, String bodyJson, int total, int totalPages) {
+        server.stubFor(get(urlPathEqualTo("/api/v4/projects/" + projectId + "/repository/branches"))
+                .willReturn(json(bodyJson)
+                        .withHeader("x-total", String.valueOf(total))
+                        .withHeader("x-total-pages", String.valueOf(totalPages))));
+        return this;
+    }
+
+    /** Stub {@code GET /projects/:id/repository/branches/:branch} (URL-encoded branch) with a branch body. */
+    public GitLabWireMock stubBranch(long projectId, String urlEncodedBranch, String body) {
+        server.stubFor(get(urlEqualTo(
+                "/api/v4/projects/" + projectId + "/repository/branches/" + urlEncodedBranch))
+                .willReturn(json(body)));
+        return this;
+    }
+
+    /** Stub {@code GET /projects/:id/repository/branches/:branch} to return a status (e.g. 404 = branch gone). */
+    public GitLabWireMock stubBranchStatus(long projectId, String urlEncodedBranch, int status) {
+        server.stubFor(get(urlEqualTo(
+                "/api/v4/projects/" + projectId + "/repository/branches/" + urlEncodedBranch))
+                .willReturn(aResponse().withStatus(status)));
         return this;
     }
 

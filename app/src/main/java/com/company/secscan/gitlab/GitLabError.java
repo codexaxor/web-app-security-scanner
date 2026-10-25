@@ -21,6 +21,8 @@ public enum GitLabError {
     PROJECT_NOT_FOUND,
     /** 404 on a non-group call: the resource was not found. */
     NOT_FOUND,
+    /** A chosen scan branch is invalid or does not exist in GitLab for the project (D-076). */
+    BRANCH_NOT_FOUND,
     /** The target host is not https or is not in the allowed-hosts list (SSRF guard, D-018). */
     HOST_NOT_ALLOWED,
     /** The group/project path/URL entered is blank or could not be parsed (user input validation). */

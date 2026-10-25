@@ -9,8 +9,11 @@ import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.gitlab.api.ProjectView;
 import com.company.secscan.gitlab.dto.GitLabProject;
+import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositoryView;
+import com.company.secscan.scan.BranchName;
 import com.company.secscan.workspace.Workspace;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -172,6 +175,32 @@ public class RepositoryService {
                                 summaries.summaryOrEmpty(rollups, r.getId()))));
     }
 
+    private static final int SEARCH_MAX = 100;
+
+    /**
+     * One page of a repository's GitLab branches for the "Branch to scan" picker (D-076). {@code search} (≤ 100
+     * chars, else 400) is passed to GitLab as a server-side filter; {@code size} is capped at 100. Returns an
+     * empty page for a repository with no live GitLab connection (e.g. a local {@code file:} connection). 404 if
+     * the repository is not in this workspace.
+     */
+    public PagedResponse<BranchView> listBranches(UUID repositoryId, String search, int page, int size) {
+        Repository repo = requireRepo(repositoryId);
+        if (search != null && search.length() > SEARCH_MAX) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
+        }
+        int pageIndex = Math.max(0, page);
+        int perPage = Math.min(Math.max(1, size), 100);
+        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
+        if (conn == null || isLocal(conn)) {
+            return new PagedResponse<>(List.of(), pageIndex, perPage, 0, 0);
+        }
+        String token = cipher.require().decrypt(conn.getTokenCiphertext());
+        GitLabClient.Paged<com.company.secscan.gitlab.dto.GitLabBranch> paged = client.listBranches(
+                conn.getBaseUrl(), token, repo.getGitlabProjectId(), search, pageIndex + 1, perPage);
+        List<BranchView> views = paged.items().stream().map(BranchView::of).toList();
+        return new PagedResponse<>(views, pageIndex, perPage, paged.totalElements(), paged.totalPages());
+    }
+
     /**
      * Updates a repository's settings (OD-15 / D-070). {@code sensitivity} must be low/normal/high (else 400);
      * a change triggers an immediate per-repo re-score (score-only, 0 triage_event). {@code includeDevDeps} is
@@ -179,11 +208,23 @@ public class RepositoryService {
      * {@code inactive_reason=DEACTIVATED_BY_USER}; reactivating succeeds only for a user-deactivated repo that
      * still has a connection, else 409. A repository outside the workspace → 404.
      */
+    /** Settings patch with no scan-branch change (convenience for callers that only touch other fields). */
     @Transactional
     public RepositoryView patch(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active) {
+        return patch(repositoryId, sensitivity, includeDevDeps, active, null);
+    }
+
+    @Transactional
+    public RepositoryView patch(UUID repositoryId, String sensitivity, Boolean includeDevDeps, Boolean active,
+                                JsonNode scanBranch) {
         Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
         boolean rescoreNeeded = false;
+
+        if (scanBranch != null) {                 // key present in the request body
+            applyScanBranch(repo, scanBranch);
+            log.info("Repository {} scanBranch set", repositoryId);
+        }
 
         if (sensitivity != null) {
             if (!SENSITIVITIES.contains(sensitivity)) {
@@ -212,6 +253,45 @@ public class RepositoryService {
         RepositorySummaryService.RepositorySummary summary =
                 summaries.summaryOrEmpty(summaries.summariesByRepo(WORKSPACE), repositoryId);
         return RepositoryView.of(repo, conn, summary);
+    }
+
+    /**
+     * Applies a {@code scanBranch} change (D-076). JSON {@code null} resets to the default branch; a string sets
+     * the branch after validating its name (git ref-format) and existence in GitLab (the authoritative check);
+     * any other JSON type is a 400. Setting a non-null branch on an inactive repository is a 409.
+     */
+    private void applyScanBranch(Repository repo, JsonNode scanBranch) {
+        if (scanBranch.isNull()) {
+            repo.setScanBranch(null);             // follow the GitLab default branch again
+            return;
+        }
+        if (!scanBranch.isTextual()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "scanBranch must be a string or null.");
+        }
+        if (!repo.isActive()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Set the scan branch while the repository is active.");
+        }
+        String branch = scanBranch.asText();
+        if (!BranchName.isValid(branch)) {
+            throw new GitLabException(GitLabError.BRANCH_NOT_FOUND, "Not a valid branch name.");
+        }
+        GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
+        if (conn != null && !isLocal(conn)) {
+            // Authoritative existence check: GitLab 404 → BRANCH_NOT_FOUND (→ 400). Token never logged.
+            String token = cipher.require().decrypt(conn.getTokenCiphertext());
+            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+        }
+        repo.setScanBranch(branch);
+    }
+
+    private Repository requireRepo(UUID repositoryId) {
+        return repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
+    }
+
+    private static boolean isLocal(GitlabConnection conn) {
+        return conn.getBaseUrl() != null && conn.getBaseUrl().startsWith("file:");
     }
 
     private void applyActivation(Repository repo, boolean active) {

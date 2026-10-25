@@ -1,6 +1,7 @@
 package com.company.secscan.repository;
 
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositorySettingsRequest;
 import com.company.secscan.repository.api.RepositoryView;
 import com.company.secscan.repository.api.SelectRepositoriesRequest;
@@ -38,9 +39,19 @@ public class RepositoryController {
         return service.listSelected(page, size);
     }
 
-    /** Updates a repository's settings (sensitivity, include-dev-deps, active). OD-15 / D-070. */
+    /** Updates a repository's settings (sensitivity, include-dev-deps, active, scan branch). OD-15 / D-070 / D-076. */
     @PatchMapping("/{id}")
     public RepositoryView patch(@PathVariable UUID id, @RequestBody RepositorySettingsRequest req) {
-        return service.patch(id, req.sensitivity(), req.includeDevDeps(), req.active());
+        return service.patch(id, req.sensitivity(), req.includeDevDeps(), req.active(), req.scanBranch());
+    }
+
+    /** The branches for the "Branch to scan" picker (D-076): server-side {@code search} + pagination. */
+    @GetMapping("/{id}/branches")
+    public PagedResponse<BranchView> branches(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return service.listBranches(id, search, page, size);
     }
 }
