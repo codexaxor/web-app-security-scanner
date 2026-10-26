@@ -14,6 +14,64 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-082 M9 scheduling deferred after containers and git-history secrets (2026-10-27, accepted)
+Context: D-081 put M9 right after M8.7. Nothing in M8.5–M8.7 depends on scheduling.
+Decision: the order is M8.5 → M8.6 → M8.7 → container image scanning → git-history secrets + author → M9.
+Until M9, scans are manual (the Scan button). Container scanning ships with manual scan/re-check only; its
+nightly re-check moves into M9. OD-5 (worker hosting) is decided at the container spike instead of "before M9".
+M9 keeps every existing brief item: provider-aware poller, `effectiveBranch()` snapshot onto `scan.branch`,
+`BRANCH_CHANGED` excluded from fix metrics, intel startup sync.
+Consequences: findings go stale between manual scans, so the UI must show a "last scan" age (M8.6).
+Revisit when: stale findings become a problem in daily use, or a client needs automatic scanning.
+Supersedes the order in D-081 (its scope list stays valid).
+
+## D-083 M8.5 decisions (closes OD-22, OD-27) (2026-10-27, accepted)
+Context: M8.5 (D-081 (1)) needed its open items settled before `/start-milestone`.
+Decision:
+ - **OD-22 = A:** D-075 is met on **core-keycloak + notification + ib-api-v2** (`notification` counts as the third
+   real repository). Each is walked through twice: a baseline at the start of M8.5 on the M8.1 build (no code
+   change), and at the end on the M8.5 build (SQL = API = UI).
+ - **OD-27:** the IaC per-`check_id` severity override ships in M8.5 as **V20** (keeps D-077 numbering; no
+   out-of-order migration). Scoring-only.
+ - **OD-19 fix = D-073 parts (1) + (2):** an ignored finding absent from a scan where its scanner succeeded and was
+   authoritative is solved when its hold is re-derivable, routed through the D-063 resolver, writing a
+   `triage_event`; plus a one-off retire pass for rows already accumulated (no migration). This also covers M8.1
+   D-1 (branch with no manifests) and ignored-absent after a branch switch, using `BRANCH_CHANGED` when the cause
+   is a branch switch. Part (3) (structural SAST match key) is out of scope. Rules unchanged: a failed or
+   non-authoritative scanner closes nothing; every status change writes a `triage_event`.
+ - **Feed "New · 7d"** counts only findings first seen on the repository's currently tracked branch.
+ - **Level-2 taxonomy ships as V21:** each issue group gets a level-2 category derived from stored data
+   (SCA = ecosystem, secret = secret type, SAST = weakness class from CWE, IaC = platform, EOL = runtime), plus
+   optional OWASP Top 10 2025 category names (names only, no OWASP text — CC BY-SA). Backfilled for existing rows,
+   exposed in feed/group/sub-issue views, usable as a feed filter. Also add the D-074 errata correcting its level-1
+   label text to the shipped labels in `ui/src/lib/labels.ts`.
+Consequences: closes OD-22 and OD-27; M8.5's migrations are V20 (IaC override) and V21 (taxonomy).
+
+## D-084 M8.6 decisions (closes OD-25, OD-26) (2026-10-27, accepted)
+Context: M8.6 (D-081 (2)) needed its navigation and deep-link decisions settled.
+Decision:
+ - **OD-25:** the app shell moves to a left sidebar navigation.
+ - **OD-26:** amend D-067 — the UI may build links to a file line or commit on the source host ONLY from: the
+   stored connection host, the stored project path, a validated 40-hex `scan.commit_sha`, and a URL-encoded
+   repo-relative path + integer line. Never from finding text or scanner output. Covered by a guard/unit test. All
+   other D-067 rules unchanged.
+Consequences: closes OD-25 and OD-26; D-067's security baseline is unchanged except this one scoped amendment.
+
+## D-085 M8.7 decisions (adds and closes OD-30, OD-31) (2026-10-27, accepted)
+Context: M8.7 (D-080, D-081 (3)) needed the GitHub access and public-repository models settled; two new open
+decisions (OD-30, OD-31) are added and resolved here.
+Decision:
+ - **OD-30:** GitHub access starts with a fine-grained personal access token, read-only Contents + Metadata,
+   entered only in the UI; a GitHub App is later.
+ - **OD-31:** public repositories are added by URL and cloned anonymously over HTTPS; branch listing via the
+   provider's unauthenticated API with rate-limit handling; no search/listing of public repositories.
+ - **Migration V22** generalises the GitLab connection into a provider-neutral source connection and makes
+   repository identity = workspace + provider + host + the provider's id; existing rows are backfilled as GitLab on
+   their current host, keeping their ids and findings.
+ - Until M8.7 ships: do NOT add a second GitLab host (incl. gitlab.com) to `SECSCAN_GITLAB_ALLOWED_HOSTS` —
+   repository identity is still the bare GitLab project id.
+Consequences: adds and closes OD-30 and OD-31; M8.7 owns V22 and the provider-neutral connection/identity model.
+
 ## D-081 Roadmap after M8.1 (OD-24 = A) (2026-10-26, accepted)
 Context: the 2026-10-26 intake added UI uplift, multi-provider sources, container image scanning and git-history
 secret items on top of the M8.5 commitments (D-073, D-074, D-075).
@@ -1286,7 +1344,7 @@ Decision: `workspace_id` on every business table from day one.
   finished in M4b
 - OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
-- OD-5 Hosting for the worker — needed before M9
+- OD-5 Hosting for the worker — decided at the container spike (D-082)
 - OD-6 Product name
 - OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
@@ -1384,16 +1442,21 @@ Decision: `workspace_id` on every business table from day one.
     self-hosted), public images first-class, spike before build; milestone number assigned when scheduled.
   - **GitHub / gitlab.com / public repositories → M8.7 (D-080):** multiple source connections of any provider
     in one workspace, one shared feed.
-- Post-M8.1 open decisions (recorded 2026-10-26):
-  - **OD-22 Which real repositories satisfy D-075** (is `notification` the 3rd real repo?) [M8.5, first task].
-  - **OD-25 App shell navigation:** left sidebar vs restyled top nav [M8.6].
+- Post-M8.1 open decisions (recorded 2026-10-26; OD-30/OD-31 added 2026-10-27):
+  - **OD-22 Which real repositories satisfy D-075** (is `notification` the 3rd real repo?) [M8.5, first task] —
+    RESOLVED by D-083 (OD-22 = A: core-keycloak + notification + ib-api-v2).
+  - **OD-25 App shell navigation:** left sidebar vs restyled top nav [M8.6] — RESOLVED by D-084 (left sidebar).
   - **OD-26 Deep links to a file line / commit on the source host:** amend D-067 (links only from stored host +
-    project + validated commit SHA + encoded path) [M8.6].
+    project + validated commit SHA + encoded path) [M8.6] — RESOLVED by D-084.
   - **OD-27 Migration numbering if the IaC severity override (V20 per D-077) is not in M8.5:** Flyway would need
-    out-of-order to add V20 after V21 [M8.5].
+    out-of-order to add V20 after V21 [M8.5] — RESOLVED by D-083 (IaC override ships as V20 in M8.5).
   - **OD-28 Container scan engine + registry auth model** (spike decides) [containers].
   - **OD-29 Git-history secrets:** lifecycle (cannot be solved by deletion) + author attribution privacy (name
     only vs name + email) [later].
+  - **OD-30 GitHub access model** (fine-grained PAT vs GitHub App) [M8.7] — RESOLVED by D-085 (fine-grained PAT
+    first, read-only Contents + Metadata, UI-only; GitHub App later).
+  - **OD-31 Public repositories** (how added, cloned and branch-listed) [M8.7] — RESOLVED by D-085 (added by URL,
+    cloned anonymously over HTTPS, branch listing via the unauthenticated API; no public-repo search/listing).
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.
