@@ -14,6 +14,21 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-087 IaC per-check_id severity override table (V20), scoring-only, global (2026-10-27, accepted)
+Context: M8.5 (D-083 OD-27). OSS Checkov checks carry no severity, so every IaC finding scores base MEDIUM
+(D-054). A maintained per-`check_id` override lets a specific check be scored CRITICAL/HIGH/MEDIUM/LOW.
+Decision: migration **V20** adds `iac_severity_override (check_id pk, severity, note, created_at)`. It is a
+global config table with **no `workspace_id`** (D-050 family, beside `kev_entry`/`epss_score`/`fix_time_config`/
+`eol_cycle`); its `IacSeverityOverrideRepository.findById(checkId)` lookup is added to the CLAUDE.md domain-rule-1
+exception list. The override is read by `SubIssueScorer` for IaC findings and fed to the pure `Scoring` as
+`ScoreInput.iacSeverityOverride`; it replaces the default MEDIUM base at scan time and on re-score (D-049). It is
+**scoring-only** — never a status change, never a `triage_event` — and `check_id` is unchanged as the IaC
+fingerprint/rule input (not a new fingerprint input). The table ships **empty**: a row is added only for a
+`check_id` confirmed in real Checkov output (never guessed, D-061 pattern). There is **no UI** to manage overrides
+yet (known gap). Proven by `ScoringTest.iacBaseUsesCheckIdOverrideWhenPresent` and
+`IacSeverityOverrideIT` (score changes, status unchanged, 0 triage_event).
+Consequences: one new global table; IaC scores become tunable without a status/fingerprint risk.
+
 ## D-086 M8.x train execution model (2026-10-27, accepted)
 Context: M8.5, M8.6 and M8.7 (D-081 (1)(2)(3)) are planned together and approved once, then built back to back.
 This needs an execution model that keeps CLAUDE.md's "one milestone per session" and WORKFLOW's review/merge

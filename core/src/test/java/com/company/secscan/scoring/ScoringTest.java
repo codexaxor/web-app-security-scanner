@@ -168,6 +168,23 @@ class ScoringTest {
     }
 
     @Test
+    void iacBaseUsesCheckIdOverrideWhenPresent() {
+        // D-083 (OD-27, V20): a per-check_id override replaces the default-MEDIUM Checkov base.
+        ScoreResult crit = Scoring.score(new ScoreInput("iac", null, null, null, false, "normal", null, false,
+                null, false, "CRITICAL"));
+        assertThat(crit.score()).isEqualTo(90);
+        assertThat(has(crit, "base_iac")).isTrue();
+        // A blank/absent override falls back to the default MEDIUM.
+        ScoreResult none = Scoring.score(new ScoreInput("iac", null, null, null, false, "normal", null, false,
+                null, false, null));
+        assertThat(none.score()).isEqualTo(50);
+        // The override is IaC-only: a SAST finding ignores it.
+        ScoreResult sastIgnores = Scoring.score(new ScoreInput("sast", null, "HIGH", null, false, "normal",
+                null, false, null, false, "CRITICAL"));
+        assertThat(sastIgnores.score()).isEqualTo(75);
+    }
+
+    @Test
     void eolBasePastEolIs75AndEndingSoonIs45() {
         ScoreResult past = Scoring.score(new ScoreInput("eol", null, null, null, false, "normal",
                 com.company.secscan.eol.EolStatus.PAST_EOL, false));
