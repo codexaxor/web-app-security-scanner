@@ -8,12 +8,17 @@ import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.scan.api.ScanView;
+import com.company.secscan.scan.parse.ParsedScan;
+import com.company.secscan.scan.parse.ScannerTaskResult;
+import com.company.secscan.scan.parse.SecscanConfig;
 import com.company.secscan.scan.worker.ScanClaimer;
 import com.company.secscan.scan.worker.ScanJobProcessor;
+import com.company.secscan.scan.worker.ScanStateService;
 import com.company.secscan.support.AbstractScanWorkerIT;
 import com.company.secscan.support.GitLabWireMock;
 import com.company.secscan.workspace.Workspace;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +49,8 @@ class BranchMissingIT extends AbstractScanWorkerIT {
     GitlabConnectionRepository connections;
     @Autowired
     TokenCipherHolder cipher;
+    @Autowired
+    ScanStateService state;
 
     private GitLabWireMock gitlab;
 
@@ -103,6 +110,41 @@ class BranchMissingIT extends AbstractScanWorkerIT {
 
         assertThat(finished.getStatus()).isEqualTo(Scan.STATUS_FAILED);
         assertThat(finished.getFailReason()).isEqualTo("PROJECT_UNREACHABLE");
+        assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isFalse();
+    }
+
+    @Test
+    void aTransientBranchCheckErrorProceedsPastThePreCloneGate() {   // A5: 5xx on the branch check → proceed
+        Repository repo = seed(9303L, "dev");
+        gitlab.stubBranchStatus(9303L, "dev", 500);             // transient error on the branch check
+        gitlab.stubProjectById(9303L,
+                "{\"id\":9303,\"path_with_namespace\":\"svc/app\",\"default_branch\":\"main\",\"empty_repo\":false}");
+
+        Scan finished = runAndGet(repo);
+
+        // It did NOT fail-fast as branch-missing / project-unreachable: the verdict was TRANSIENT, so the worker
+        // proceeded to the clone (which then fails here — WireMock is not a git server — for a non-branch reason).
+        assertThat(finished.getFailReason()).isNotIn("BRANCH_NOT_FOUND", "PROJECT_UNREACHABLE");
+        assertThat(finished.getReconciledAt()).isNull();                 // a failed clone closes nothing
+        assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isFalse();
+    }
+
+    @Test
+    void branchMissingIsClearedOnTheNextSuccessfulScan() {   // A5: a good scan clears a stale branch-missing flag
+        Repository repo = seed(9304L, "dev");
+        repo.markBranchMissing();
+        repositories.save(repo);
+        assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isTrue();
+
+        Scan scan = scans.save(Scan.manual(WORKSPACE, repo.getId(), "dev"));
+        scan.markRunning();
+        scans.save(scan);
+        ScannerTaskResult sca = new ScannerTaskResult("sca", "ok", 0, 5L, "osv.json", false);
+        ParsedScan parsed = new ParsedScan(false, "commit-ok", Map.of(), List.of(sca), List.of(), List.of(),
+                SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), List.of());
+        state.recordSuccess(WORKSPACE, scan.getId(), UUID.randomUUID(), repo.getId(), parsed, null,
+                Scan.STATUS_COMPLETED);
+
         assertThat(repositories.findById(repo.getId()).orElseThrow().isBranchMissing()).isFalse();
     }
 }

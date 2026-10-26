@@ -8,8 +8,10 @@ COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
 COPY core/build.gradle.kts core/gradle.lockfile ./core/
 COPY app/build.gradle.kts app/gradle.lockfile ./app/
-# Warm the dependency cache before copying sources (better layer caching).
-RUN ./gradlew --no-daemon :app:dependencies >/dev/null 2>&1 || true
+# Warm the dependency cache before copying sources (better layer caching). Lockfiles (copied above) make this
+# deterministic; a genuine resolution failure must surface, so no `|| true` masks it (stdout — the verbose
+# dependency tree — is suppressed, but stderr and a non-zero exit fail the build).
+RUN ./gradlew --no-daemon :app:dependencies >/dev/null
 COPY core ./core
 COPY app ./app
 RUN ./gradlew --no-daemon :app:bootJar -x test

@@ -109,10 +109,9 @@ async function main() {
       },
     );
 
-    // The Playwright container runs as pwuser (uid 1001) — a DIFFERENT uid from the host user who owns this bind
-    // mount, and we cannot chown to 1001 without root. So "other" (pwuser) needs rwx; group gets nothing. Mode
-    // 0o707 is the narrowest that lets pwuser write artifacts here (narrower than the previous 0o777). (SF-4)
-    chmodSync(ARTIFACTS, 0o707);
+    // The Playwright container runs as the HOST user (see --user below) so it writes this bind-mounted artifacts
+    // dir as its OWNER — the dir is therefore NOT world-writable (M8.5 housekeeping; was 0o707 = others rwx).
+    chmodSync(ARTIFACTS, 0o755);
 
     console.log("[e2e] running Playwright (in Docker)");
     // Run the local Playwright binary directly (NOT `npx`, which would try to write an npm cache into the
@@ -121,9 +120,13 @@ async function main() {
       "docker",
       // SF-4: the two SECRET env vars use name-only `-e` flags (value supplied via this process's env below), so
       // they never appear on the argv. Non-secret vars keep the inline `KEY=value` form for clarity.
-      ["run", "--rm", "--network", NETWORK, "--user", "pwuser", "--init",
+      // Run as the HOST user (not the image's pwuser) so artifacts are written as this bind mount's owner and the
+      // dir need not be world-writable (M8.5 housekeeping). HOME=/tmp gives the browser a writable home/cache
+      // under that uid, which has no entry in the image's /etc/passwd.
+      ["run", "--rm", "--network", NETWORK, "--user", `${process.getuid()}:${process.getgid()}`, "--init",
         "-v", `${UI_DIR}:/ui:ro`, "-v", `${ARTIFACTS}:/ui/e2e/artifacts`,
         "-w", "/ui/e2e",
+        "-e", "HOME=/tmp",
         "-e", "E2E_BASE_URL=http://ui:80",
         "-e", `E2E_ADMIN_EMAIL=${env.E2E_ADMIN_EMAIL}`, "-e", "E2E_ADMIN_PASSWORD",
         "-e", "PGHOST=postgres", "-e", "PGPORT=5432", "-e", "PGUSER=secscan",
