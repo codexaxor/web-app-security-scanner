@@ -357,6 +357,63 @@ already-selected project's checkbox is disabled ("Already selected") and the res
 selected"; a project whose code is unreadable is labelled honestly ("No access to repository code — check the token
 role") rather than "empty repository". No new dependency; CSP unchanged.
 
+## M8.5 Correctness + taxonomy
+
+**Scope (D-083 + D-081 (1)).** OD-19 family routed through the D-063 resolver: solve an *ignored* finding absent
+from a scan where its scanner succeeded and was authoritative when its hold is re-derivable (writing a
+`triage_event`), plus a one-off retire pass for the rows already accumulated (no migration); this also covers M8.1
+D-1 (a branch with no manifests) and absent-but-ignored after a branch switch (`BRANCH_CHANGED` when the cause is a
+branch switch). Level-2 taxonomy (migration **V21**): each issue group gets a level-2 category derived from stored
+data (SCA = ecosystem, secret = secret type, SAST = weakness class from CWE, IaC = platform, EOL = runtime), plus
+optional OWASP Top 10 2025 category names (names only — CC BY-SA), backfilled, exposed in feed/group/sub-issue
+views and usable as a feed filter; plus the D-074 errata correcting the level-1 label text to the shipped labels in
+`ui/src/lib/labels.ts`. IaC per-`check_id` severity override (migration **V20**, scoring-only). Feed "New · 7d"
+counts only findings first seen on the repository's currently tracked branch. D-081 (1) small items: IaC human
+titles from Checkov `check_name`, languages refreshed on each scan, re-score on unignore, the A5 ITs, and
+housekeeping (API Dockerfile `|| true`, dev postgres digest pin, e2e artifacts dir mode).
+
+**Done when:**
+- Baseline + end walkthrough on core-keycloak, notification, ib-api-v2 and secscan-test-secrets: `sub_issue`
+  status counts SQL = API = UI per repo.
+- OD-19: the 2 stale ignored SAST duplicates on secscan-test-secrets are retired with `triage_event`s; a repeat
+  scan creates no new orphans; named IT for absent-ignored-with-held-rule solved, absent-ignored-with-failed-scanner
+  unchanged, absent-ignored-with-non-authoritative-SCA unchanged.
+- Branch switch to a branch with no manifests re-baselines prior SCA findings (named IT).
+- Every issue group has a level-2 category after backfill (SQL count of null = 0); feed filter works (E2E).
+- IaC groups show the Checkov check name, not only the id.
+- IaC override changes only scores (no status change, no `triage_event`) — named IT.
+- "New · 7d" on notification equals the count of findings first seen on `dev` (SQL oracle).
+- Unignore re-scores the reopened finding immediately (named IT).
+- Languages are refreshed on every successful scan (secscan-test-secrets no longer empty).
+- `./gradlew clean build --rerun-tasks` green; UI gate + E2E twice green.
+
+## M8.6 UI uplift
+
+**Scope (D-081 (2) + D-084).** Left sidebar app shell + a design pass. Repositories list (search, filters, sort,
+severity chips, coverage tag, row menu, clickable rows). Repository page (Issues / Scans / Settings tabs, coverage
+banner, last scan age). Issue side panel (summary and how-to-fix text generated only from stored fields, advisory
+text via a new API field, sub-issues grouped by location with "+N more", next/prev, shareable URL). Secret context
+(fix guidance per secret type, file-line + commit link per D-084). Feed and Dashboard restyled.
+
+**Done when:** list → repo page → panel flow covered by E2E; generated texts unit-tested; link builder guard test;
+D-067 headers unchanged; real-data walkthrough on the 3 repos. (Detailed Done when: architect, before
+`/start-milestone M8.6`.)
+
+## M8.7 Multiple sources
+
+**Scope (D-080 + D-085).** One workspace holds self-managed GitLab + gitlab.com + GitHub + public repositories in
+one feed. GitHub access via a fine-grained personal access token (read-only Contents + Metadata, entered only in
+the UI; a GitHub App is later). Public repositories added by URL and cloned anonymously over HTTPS, branch listing
+via the provider's unauthenticated API with rate-limit handling, no search/listing of public repositories. Migration
+**V22** generalises the GitLab connection into a provider-neutral source connection and makes repository identity =
+workspace + provider + host + the provider's id; existing rows are backfilled as GitLab on their current host,
+keeping their ids and findings.
+
+**Done when:** one workspace scans self-managed GitLab + gitlab.com (a mirror of an existing repo) + a private
+GitHub repo + a public GitHub repo in one feed; the mirror pair yields the same findings on the same commit;
+existing repositories keep ids and findings after V22. (Detailed Done when: architect, before
+`/start-milestone M8.7`.)
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
@@ -395,12 +452,12 @@ locally.
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
 | M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
 | M8.1 | Branch to scan per repository | Per-repo `scan_branch` + `scan.branch` snapshot (V19); branch picker endpoint + searchable UI combobox; git-ref-format + GitLab-existence validation; branch-aware re-baseline (`BRANCH_CHANGED`); token-rotation UI; two selection-screen bug fixes (B1 add-count, B2 empty-vs-no-access) — D-076..D-078 | `notification` scans branch `dev`; a branch switch re-baselines (closes "branch changed", Solved·7d unchanged) and a same-branch rescan adds 0 triage events; see the M8.1 section |
-| M8.5 | Correctness + taxonomy | OD-19 family (incl. M8.1 D-1, absent-but-ignored after a branch switch), level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, D-075 real-repo walkthrough (UI polish moved out) — D-081 (1) | SPEC section pending (architect) |
-| M8.6 | UI uplift | New app shell, Repositories list redesign (clickable rows), repository detail page (issues / scans / settings, coverage banner), issue side panel clarity, secret context, compact side-panel locations — D-081 (2) | SPEC section pending (architect) |
-| M8.7 | Multi-provider sources | gitlab.com + GitHub + public repositories in one workspace, one shared feed; one adapter per provider; host policy per connection — D-080, D-081 (3) | SPEC section pending (architect) |
-| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner; provider-aware (D-080) | A new commit is scanned within 15 min; nightly run completes for all repos |
-| TBD | Container image scanning | Registry-agnostic OCI (any registry incl. self-hosted), public images first-class, spike before build — D-081 (5) | SPEC section pending (architect) |
+| M8.5 | Correctness + taxonomy | OD-19 family (incl. M8.1 D-1, absent-but-ignored after a branch switch), level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, D-075 real-repo walkthrough (UI polish moved out) — D-081 (1), D-083 | See the "M8.5 Correctness + taxonomy" section |
+| M8.6 | UI uplift | New app shell (left sidebar), Repositories list redesign (clickable rows), repository detail page (issues / scans / settings, coverage banner, last scan age), issue side panel clarity, secret context, compact side-panel locations — D-081 (2), D-084 | See the "M8.6 UI uplift" section (detailed Done when: architect, before `/start-milestone M8.6`) |
+| M8.7 | Multi-provider sources | gitlab.com + GitHub + public repositories in one workspace, one shared feed; one adapter per provider; host policy per connection; provider-neutral connection + identity (V22) — D-080, D-081 (3), D-085 | See the "M8.7 Multiple sources" section (detailed Done when: architect, before `/start-milestone M8.7`) |
+| TBD | Container image scanning | Registry-agnostic OCI (any registry incl. self-hosted), public images first-class, spike before build; manual scan/re-check only until M9 — D-081 (5), D-082 | SPEC section pending (architect) |
 | later | Secrets in git history | Git-history secret scan + author attribution; own lifecycle decision — D-081 (6) | SPEC section pending (architect) |
+| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner; provider-aware (D-080); deferred per D-082; also nightly container re-check | A new commit is scanned within 15 min; nightly run completes for all repos |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 
 ## Open decisions
