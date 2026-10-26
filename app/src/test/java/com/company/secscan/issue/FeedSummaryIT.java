@@ -7,6 +7,8 @@ import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.issue.api.FeedSummaryView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.Scan;
+import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.support.AbstractGitLabIT;
 import com.company.secscan.workspace.Workspace;
 import java.util.List;
@@ -34,6 +36,8 @@ class FeedSummaryIT extends AbstractGitLabIT {
     @Autowired
     GitlabConnectionRepository connections;
     @Autowired
+    ScanRepository scans;
+    @Autowired
     JdbcTemplate jdbc;
 
     private Repository seedRepo(long id) {
@@ -48,8 +52,20 @@ class FeedSummaryIT extends AbstractGitLabIT {
         return groups.save(g).getId();
     }
 
+    /** A completed scan on {@code branch} for the repo — its id is used as a sub-issue's first-seen scan. */
+    private UUID scanOn(UUID repoId, String branch) {
+        Scan s = Scan.manual(WORKSPACE, repoId, branch);
+        s.finish(Scan.STATUS_COMPLETED);
+        return scans.save(s).getId();
+    }
+
+    /** A sub first seen on the repo's tracked branch "main" (so the branch-scoped New·7d query counts it, D-083). */
     private UUID sub(UUID groupId, UUID repoId, String fp) {
-        return subIssues.save(new SubIssue(WORKSPACE, groupId, repoId, "sca", "sca", fp, null)).getId();
+        return subFirstSeenOn(groupId, repoId, fp, scanOn(repoId, "main"));
+    }
+
+    private UUID subFirstSeenOn(UUID groupId, UUID repoId, String fp, UUID firstSeenScanId) {
+        return subIssues.save(new SubIssue(WORKSPACE, groupId, repoId, "sca", "sca", fp, firstSeenScanId)).getId();
     }
 
     private void backdateSubCreatedAt(UUID subId, int days) {
@@ -116,6 +132,28 @@ class FeedSummaryIT extends AbstractGitLabIT {
 
         FeedSummaryView s = service.feedSummary(null, null, "focus", false);
         assertThat(s.solved()).isEqualTo(2);   // genuine + null-reason; the branch-change close is excluded
+    }
+
+    @Test
+    void newCountsOnlyFindingsFirstSeenOnTrackedBranch() {   // D-083
+        Repository repo = seedRepo(8203L);
+        repo.setScanBranch("dev");                 // the repo now tracks "dev" (effective branch)
+        repositories.save(repo);
+        UUID g = openGroup(repo.getId(), "crit", 95);
+
+        subFirstSeenOn(g, repo.getId(), "fp-on-dev", scanOn(repo.getId(), "dev"));    // counts (tracked branch)
+        subFirstSeenOn(g, repo.getId(), "fp-on-main", scanOn(repo.getId(), "main"));  // excluded (old branch)
+
+        assertThat(service.feedSummary(null, null, "focus", false).newFindings()).isEqualTo(1);
+
+        // SQL oracle: distinct subs created in 7d whose first-seen scan branch = the repo's effective branch.
+        Long sql = jdbc.queryForObject(
+                "select count(distinct s.id) from sub_issue s join scan fs on fs.id = s.first_seen_scan_id "
+                        + "join repository r on r.id = s.repository_id "
+                        + "where s.workspace_id = ? and s.created_at >= now() - interval '7 days' "
+                        + "and fs.branch = coalesce(r.scan_branch, r.default_branch)",
+                Long.class, WORKSPACE);
+        assertThat(sql).isEqualTo(1);
     }
 
     private void solvedWithReason(UUID subId, String reason, int daysAgo) {

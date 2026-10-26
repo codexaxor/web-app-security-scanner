@@ -30,15 +30,21 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     java.util.Optional<SubIssue> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
     /**
-     * Feed-summary "New in last 7 days" (OD-14 item 4, change 3): distinct sub-issues first seen (row created)
-     * since {@code since}, honouring type + repository filters only (not band, not view) and excluding inactive
-     * repositories' findings unless {@code includeInactive}. A reopened finding keeps its original created_at, so
-     * it is not counted as New.
+     * Feed-summary "New in last 7 days" (OD-14 item 4, change 3; D-083): distinct sub-issues first seen (row
+     * created) since {@code since} AND first seen ON THE REPOSITORY'S CURRENTLY TRACKED (effective) branch —
+     * {@code coalesce(scan_branch, default_branch)} (D-076). A finding first seen on a now-abandoned branch is
+     * NOT "New" on the branch we now scan, which fixes the across-a-branch-switch over-count. Honours the
+     * type + repository filters only (not band, not view) and excludes inactive repositories' findings unless
+     * {@code includeInactive}. A reopened finding keeps its original created_at, so it is not counted as New;
+     * a finding with no first-seen scan (legacy/null) is excluded.
      */
     @Query("""
             select count(distinct s.id)
-            from SubIssue s, com.company.secscan.repository.Repository r
-            where s.workspaceId = :ws and r.id = s.repositoryId and s.createdAt >= :since
+            from SubIssue s, com.company.secscan.repository.Repository r,
+                 com.company.secscan.scan.Scan fs
+            where s.workspaceId = :ws and r.id = s.repositoryId and fs.id = s.firstSeenScanId
+              and s.createdAt >= :since
+              and fs.branch = coalesce(r.scanBranch, r.defaultBranch)
               and (:repositoryId is null or s.repositoryId = :repositoryId)
               and (:type is null or s.type = :type)
               and (:includeInactive = true or r.active = true)

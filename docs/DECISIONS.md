@@ -14,6 +14,20 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
+Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure
+code", "Infrastructure misconfiguration", "End-of-life runtime". The UI actually shipped (S10f) a different,
+final wording. Per the log no-edit rule, D-074's text stands; this entry is the authority for the shipped
+labels, which the M8.5 level-2 taxonomy sits beneath.
+Decision (errata): the shipped level-1 labels in `ui/src/lib/labels.ts` (`TYPE_LABEL`) are:
+ - `sca` → "Vulnerable dependency"
+ - `sast` → "Code weakness"
+ - `secret` → "Exposed secret"
+ - `iac` → "Infrastructure config"
+ - `eol` → "Outdated runtime"
+These are correct and unchanged; M8.5 adds only the level-2 category + optional OWASP 2025 name beneath them
+(D-083). Documentation accuracy only; no behaviour change.
+
 ## D-087 IaC per-check_id severity override table (V20), scoring-only, global (2026-10-27, accepted)
 Context: M8.5 (D-083 OD-27). OSS Checkov checks carry no severity, so every IaC finding scores base MEDIUM
 (D-054). A maintained per-`check_id` override lets a specific check be scored CRITICAL/HIGH/MEDIUM/LOW.
