@@ -246,3 +246,72 @@ Scope: D-080, D-085, D-081 (3). One workspace, one feed, many providers.
 === REPORT BACK NOW (Phase A) ===
 The full plan per "PHASE A", the CHECKLIST answers, disk preflight numbers, the brief + state file commit
 hashes — then STOP.
+
+## Approved plan changes (2026-10-27)
+
+Train plan approved with these changes. First append this whole message verbatim to
+docs/plans/M8x-train-brief.md under a heading "Approved plan changes (2026-10-27)", record the approval
+date in docs/plans/M8x-train-state.md, commit ("docs(plans): train plan approval + changes"). These changes
+are binding for M8.5, M8.6 and M8.7 and must be re-read by every later session.
+
+M8.5
+1. S1 OD-19 retire pass: endpoint acts ONLY on the authenticated user's workspace (no cross-workspace
+   sweep — admin endpoints are ungated, OD-9). dryRun defaults to true and returns the candidate list
+   (sub_issue ids, rule, file, reason). Candidate = status 'ignored' AND hold re-derivable (auto cause, or a
+   rule/path/cve-scope rule; sub-issue-scope manual ignores are NOT touched) AND the repository's latest scan
+   on its effective branch completed with that finding's scanner succeeded and authoritative AND the
+   fingerprint is absent from that scan. Each retire writes triage_event ignored→solved, actor system,
+   reason SOLVED_NOT_DETECTED, scan_id = that latest scan; BRANCH_CHANGED only when the absence is caused by
+   a branch switch (reconcile path). Idempotent. Add IT: subIssueScopeManualIgnoreIsNeverRetired.
+2. S3 taxonomy backfill: NOT an endpoint. Run automatically on api startup after Flyway, idempotent, only
+   rows with level2_category null, per workspace, DB-only, no status change, no triage_event. Reconcile sets
+   the category for new/updated groups. TaxonomyBackfillIT asserts null count 0 after startup.
+3. S4 (your question a = yes): reuse advisory_summary for the Checkov check_name. IaC group title =
+   check_name (fallback check_id); IaC subtitle must not equal the title — use the check_id. Existing IaC
+   groups' titles are refreshed on their next successful scan (title is descriptive). Add
+   IaCTitleIT.existingGroupTitleRefreshedOnNextScan.
+4. S3 (your question b = yes): coarse IaC platform heuristic with fallback "Infrastructure"; record as a D-draft.
+5. S2 V20: global table accepted (D-050 family) with the CLAUDE.md rule-1 exception + DECISIONS entry; seed
+   only check_ids confirmed in real Checkov fixture output, else ship empty. Report lists "no UI to manage
+   IaC overrides yet" under known gaps.
+6. S5 languages: lang_detect counts file SIZES by extension only — never reads file contents; skips .git,
+   node_modules, vendor, build, dist, target, .gradle; never follows symlinks (realpath-confined to the
+   checkout); display names match GitLab's (Java, Kotlin, HTML, CSS, JavaScript, TypeScript, Python,
+   FreeMarker, Shell, Dockerfile, C#, …); keep languages ≥1% share; bounded runtime. A detection failure
+   never fails the scan (scan warning only) and never clears existing languages. In-image tests cover
+   symlink-out, vendored dir skipped, empty repo.
+7. OWASP Top 10 2025 names: use only the official final 2025 list. If it cannot be verified as final from
+   owasp.org during S3, leave owasp_category null everywhere and record it — never guess names.
+8. New·7d SQL accepted as proposed (row-level New/To Do status unchanged).
+
+M8.6
+9. Accepted as planned. SubIssueView host may be null (detached repo) → no source link rendered. The
+   sourceLink builder covers GitLab shapes in M8.6 (incl. a self-managed host with a non-default port).
+10. U4: write the exact scan-warning-code → banner-text map into the work log and unit-test it.
+
+M8.7 (V22 design changes — binding)
+11. Connection uniqueness: replace uq_gitlab_connection_group / uq_gitlab_connection_project with indexes
+    that include provider and host (workspace_id, provider, host, <group id | project id>).
+12. Connection targets: relax ck_gitlab_connection_target and extend target_type to cover GitHub targets
+    (owner = user/org, repo = single repository) and public repositories; add the columns they need (e.g.
+    owner login, repo full name, provider repo id). Public repositories: credential_kind 'none'; state in
+    V0 whether a public repo gets its own connection row or an anonymous per-host connection, and why.
+13. repository: provider_repo_id NOT NULL; gitlab_project_id becomes nullable (GitHub rows); GitHub
+    identity = GitHub's numeric repository id (stable across renames), full name kept as display path.
+14. Host backfill: host keeps an explicit non-default port (host:port). It must not fail when a workspace
+    has repositories but no connections: run \d repository first; derive host from a stored repository
+    URL column if one exists, else the single configured SECSCAN_GITLAB_ALLOWED_HOSTS value, else HARD STOP
+    with the counts. MigrationV22IT adds: detachedRepoWithNoConnections, gitlabGroupIdCollisionAcrossHosts,
+    githubConnectionRowAccepted, idsAndFindingsUnchangedAfterBackfill.
+15. V0 writes the final V22 SQL into the work log, and V1 must have MigrationV22IT green before any other
+    M8.7 slice starts.
+16. sourceLink gains GitHub shapes (https://github.com/<owner>/<repo>/blob/<sha>/<path>#L<line> and
+    /commit/<sha>) with the same rejection tests.
+17. Built-in SaaS hosts (github.com, api.github.com, gitlab.com) are allowed by default but can be switched
+    off by configuration (egress control, D-033); document the property.
+
+Then run Phase B for M8.5 only, following the brief (BUILD LOOP, failure policy, HARD STOP, MILESTONE
+FINISH). When M8.5 is finished, set the state to "next: M8.6 via PROMPT 3" and STOP this session.
+
+Report back: approval commit hash; the M8.5 report path + commit; final gate counts (core/app tests,
+vitest, guard, e2e ×2); every D-draft; the OD-19 dry-run result shape; pending manual walkthrough steps.
