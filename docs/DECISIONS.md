@@ -14,6 +14,26 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-086 M8.x train execution model (2026-10-27, accepted)
+Context: M8.5, M8.6 and M8.7 (D-081 (1)(2)(3)) are planned together and approved once, then built back to back.
+This needs an execution model that keeps CLAUDE.md's "one milestone per session" and WORKFLOW's review/merge
+discipline while allowing a single combined plan.
+Decision (accepted by Sajal 2026-10-27; full text in `docs/plans/M8x-train-brief.md`):
+ - One combined Phase A plan for all three milestones; the architect approves it once.
+ - CLAUDE.md "don't start the next milestone in the same session" is KEPT: each milestone runs in its own
+   fresh session, started by the human. Continuity lives on disk: `docs/plans/M8x-train-brief.md` (source of
+   truth, incl. the "Approved plan changes" section), `docs/plans/M8x-train-state.md`, and per-milestone work
+   logs under `docs/reports/`.
+ - Branches are STACKED (deviation from WORKFLOW "branch from develop"): `feature/m8.6-ui-uplift` from the HEAD
+   of `feature/m8.5-correctness-taxonomy`; `feature/m8.7-multi-source` from the HEAD of `feature/m8.6-ui-uplift`.
+ - Review is per milestone after all three are built (`/review-pr` in fresh sessions). A fix to an earlier
+   branch is committed there and MERGED FORWARD (`git merge`, never rebase/force-push) into the later branches.
+   Human merges into develop/main in order m8.5 → m8.6 → m8.7.
+ - Real-data walkthroughs are deferred to the end of the train (listed per report under "Pending manual
+   walkthrough"); ib-api-v2 is onboarded only then (deviation from D-083's M8.1-baseline expectation).
+Consequences: the migration/identity/UI work proceeds as one reviewed train; the "3 real repos" and
+multi-provider walkthroughs happen once at the end against the fully built stack.
+
 ## D-082 M9 scheduling deferred after containers and git-history secrets (2026-10-27, accepted)
 Context: D-081 put M9 right after M8.7. Nothing in M8.5–M8.7 depends on scheduling.
 Decision: the order is M8.5 → M8.6 → M8.7 → container image scanning → git-history secrets + author → M9.
