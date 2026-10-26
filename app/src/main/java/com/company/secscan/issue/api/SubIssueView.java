@@ -5,6 +5,7 @@ import com.company.secscan.issue.SubIssue;
 import com.company.secscan.scoring.CweDictionary;
 import com.company.secscan.scoring.Scoring;
 import com.company.secscan.scoring.ScoreLine;
+import com.company.secscan.taxonomy.Level2Taxonomy;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -28,7 +29,7 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            String cwePhrase, Boolean inKev, BigDecimal epss, String epssAttribution,
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
                            UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
-                           boolean ruleGlobal) {
+                           boolean ruleGlobal, String level2Category, String owaspCategory) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
@@ -47,6 +48,10 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
         Integer score = s.getScore();
         String cwePhrase = CweDictionary.getInstance().phrase(s.getCwe(), s.getAdvisorySummary());
         String epssAttribution = s.getEpss() != null ? EPSS_ATTRIBUTION : null;
+        // M8.5 (D-083): the level-2 category + optional OWASP 2025 name, from the same pure function the group
+        // rollup uses, over this sub's own fields — so panel and feed agree.
+        Level2Taxonomy.Category cat = Level2Taxonomy.getInstance().of(s.getType(), s.getFilePath(), s.getRuleId(),
+                s.getCwe(), s.getPackageName());
         return new SubIssueView(s.getId(), s.getGroupId(), s.getRepositoryId(), s.getType(), s.getScanner(),
                 s.getStatus(),
                 s.getVulnId(), s.getRuleId(), s.getPackageName(), s.getInstalledVersion(), s.getFixedVersion(),
@@ -59,6 +64,7 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getReason(),
                 rule == null ? null : rule.getCreatedBy(),
                 // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
-                rule != null && rule.getRepositoryId() == null);
+                rule != null && rule.getRepositoryId() == null,
+                cat.level2(), cat.owasp());
     }
 }

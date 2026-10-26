@@ -50,6 +50,7 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
             where g.workspaceId = :ws and r.id = g.repositoryId and r.workspaceId = :ws
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
+              and (:category is null or g.level2Category = :category)
               and g.status in :statuses
               and (:bandLo is null or (g.severityScore >= :bandLo and g.severityScore <= :bandHi))
               and (:includeInactive = true or r.active = true)
@@ -58,11 +59,26 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
     Page<IssueGroup> searchFeed(@Param("ws") UUID ws,
                                 @Param("repositoryId") UUID repositoryId,
                                 @Param("type") String type,
+                                @Param("category") String category,
                                 @Param("statuses") java.util.List<String> statuses,
                                 @Param("bandLo") Integer bandLo,
                                 @Param("bandHi") Integer bandHi,
                                 @Param("includeInactive") boolean includeInactive,
                                 Pageable pageable);
+
+    /** Groups in a workspace whose level-2 category is not yet set — the OD-19/D-083 startup backfill input. */
+    java.util.List<IssueGroup> findByWorkspaceIdAndLevel2CategoryIsNull(UUID workspaceId);
+
+    /**
+     * Backfill the taxonomy columns for ONE group, only while still unset (idempotent) and workspace-scoped: a
+     * column-scoped UPDATE (never a full-entity save) so it cannot clobber a concurrent reconcile. Returns rows
+     * updated (0 when already set). {@code owasp} may be null.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "update issue_group set level2_category = :level2, owasp_category = :owasp "
+            + "where id = :id and workspace_id = :ws and level2_category is null", nativeQuery = true)
+    int backfillTaxonomyIfNull(@Param("id") UUID id, @Param("ws") UUID ws, @Param("level2") String level2,
+                               @Param("owasp") String owasp);
 
     /**
      * Band counts for the Feed summary (OD-14 item 4): for the same filters as the feed (view statuses, type,

@@ -60,12 +60,12 @@ public class IssueService {
 
     /** The Feed (OD-14 item 3): view (focus/all), optional band, type and repository filters, includeInactive. */
     @Transactional(readOnly = true)
-    public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String view, String band,
-                                                    boolean includeInactive, int page, int size) {
+    public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String view,
+                                                    String band, boolean includeInactive, int page, int size) {
         int[] range = bandRange(band);
-        var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), statusesFor(view),
-                range == null ? null : range[0], range == null ? null : range[1], includeInactive,
-                Pagination.of(page, size));
+        var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), blankToNull(category),
+                statusesFor(view), range == null ? null : range[0], range == null ? null : range[1],
+                includeInactive, Pagination.of(page, size));
         Map<UUID, Repository> repos = repoById();
         Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
         // Feed rows omit fixedVersions (an SCA-only, per-group detail shown in the side panel, not the table).

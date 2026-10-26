@@ -5,6 +5,7 @@ import com.company.secscan.intel.FixTimeConfigRepository;
 import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scoring.CweDictionary;
 import com.company.secscan.scoring.FixTime;
+import com.company.secscan.taxonomy.Level2Taxonomy;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +81,19 @@ public class GroupRollupService {
                 g.setFixTimeMinutes(fixTime);
                 if (subtitle != null) {
                     g.setSubtitle(subtitle);
+                }
+                // M8.5 (D-083): the level-2 category + optional OWASP 2025 name, derived from a representative
+                // sub-issue's stored fields (all subs in a group share the categorizing fields). Descriptive,
+                // never a status/fingerprint input.
+                SubIssue rep = worstOpen(open);
+                if (rep == null && !subs.isEmpty()) {
+                    rep = subs.get(0);
+                }
+                if (rep != null) {
+                    Level2Taxonomy.Category cat = Level2Taxonomy.getInstance().of(rep.getType(), rep.getFilePath(),
+                            rep.getRuleId(), rep.getCwe(), rep.getPackageName());
+                    g.setLevel2Category(cat.level2());
+                    g.setOwaspCategory(cat.owasp());
                 }
                 groups.save(g);
             } else {

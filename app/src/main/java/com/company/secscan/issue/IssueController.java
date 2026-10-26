@@ -28,12 +28,13 @@ public class IssueController {
     public PagedResponse<IssueGroupView> listGroups(
             @RequestParam(required = false) UUID repositoryId,
             @RequestParam(required = false) String type,
+            @RequestParam(required = false) String category,
             @RequestParam(defaultValue = "focus") String view,
             @RequestParam(required = false) String band,
             @RequestParam(defaultValue = "false") boolean includeInactive,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listGroups(repositoryId, type, view, band, includeInactive, page, size);
+        return service.listGroups(repositoryId, type, category, view, band, includeInactive, page, size);
     }
 
     /** The Feed summary bar (OD-14 item 4). */
