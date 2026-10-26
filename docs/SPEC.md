@@ -395,7 +395,12 @@ locally.
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
 | M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
 | M8.1 | Branch to scan per repository | Per-repo `scan_branch` + `scan.branch` snapshot (V19); branch picker endpoint + searchable UI combobox; git-ref-format + GitLab-existence validation; branch-aware re-baseline (`BRANCH_CHANGED`); token-rotation UI; two selection-screen bug fixes (B1 add-count, B2 empty-vs-no-access) — D-076..D-078 | `notification` scans branch `dev`; a branch switch re-baselines (closes "branch changed", Solved·7d unchanged) and a same-branch rescan adds 0 triage events; see the M8.1 section |
-| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner | A new commit is scanned within 15 min; nightly run completes for all repos |
+| M8.5 | Correctness + taxonomy | OD-19 family (incl. M8.1 D-1, absent-but-ignored after a branch switch), level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, D-075 real-repo walkthrough (UI polish moved out) — D-081 (1) | SPEC section pending (architect) |
+| M8.6 | UI uplift | New app shell, Repositories list redesign (clickable rows), repository detail page (issues / scans / settings, coverage banner), issue side panel clarity, secret context, compact side-panel locations — D-081 (2) | SPEC section pending (architect) |
+| M8.7 | Multi-provider sources | gitlab.com + GitHub + public repositories in one workspace, one shared feed; one adapter per provider; host policy per connection — D-080, D-081 (3) | SPEC section pending (architect) |
+| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner; provider-aware (D-080) | A new commit is scanned within 15 min; nightly run completes for all repos |
+| TBD | Container image scanning | Registry-agnostic OCI (any registry incl. self-hosted), public images first-class, spike before build — D-081 (5) | SPEC section pending (architect) |
+| later | Secrets in git history | Git-history secret scan + author attribution; own lifecycle decision — D-081 (6) | SPEC section pending (architect) |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 
 ## Open decisions
