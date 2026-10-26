@@ -298,6 +298,11 @@ public class ScanFinding {
         return advisorySummary;
     }
 
+    /** Sets the one-line advisory/description (M8.5: the Checkov check_name for IaC). Descriptive only. */
+    public void setAdvisorySummary(String advisorySummary) {
+        this.advisorySummary = advisorySummary;
+    }
+
     /** Sets the OSV-derived descriptive enrichment (M5) after the SCA factory builds the row. */
     public void setOsvEnrichment(String cvss, String severityLabel, List<String> cwe, List<String> cveAliases,
                                  String advisorySummary) {

@@ -288,8 +288,10 @@ public class ScanStateService {
                     f.snippetHash(), f.severityLabel(), f.toolSeverity(), f.cwe());
         }
         if (RawFinding.TYPE_IAC.equals(f.type())) {
-            return ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.packageName(),
-                    f.line(), f.severityLabel());
+            ScanFinding iac = ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(),
+                    f.packageName(), f.line(), f.severityLabel());
+            iac.setAdvisorySummary(f.advisorySummary()); // Checkov check_name → IaC title (D-083)
+            return iac;
         }
         if (RawFinding.TYPE_EOL.equals(f.type())) {
             return ScanFinding.eol(workspaceId, scanId, repositoryId, f.packageName(), f.installedVersion(),

@@ -552,6 +552,8 @@ class ScannerOutputParserTest {
                 .orElseThrow();
         assertThat(failed.filePath()).isEqualTo("main.tf");            // leading slash stripped
         assertThat(failed.packageName()).isEqualTo("aws_security_group.open"); // resource in the package column
+        // D-083: Checkov's check_name is carried in advisory_summary (→ the IaC title).
+        assertThat(failed.advisorySummary()).isEqualTo("Ensure every security group rule has a description");
 
         // D-037: the inline-skipped check is RECOVERED and promoted to a finding.
         RawFinding recovered = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_21")).findFirst()

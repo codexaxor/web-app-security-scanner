@@ -94,6 +94,12 @@ public class GroupRollupService {
                             rep.getRuleId(), rep.getCwe(), rep.getPackageName());
                     g.setLevel2Category(cat.level2());
                     g.setOwaspCategory(cat.owasp());
+                    // D-083: refresh the IaC title from the latest Checkov check_name (carried in advisory_summary),
+                    // so groups created before this behaviour pick up the human title on their next scan. Title is
+                    // descriptive; the fingerprint is unchanged.
+                    if (ScanFinding.TYPE_IAC.equals(g.getType()) && rep.getAdvisorySummary() != null) {
+                        g.setTitle(rep.getAdvisorySummary());
+                    }
                 }
                 groups.save(g);
             } else {
@@ -163,8 +169,11 @@ public class GroupRollupService {
             return null;
         }
         return switch (groupType) {
-            case ScanFinding.TYPE_SCA, ScanFinding.TYPE_SAST, ScanFinding.TYPE_IAC ->
+            case ScanFinding.TYPE_SCA, ScanFinding.TYPE_SAST ->
                     CweDictionary.getInstance().phrase(worst.getCwe(), worst.getAdvisorySummary());
+            // D-083: IaC subtitle is the check_id — the title is the human check_name, so the subtitle must NOT
+            // repeat it (advisory_summary now holds the check_name for IaC).
+            case ScanFinding.TYPE_IAC -> worst.getRuleId();
             default -> null;
         };
     }

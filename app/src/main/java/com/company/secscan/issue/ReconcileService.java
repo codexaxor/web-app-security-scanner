@@ -201,6 +201,11 @@ public class ReconcileService {
             copyDescriptive(findByFp(findingByFp, fp), sub);
             collectUnmapped(scorer.score(sub, sensitivity, triage.epssAutoIgnoreEnabled()), unmappedSecretRules);
             subIssues.save(sub); // no status change, no event
+            // D-083: an IaC group's descriptive title is the latest Checkov check_name — recompute the group so a
+            // group created before check_name titling (or whose description changed) picks it up on a seen rescan.
+            if (ScanFinding.TYPE_IAC.equals(sub.getType())) {
+                touchedGroups.add(sub.getGroupId());
+            }
         }
         for (String ruleId : unmappedSecretRules) { // once per rule per scan, not per sub-issue (N2)
             log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
@@ -362,8 +367,12 @@ public class ReconcileService {
             // cycle=installed_version in the overloaded columns).
             return f.getPackageName() + " " + f.getInstalledVersion() + " no longer receives security updates";
         }
-        // SCA/SAST/IaC get plain-language titles with their scanners (M4/M6); the rule/package id is a safe
-        // default.
+        if (ScanFinding.TYPE_IAC.equals(f.getType())) {
+            // D-083: the human Checkov check_name (carried in advisory_summary) is the IaC title; the check_id
+            // (rule_id) is the fallback and the subtitle.
+            return f.getAdvisorySummary() != null ? f.getAdvisorySummary() : f.getRuleId();
+        }
+        // SCA/SAST get plain-language titles with their scanners (M4/M6); the rule/package id is a safe default.
         return f.getRuleId() != null ? f.getRuleId() : f.getPackageName();
     }
 

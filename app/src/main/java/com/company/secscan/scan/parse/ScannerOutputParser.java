@@ -424,7 +424,10 @@ public class ScannerOutputParser {
                 line = range.get(0).asInt();
             }
             String severityLabel = text(c, "severity"); // usually null for OSS checks → base MEDIUM (D-054)
-            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel));
+            // D-083: Checkov's human description becomes the IaC title (carried via advisory_summary, reused);
+            // the check_id remains the subtitle and the fingerprint input.
+            String checkName = text(c, "check_name");
+            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel, checkName));
         }
     }
 
