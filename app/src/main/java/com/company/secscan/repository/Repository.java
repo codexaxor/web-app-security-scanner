@@ -163,6 +163,16 @@ public class Repository {
     }
 
     /**
+     * Content-detected languages refreshed on a successful scan (M8.5, D-081). A null/empty list is ignored —
+     * the caller only refreshes when detection produced something, so a detection failure never clears them.
+     */
+    public void setLanguages(List<String> languages) {
+        if (languages != null && !languages.isEmpty()) {
+            this.languages = new ArrayList<>(languages);
+        }
+    }
+
+    /**
      * Sets the branch to scan (D-076). {@code null} = follow the GitLab default branch. The caller validates the
      * name and its existence in GitLab first. Changing the branch clears any stale branch-missing flag.
      */

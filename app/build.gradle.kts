@@ -158,6 +158,22 @@ val scopeInventoryTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-081 gate (M8.5): the static language detector (scanner-image/lang_detect.py) is Python; host-run unit tests
+// under the DEFAULT build (stdlib unittest; sizes files only, no network), mirroring eolDetectTest.
+val langDetectTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the static language detector's Python unit tests (M8.5, D-081)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("lang_detect.py")).withPropertyName("langDetect")
+    inputs.file(scannerDir.resolve("lang_detect_test.py")).withPropertyName("langDetectTest")
+    val marker = layout.buildDirectory.file("lang-detect-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "lang_detect_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 // D-076 gate (SF-5): the scanner's branch-name validator (secscan-lib.sh valid_branch_name) must agree with the
 // Java core.scan.BranchName rules on the SHARED scanner-image/branch-vectors.json, and run-scan.sh must refuse an
 // invalid SCAN_BRANCH before git. Run INSIDE the built image (busybox sh + the shipped scripts), not host dash,
@@ -186,5 +202,6 @@ val branchVectorsInImageTest by tasks.registering(Exec::class) {
 }
 
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, branchVectorsInImageTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
+        branchVectorsInImageTest)
 }

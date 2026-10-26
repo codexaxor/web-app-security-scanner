@@ -107,8 +107,9 @@ public class ScannerOutputParser {
         String scopeStatus = m.scopeInventoryStatus == null ? ParsedScan.SCOPE_STATUS_OK : m.scopeInventoryStatus;
         List<String> unreadable = m.unreadableScopeManifests == null ? List.of()
                 : List.copyOf(m.unreadableScopeManifests);
+        List<String> languages = readLanguages(outDir.resolve("languages.json"));
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages);
     }
 
     /**
@@ -428,6 +429,33 @@ public class ScannerOutputParser {
             // the check_id remains the subtitle and the fingerprint input.
             String checkName = text(c, "check_name");
             out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel, checkName));
+        }
+    }
+
+    /**
+     * Reads {@code languages.json} (M8.5, D-081) → the ordered language list the worker stores on the repository.
+     * A missing or unparseable file, or a non-"ok" status, yields an empty list — the worker then leaves the
+     * stored languages unchanged (a detection failure never clears them).
+     */
+    List<String> readLanguages(Path file) {
+        if (!Files.exists(file)) {
+            return List.of();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(file.toFile());
+            com.fasterxml.jackson.databind.JsonNode arr = root == null ? null : root.get("languages");
+            if (arr == null || !arr.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                if (n != null && n.isTextual() && !n.asText().isBlank()) {
+                    out.add(n.asText());
+                }
+            }
+            return out;
+        } catch (java.io.IOException e) {
+            return List.of();
         }
     }
 

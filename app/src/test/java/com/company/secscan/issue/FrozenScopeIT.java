@@ -84,6 +84,6 @@ class FrozenScopeIT extends TriageSeedSupport {
     private ParsedScan empty(UUID repo, SecscanConfig config, String scopeStatus) {
         ScannerTaskResult sca = new ScannerTaskResult("sca", "ok", 0, 5L, "osv.json", false);
         return new ParsedScan(false, "commit-fs", Map.of(), List.of(sca), List.of(), List.of(), config,
-                List.of(), scopeStatus, List.of());
+                List.of(), scopeStatus, List.of(), List.of());
     }
 }

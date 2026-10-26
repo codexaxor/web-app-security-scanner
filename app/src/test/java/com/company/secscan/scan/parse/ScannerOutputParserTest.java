@@ -573,6 +573,19 @@ class ScannerOutputParserTest {
     }
 
     @org.junit.jupiter.api.Test
+    void languagesJsonParsedInOrderAndMissingFileIsEmpty(@TempDir Path outDir) throws Exception {
+        Path file = outDir.resolve("languages.json");
+        java.nio.file.Files.writeString(file, "{\"languages\":[\"Java\",\"Kotlin\",\"TypeScript\"],\"status\":\"ok\"}");
+        assertThat(parser.readLanguages(file)).containsExactly("Java", "Kotlin", "TypeScript");
+        // A missing file (detector did not run) → empty, so the worker leaves stored languages unchanged.
+        assertThat(parser.readLanguages(outDir.resolve("absent.json"))).isEmpty();
+        // An error document with an empty list → empty.
+        Path err = outDir.resolve("err.json");
+        java.nio.file.Files.writeString(err, "{\"languages\":[],\"status\":\"error\"}");
+        assertThat(parser.readLanguages(err)).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
     void normalizeIacResourceStripsSlashDotAndCollapsesButLeavesCleanResources() {
         assertThat(ScannerOutputParser.normalizeIacResource("/iac//docker/Dockerfile."))
                 .isEqualTo("iac/docker/Dockerfile");
