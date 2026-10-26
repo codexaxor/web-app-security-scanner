@@ -35,6 +35,14 @@ public interface ScanRepository extends JpaRepository<Scan, UUID> {
     Optional<Scan> findFirstByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullOrderByReconciledAtDesc(
             UUID workspaceId, UUID repositoryId);
 
+    /**
+     * The most recently CREATED reconciled scan of a repository on a given branch — the basis for the OD-19
+     * one-off retire pass (D-083): an ignored finding absent from this scan, whose scanner was authoritative in
+     * it, on the repository's CURRENT effective branch, is a retire candidate. Workspace-scoped (domain rule 1).
+     */
+    Optional<Scan> findFirstByWorkspaceIdAndRepositoryIdAndBranchAndReconciledAtIsNotNullOrderByCreatedAtDesc(
+            UUID workspaceId, UUID repositoryId, String branch);
+
     /** Workspace-scoped batch lookup by id (domain rule 1): resolve a page of events' scans to their branch. */
     List<Scan> findByWorkspaceIdAndIdIn(UUID workspaceId, List<UUID> ids);
 

@@ -63,7 +63,7 @@ public class TriageApplier {
      */
     public Set<UUID> applyAtReconcile(UUID workspaceId, UUID repositoryId, UUID scanId, TriageContext triage,
                                       Set<String> incomingFps, Set<String> solvableScanners,
-                                      Map<String, Set<String>> sastRuleIdsByFile) {
+                                      Map<String, Set<String>> sastRuleIdsByFile, Set<String> rebaselineScanners) {
         // Review S3 freeze: a present-but-unusable .secscan.yml or a failed scope inventory must not revoke or
         // unignore anything it governed. A frozen config SKIPS the CVE revoke lifecycle (its materialized rules
         // persist, so their findings stay IGNORE_RULE) and the exclude.paths are dropped from the auto-context so
@@ -107,6 +107,21 @@ public class TriageApplier {
                     subIssues.save(sub);
                     events.save(TriageEvent.system(workspaceId, sub.getId(), from, SubIssue.STATUS_IGNORED,
                             desired.reasonCode(), scanId));
+                    touched.add(sub.getGroupId());
+                } else if (!incomingFps.contains(sub.getFingerprint())
+                        && solvableScanners.contains(sub.getScanner())
+                        && rebaselineScanners.contains(sub.getScanner())
+                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)
+                        && TriageResolver.isHoldReDerivable(sub, groupKeyById.get(sub.getGroupId()), rules)) {
+                    // D-083 (OD-19) reconcile path: an IGNORED finding absent on a branch-switch scan whose scanner
+                    // is authoritative, held by a re-derivable cause (auto cause or a group/path/cve/rule rule), is
+                    // SOLVED with BRANCH_CHANGED — the D-076 "absent-but-ignored after a branch switch" family. A
+                    // sub-issue-scope manual ignore is preserved (isHoldReDerivable == false). The present fingerprint
+                    // (if it reappears on another branch) is re-ignored by the same cause, so intent is kept.
+                    sub.solve();
+                    subIssues.save(sub);
+                    events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_IGNORED,
+                            SubIssue.STATUS_SOLVED, TriageEvent.REASON_BRANCH_CHANGED, scanId));
                     touched.add(sub.getGroupId());
                 } else if (hasIgnoreChanged(sub, desired)
                         && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {

@@ -103,23 +103,35 @@ public class ReconcileService {
         // workspaceId == scan.getWorkspaceId() (the scan was fetched scoped to it).
         UUID repositoryId = scan.getRepositoryId();
 
-        // Scanners authoritative to close their missing findings this scan: succeeded AND closes_findings. A
-        // failed/absent scanner closes none (domain rule 3); nor does a successful SCA scan that found no
-        // packages (OSV exit 128 — closes_findings is false), so an empty scan never mass-solves SCA issues
-        // (D-034, plan change #1).
+        // Scanners authoritative to close their missing findings this scan ON THE SAME BRANCH: succeeded AND
+        // closes_findings. A failed/absent scanner closes none (domain rule 3); nor does a successful SCA scan
+        // that found no packages (OSV exit 128 — closes_findings is false), so a same-branch empty scan never
+        // mass-solves SCA issues (D-034, plan change #1). We also track every scanner that merely SUCCEEDED
+        // (okScanners), which the branch-switch re-baseline uses below.
         Set<String> solvableScanners = new HashSet<>();
+        Set<String> okScanners = new HashSet<>();
         for (ScanTask t : tasks.findByScanId(scanId)) {
-            if (t.succeeded() && t.closesFindings()) {
-                solvableScanners.add(t.getScanner());
+            if (t.succeeded()) {
+                okScanners.add(t.getScanner());
+                if (t.closesFindings()) {
+                    solvableScanners.add(t.getScanner());
+                }
             }
         }
 
         // D-076 re-baseline: a scanner whose branch differs from the branch at which it last successfully closed
         // findings is re-baselining this scan — its switch-caused closes/reopens get REASON_BRANCH_CHANGED (not a
-        // fix / not a genuine re-detection). Only scanners that succeeded this scan can re-baseline, and only when
-        // both branches are known and differ. A failed scanner never advanced its last-closing branch, so it
-        // re-baselines on its NEXT success automatically (nothing is lost).
-        Set<String> rebaselineScanners = rebaselineScanners(scan, solvableScanners);
+        // fix / not a genuine re-detection). Detected over ALL scanners that SUCCEEDED this scan (okScanners), not
+        // just the same-branch-authoritative ones: M8.1 D-1 — a switch to a branch with NO manifests makes the SCA
+        // scan no-packages (closes_findings=false), yet the prior branch's SCA findings must still re-baseline so
+        // they don't linger on the newly-tracked branch. A failed scanner never advanced its last-closing branch,
+        // so it re-baselines on its NEXT success automatically (nothing is lost).
+        Set<String> rebaselineScanners = rebaselineScanners(scan, okScanners);
+        // The scanners that may close their absent findings this scan: the same-branch authoritative set PLUS any
+        // scanner re-baselining because the branch changed (even a no-packages SCA — D-1). On the SAME branch the
+        // re-baseline set is empty, so the D-034 no-packages mass-solve guard is unchanged.
+        Set<String> closingScanners = new HashSet<>(solvableScanners);
+        closingScanners.addAll(rebaselineScanners);
 
         List<ScanFinding> scanFindings = findings.findByScanId(scanId);
         Map<String, ScanFinding> findingByFp = new HashMap<>();
@@ -150,7 +162,7 @@ public class ReconcileService {
             existing.add(new Existing(s.getFingerprint(), s.getScanner(), s.getStatus()));
         }
 
-        Plan plan = reconciler.reconcile(incoming, existing, solvableScanners, frozenFingerprints);
+        Plan plan = reconciler.reconcile(incoming, existing, closingScanners, frozenFingerprints);
 
         // Scoring inputs (M5): repo sensitivity (adjustment) and the tunable fix-time config, loaded once.
         String sensitivity = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
@@ -219,7 +231,7 @@ public class ReconcileService {
             }
         }
         touchedGroups.addAll(triageApplier.applyAtReconcile(workspaceId, repositoryId, scanId, triage,
-                findingByFp.keySet(), solvableScanners, sastRuleIdsByFile));
+                findingByFp.keySet(), closingScanners, sastRuleIdsByFile, rebaselineScanners));
 
         for (UUID groupId : touchedGroups) {
             rollup.recompute(workspaceId, groupId, fixConfig);
@@ -299,13 +311,13 @@ public class ReconcileService {
      * closing branch is known and differs from this scan's branch. When the scan has no branch, or a scanner has
      * no prior closing scan, it does not re-baseline.
      */
-    private Set<String> rebaselineScanners(Scan scan, Set<String> solvableScanners) {
+    private Set<String> rebaselineScanners(Scan scan, Set<String> candidateScanners) {
         String currentBranch = scan.getBranch();
         if (currentBranch == null) {
             return Set.of();
         }
         Set<String> rebaselining = new HashSet<>();
-        for (String scanner : solvableScanners) {
+        for (String scanner : candidateScanners) {
             String priorBranch = scans.findLastClosingBranch(
                     scan.getWorkspaceId(), scan.getRepositoryId(), scanner, scan.getId());
             if (priorBranch != null && !priorBranch.equals(currentBranch)) {
