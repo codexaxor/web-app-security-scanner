@@ -282,7 +282,7 @@ function LocationCard({
   const idLabel = sub.vulnId ?? sub.ruleId ?? sub.packageName ?? sub.type;
 
   // D-084: file + commit deep links, built only from the stored host/project/commit/path/line (never data).
-  const ref = { host: sub.host, projectPath, commitSha: sub.commitSha };
+  const ref = { host: sub.host, projectPath, commitSha: sub.commitSha, provider: sub.provider };
   const fileLink = sub.filePath ? sourceFileLink(ref, sub.filePath, sub.line) : null;
   const commitLink = sourceCommitLink(ref);
 

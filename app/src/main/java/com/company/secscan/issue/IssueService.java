@@ -199,10 +199,14 @@ public class IssueService {
         // D-084: host (from the repo's connection) + per-finding commit (from its last-seen scan) are the only
         // inputs, with the stored project path, the UI uses to build a file/commit deep link. Both may be null.
         String host = sourceHostOf(grp.getRepositoryId());
+        // provider selects the source-link URL shape (GitLab `/-/` vs GitHub) — M8.7 approval 16.
+        String provider = repositories.findByIdAndWorkspaceId(grp.getRepositoryId(), WORKSPACE)
+                .map(Repository::getProvider).orElse(null);
         Map<UUID, String> commitByScan = commitShas(pageResult.getContent());
         return PagedResponse.fromPage(pageResult.map(s ->
                 SubIssueView.of(s, s.getIgnoredByRuleId() == null ? null : rules.get(s.getIgnoredByRuleId()),
-                        host, s.getLastSeenScanId() == null ? null : commitByScan.get(s.getLastSeenScanId()))));
+                        host, s.getLastSeenScanId() == null ? null : commitByScan.get(s.getLastSeenScanId()),
+                        provider)));
     }
 
     /** The source-host authority (host[:port]) of a repository's connection, or null if detached/unparseable. */

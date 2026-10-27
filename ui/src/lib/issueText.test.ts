@@ -69,6 +69,7 @@ function sub(p: Partial<SubIssueView>): SubIssueView {
     advisorySummary: null,
     host: null,
     commitSha: null,
+    provider: null,
     ...p,
   };
 }

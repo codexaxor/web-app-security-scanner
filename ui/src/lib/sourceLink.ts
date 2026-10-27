@@ -42,9 +42,23 @@ export interface SourceRef {
   host: string | null | undefined;
   projectPath: string | null | undefined;
   commitSha: string | null | undefined;
+  // "gitlab" (default) or "github" — selects the URL shape (M8.7 approval 16). Same validation either way.
+  provider?: string | null;
 }
 
-/** `https://<host>/<project>/-/blob/<sha>/<encoded path>#L<line>`, or null when any input is invalid. */
+// GitLab puts repository routes under `/-/`; GitHub does not. The infixes are the only shape difference.
+function blobInfix(provider: string | null | undefined): string {
+  return provider === "github" ? "/blob/" : "/-/blob/";
+}
+function commitInfix(provider: string | null | undefined): string {
+  return provider === "github" ? "/commit/" : "/-/commit/";
+}
+
+/**
+ * File-at-commit link, or null when any input is invalid.
+ * GitLab: `https://<host>/<project>/-/blob/<sha>/<encoded path>#L<line>`.
+ * GitHub: `https://<host>/<owner/name>/blob/<sha>/<encoded path>#L<line>`.
+ */
 export function sourceFileLink(
   ref: SourceRef,
   filePath: string | null | undefined,
@@ -54,11 +68,13 @@ export function sourceFileLink(
   const encoded = encodeFilePath(filePath);
   if (encoded === null) return null;
   const lineFrag = typeof line === "number" && Number.isInteger(line) && line >= 1 ? `#L${line}` : "";
-  return `https://${ref.host}/${ref.projectPath}/-/blob/${ref.commitSha.toLowerCase()}/${encoded}${lineFrag}`;
+  return `https://${ref.host}/${ref.projectPath}${blobInfix(ref.provider)}${ref.commitSha.toLowerCase()}/${encoded}${lineFrag}`;
 }
 
-/** `https://<host>/<project>/-/commit/<sha>`, or null when any input is invalid. */
+/**
+ * Commit link, or null when any input is invalid. GitLab: `…/-/commit/<sha>`; GitHub: `…/commit/<sha>`.
+ */
 export function sourceCommitLink(ref: SourceRef): string | null {
   if (!validHost(ref.host) || !validProjectPath(ref.projectPath) || !validSha(ref.commitSha)) return null;
-  return `https://${ref.host}/${ref.projectPath}/-/commit/${ref.commitSha.toLowerCase()}`;
+  return `https://${ref.host}/${ref.projectPath}${commitInfix(ref.provider)}${ref.commitSha.toLowerCase()}`;
 }

@@ -62,4 +62,32 @@ describe("sourceFileLink / sourceCommitLink", () => {
     expect(sourceFileLink({ ...ref, projectPath: "acme/../secret" }, "a.txt", 1)).toBeNull();
     expect(sourceFileLink({ ...ref, projectPath: "/acme/x" }, "a.txt", 1)).toBeNull();
   });
+
+  // M8.7 approval 16: GitHub shapes (no `/-/` infix), same validation + rejection rules.
+  const gh: SourceRef = { host: "github.com", projectPath: "octocat/Hello-World", commitSha: SHA, provider: "github" };
+
+  it("builds a GitHub blob link with a line anchor", () => {
+    expect(sourceFileLink(gh, "src/App.java", 7)).toBe(
+      `https://github.com/octocat/Hello-World/blob/${SHA}/src/App.java#L7`,
+    );
+  });
+
+  it("builds a GitHub commit link", () => {
+    expect(sourceCommitLink(gh)).toBe(`https://github.com/octocat/Hello-World/commit/${SHA}`);
+  });
+
+  it("encodes a GitHub file path per segment", () => {
+    expect(sourceFileLink(gh, "a b/c#d.txt", 1)).toBe(
+      `https://github.com/octocat/Hello-World/blob/${SHA}/a%20b/c%23d.txt#L1`,
+    );
+  });
+
+  it("applies the same rejections to GitHub links", () => {
+    expect(sourceFileLink({ ...gh, commitSha: "xyz" }, "a.txt", 1)).toBeNull();
+    expect(sourceFileLink(gh, "../etc/passwd", 1)).toBeNull();
+    expect(sourceFileLink(gh, "/abs", 1)).toBeNull();
+    expect(sourceFileLink(gh, "javascript:alert(1)", 1)).toBeNull();
+    expect(sourceFileLink({ ...gh, host: "github.com/evil" }, "a.txt", 1)).toBeNull();
+    expect(sourceCommitLink({ ...gh, host: null })).toBeNull();
+  });
 });

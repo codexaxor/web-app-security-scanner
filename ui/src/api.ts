@@ -163,6 +163,7 @@ export interface SubIssueView {
   advisorySummary: string | null;
   host: string | null;
   commitSha: string | null;
+  provider: string | null;
 }
 
 export interface TriageEventView {
