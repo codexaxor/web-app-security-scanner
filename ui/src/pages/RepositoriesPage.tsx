@@ -5,6 +5,7 @@ import { api, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
+import ProviderBadge from "../components/ProviderBadge";
 import SeverityChips from "../components/SeverityChips";
 import ScanButton from "../components/ScanButton";
 import RowMenu from "../components/RowMenu";
@@ -182,6 +183,7 @@ export default function RepositoriesPage() {
                   >
                     <td>
                       <div className="row">
+                        <ProviderBadge provider={r.provider} />
                         <RepoName path={r.pathWithNamespace} showPath />
                         {r.effectiveBranch ? (
                           <span className="muted branch-label">· {r.effectiveBranch}</span>
@@ -213,7 +215,7 @@ export default function RepositoriesPage() {
                     <td>
                       <SeverityChips counts={r.openBySeverity} hideWhenEmpty />
                     </td>
-                    <td className="cell-num" data-testid={`ignored-${r.gitlabProjectId}`}>
+                    <td className="cell-num" data-testid={`ignored-${r.providerRepoId}`}>
                       {r.ignoredCount}
                     </td>
                     <td>

@@ -75,7 +75,13 @@ public class SourceConnectionService {
 
     /** Adds a public repository by URL (anonymous clone; credential_kind 'none'). Host must be allowlisted. */
     public GitlabConnection createPublicRepo(String url) {
-        PublicRepoUrl parsed = PublicRepoUrl.parse(url);
+        PublicRepoUrl parsed;
+        try {
+            parsed = PublicRepoUrl.parse(url);
+        } catch (IllegalArgumentException e) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, e.getMessage());
+        }
         hostPolicy.requireAllowed(parsed.baseUrl());
         String providerRepoId;
         String fullName;
@@ -107,13 +113,15 @@ public class SourceConnectionService {
             return connections.saveAndFlush(connection);
         } catch (DataIntegrityViolationException e) {
             // A concurrent create inserted the same target first (the host-scoped unique index rejected this one).
-            throw new ProviderException(ProviderError.UNEXPECTED, "This source is already connected.", e);
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "This source is already connected.");
         }
     }
 
     private static void requireNotConnected(java.util.Optional<GitlabConnection> existing, String what) {
         if (existing.isPresent()) {
-            throw new ProviderException(ProviderError.UNEXPECTED, "This workspace is already connected to " + what
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "This workspace is already connected to " + what
                     + ". Edit that connection to rotate its token.");
         }
     }

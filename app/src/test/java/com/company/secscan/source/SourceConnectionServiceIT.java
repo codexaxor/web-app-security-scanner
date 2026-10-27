@@ -84,7 +84,7 @@ class SourceConnectionServiceIT extends AbstractGitLabIT {
         SourceConnectionService service = serviceFor(gh.baseUrl());
         service.createGitHubRepo("octo/app", TOKEN);
         assertThatThrownBy(() -> service.createGitHubRepo("octo/app", TOKEN))
-                .isInstanceOf(ProviderException.class)
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("already connected");
     }
 
