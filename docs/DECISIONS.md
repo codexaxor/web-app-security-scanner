@@ -14,6 +14,23 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-089 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
+Context: M8.7 ships the provider-neutral connection/identity model (V22), so a workspace may hold GitLab
+(self-managed + gitlab.com), GitHub and public repositories. D-085 had forbidden adding a second GitLab host
+until M8.7 shipped (identity was the bare GitLab project id); V22 makes identity = workspace + provider + host +
+provider's id, so that restriction is no longer needed.
+Decision:
+ - The outbound-host allowlist (SSRF guard, D-018; `GitLabHostPolicy`) now allows the built-in SaaS hosts
+   `github.com`, `api.github.com` and `gitlab.com` BY DEFAULT. They can be switched off with
+   `SECSCAN_SOURCE_ALLOW_BUILTIN_SAAS=false` for an egress-locked deployment (D-033).
+ - Self-managed hosts remain deny-by-default and are opted in via `SECSCAN_GITLAB_ALLOWED_HOSTS` (unchanged).
+ - D-085's "do not add a second GitLab host (incl. gitlab.com)" restriction is RETIRED now that M8.7 ships;
+   a workspace may connect any number of allowed hosts across providers. https-only and never-follow-redirects
+   are unchanged; TLS is always verified.
+Consequences: gitlab.com and github.com work out of the box; an operator can still lock egress to self-managed
+hosts only. `GitLabHostPolicy` keeps its name for now (it is the shared source-host allowlist); a rename is
+cosmetic and deferred.
+
 ## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
 Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure
 code", "Infrastructure misconfiguration", "End-of-life runtime". The UI actually shipped (S10f) a different,

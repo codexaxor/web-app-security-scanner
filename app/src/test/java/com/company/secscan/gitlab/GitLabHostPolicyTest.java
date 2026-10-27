@@ -65,4 +65,23 @@ class GitLabHostPolicyTest {
                 .contains("1 host(s)")
                 .contains("gitlab.celloscope.net");
     }
+
+    @Test
+    void builtinSaasHostsAreAllowedByDefault() {
+        // The Spring constructor merges the built-in SaaS hosts unless they are switched off (M8.7 approval 17).
+        GitLabHostPolicy policy = new GitLabHostPolicy("gitlab.celloscope.net", true);
+        assertThat(policy.isAllowedHost("github.com")).isTrue();
+        assertThat(policy.isAllowedHost("api.github.com")).isTrue();
+        assertThat(policy.isAllowedHost("gitlab.com")).isTrue();
+        assertThat(policy.isAllowedHost("gitlab.celloscope.net")).isTrue();
+        assertThatCode(() -> policy.requireAllowed("https://github.com")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void builtinSaasCanBeSwitchedOffForEgressLockedDeployments() {
+        GitLabHostPolicy policy = new GitLabHostPolicy("gitlab.celloscope.net", false);
+        assertThat(policy.isAllowedHost("github.com")).isFalse();
+        assertThat(policy.isAllowedHost("gitlab.com")).isFalse();
+        assertThat(policy.isAllowedHost("gitlab.celloscope.net")).isTrue();
+    }
 }

@@ -25,15 +25,37 @@ public class GitLabHostPolicy {
 
     private static final Logger log = LoggerFactory.getLogger(GitLabHostPolicy.class);
 
+    /**
+     * Built-in SaaS hosts allowed by default (M8.7 approval 17): github.com + its API host and gitlab.com. They
+     * can be switched off with {@code SECSCAN_SOURCE_ALLOW_BUILTIN_SAAS=false} for an egress-locked deployment
+     * (D-033). Self-managed hosts stay deny-by-default via {@code SECSCAN_GITLAB_ALLOWED_HOSTS} (D-085 retired).
+     */
+    static final Set<String> BUILTIN_SAAS_HOSTS = Set.of("github.com", "api.github.com", "gitlab.com");
+
     private final Set<String> allowedHosts;
 
     @Autowired
-    public GitLabHostPolicy(@Value("${SECSCAN_GITLAB_ALLOWED_HOSTS:}") String csv) {
-        this(parse(csv));
+    public GitLabHostPolicy(@Value("${SECSCAN_GITLAB_ALLOWED_HOSTS:}") String csv,
+                            @Value("${SECSCAN_SOURCE_ALLOW_BUILTIN_SAAS:true}") boolean allowBuiltinSaas) {
+        this(merge(parse(csv), allowBuiltinSaas));
     }
 
     public GitLabHostPolicy(Set<String> allowedHosts) {
         this.allowedHosts = Set.copyOf(allowedHosts);
+    }
+
+    /** Pure CSV constructor (tests): the configured hosts only, no built-in SaaS defaults. */
+    public GitLabHostPolicy(String csv) {
+        this(parse(csv));
+    }
+
+    private static Set<String> merge(Set<String> configured, boolean allowBuiltinSaas) {
+        if (!allowBuiltinSaas) {
+            return configured;
+        }
+        Set<String> all = new LinkedHashSet<>(configured);
+        all.addAll(BUILTIN_SAAS_HOSTS);
+        return all;
     }
 
     /**
