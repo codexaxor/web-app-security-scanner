@@ -25,6 +25,10 @@ public interface RepositoryRepository extends JpaRepository<Repository, UUID> {
 
     Optional<Repository> findByWorkspaceIdAndGitlabProjectId(UUID workspaceId, long gitlabProjectId);
 
+    /** Provider-neutral identity lookup (D-080, V22): workspace + provider + host + the provider's repo id. */
+    Optional<Repository> findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+            UUID workspaceId, String provider, String host, String providerRepoId);
+
     List<Repository> findByWorkspaceIdAndGitlabProjectIdIn(UUID workspaceId, List<Long> gitlabProjectIds);
 
     List<Repository> findByWorkspaceIdAndConnectionId(UUID workspaceId, UUID connectionId);

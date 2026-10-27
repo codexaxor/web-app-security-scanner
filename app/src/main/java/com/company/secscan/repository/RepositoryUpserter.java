@@ -32,10 +32,15 @@ class RepositoryUpserter {
      * as {@code DataIntegrityViolationException} so the caller can {@link #reattach reattach} instead of 500ing.
      */
     @Transactional
-    public Repository upsert(UUID connectionId, long projectId, String pathWithNamespace,
+    public Repository upsert(UUID connectionId, String host, long projectId, String pathWithNamespace,
                              String defaultBranch, List<String> languages) {
-        return repositories.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, projectId)
+        // Identity is (workspace, provider, host, provider_repo_id) — D-080/V22. The same numeric project id on
+        // two different GitLab hosts is two distinct repositories.
+        return repositories.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+                        WORKSPACE, "gitlab", host, Long.toString(projectId))
                 .map(r -> applyAndSave(r, connectionId, pathWithNamespace, defaultBranch, languages))
+                // host is filled by the V22 trigger from the connection (= this connection's host); identity on
+                // the row therefore matches the finder's (provider, host, providerRepoId) above.
                 .orElseGet(() -> repositories.saveAndFlush(new Repository(WORKSPACE, connectionId, projectId,
                         pathWithNamespace, defaultBranch, languages)));
     }
@@ -45,9 +50,10 @@ class RepositoryUpserter {
      * insert's transaction has rolled back). First-wins dedup means the winner keeps ownership.
      */
     @Transactional
-    public Repository reattach(UUID connectionId, long projectId, String pathWithNamespace,
+    public Repository reattach(UUID connectionId, String host, long projectId, String pathWithNamespace,
                                String defaultBranch, List<String> languages) {
-        Repository r = repositories.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, projectId)
+        Repository r = repositories.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+                        WORKSPACE, "gitlab", host, Long.toString(projectId))
                 .orElseThrow(() -> new IllegalStateException(
                         "Repository for project " + projectId + " disappeared after a concurrent insert."));
         return applyAndSave(r, connectionId, pathWithNamespace, defaultBranch, languages);

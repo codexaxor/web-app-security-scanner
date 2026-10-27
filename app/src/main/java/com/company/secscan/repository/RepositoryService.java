@@ -93,14 +93,17 @@ public class RepositoryService {
                 .sorted(Comparator.comparing(GitLabProject::pathWithNamespace))
                 .toList();
 
-        Map<Long, Repository> selected = repositories.findByWorkspaceId(WORKSPACE).stream()
-                .collect(Collectors.toMap(Repository::getGitlabProjectId, Function.identity()));
+        // Scope "already selected" to THIS connection's host: the same numeric project id on another host is a
+        // different repository (D-080/V22), so key by provider_repo_id within the connection's host.
+        Map<String, Repository> selected = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .filter(r -> conn.getHost() != null && conn.getHost().equals(r.getHost()))
+                .collect(Collectors.toMap(Repository::getProviderRepoId, Function.identity()));
 
         // Compute the requested page first, then fetch languages only for that page (bounds the extra calls).
         PagedResponse<GitLabProject> pageOfProjects = PagedResponse.fromList(visible, page, size);
         List<ProjectView> views = new ArrayList<>();
         for (GitLabProject p : pageOfProjects.content()) {
-            Repository existing = selected.get(p.id());
+            Repository existing = selected.get(Long.toString(p.id()));
             views.add(new ProjectView(
                     p.id(),
                     p.pathWithNamespace(),
@@ -130,8 +133,10 @@ public class RepositoryService {
 
         // State of each existing repository BEFORE this call (B1/SF-3 honest counts): present+active →
         // "already selected"; present+inactive/detached → "reactivated"; absent → "added".
-        Map<Long, Boolean> activeBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
-                .collect(Collectors.toMap(Repository::getGitlabProjectId, Repository::isActive));
+        // Scope to this connection's host so a same-id repo on another host is not confused with this one.
+        Map<String, Boolean> activeBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .filter(r -> conn.getHost() != null && conn.getHost().equals(r.getHost()))
+                .collect(Collectors.toMap(Repository::getProviderRepoId, Repository::isActive));
 
         Set<Long> ids = Set.copyOf(gitlabProjectIds);
         // Validate the whole batch before writing anything, so a bad id selects nothing.
@@ -158,9 +163,9 @@ public class RepositoryService {
         for (Long id : ids) {
             GitLabProject p = byId.get(id);
             List<String> languages = safeLanguages(conn, token, id);
-            Repository repo = upsertWithRaceRecovery(conn.getId(), id, p, languages);
+            Repository repo = upsertWithRaceRecovery(conn.getId(), conn.getHost(), id, p, languages);
             result.add(RepositoryView.of(repo, ownerOf(repo)));
-            Boolean wasActive = activeBefore.get(id);
+            Boolean wasActive = activeBefore.get(Long.toString(id));
             if (wasActive == null) {
                 added++;
             } else if (wasActive) {
@@ -178,12 +183,14 @@ public class RepositoryService {
      * {@code DataIntegrityViolationException} from the insert; rather than a 500, we reattach/refresh the row the
      * winner inserted — first-wins ownership is preserved.
      */
-    private Repository upsertWithRaceRecovery(UUID connectionId, long projectId, GitLabProject p,
+    private Repository upsertWithRaceRecovery(UUID connectionId, String host, long projectId, GitLabProject p,
                                               List<String> languages) {
         try {
-            return upserter.upsert(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+            return upserter.upsert(connectionId, host, projectId, p.pathWithNamespace(), p.defaultBranch(),
+                    languages);
         } catch (DataIntegrityViolationException race) {
-            return upserter.reattach(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+            return upserter.reattach(connectionId, host, projectId, p.pathWithNamespace(), p.defaultBranch(),
+                    languages);
         }
     }
 
