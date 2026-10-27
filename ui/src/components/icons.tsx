@@ -12,6 +12,7 @@ export type IconName =
   | "settings"
   | "connect"
   | "menu"
+  | "dots"
   | "search"
   | "close"
   | "chevronLeft"
@@ -72,6 +73,13 @@ const PATHS: Record<IconName, ReactElement> = {
       <line x1="4" y1="7" x2="20" y2="7" />
       <line x1="4" y1="12" x2="20" y2="12" />
       <line x1="4" y1="17" x2="20" y2="17" />
+    </>
+  ),
+  dots: (
+    <>
+      <circle cx="12" cy="5" r="1.4" />
+      <circle cx="12" cy="12" r="1.4" />
+      <circle cx="12" cy="19" r="1.4" />
     </>
   ),
   search: (

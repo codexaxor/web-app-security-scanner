@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import DashboardPage from "./pages/DashboardPage";
 import FeedPage from "./pages/FeedPage";
 import RepositoriesPage from "./pages/RepositoriesPage";
+import RepositoryPage from "./pages/RepositoryPage";
 import IgnoredPage from "./pages/IgnoredPage";
 import SettingsPage from "./pages/SettingsPage";
 import ConnectPage from "./pages/ConnectPage";
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/feed" element={<FeedPage />} />
         <Route path="/feed/:groupId" element={<FeedPage />} />
         <Route path="/repositories" element={<RepositoriesPage />} />
+        <Route path="/repositories/:id" element={<RepositoryPage />} />
         <Route path="/ignored" element={<IgnoredPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/connect" element={<ConnectPage />} />

@@ -15,6 +15,7 @@ import com.company.secscan.repository.api.SelectResult;
 import com.company.secscan.scan.BranchName;
 import com.company.secscan.workspace.Workspace;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -186,15 +187,93 @@ public class RepositoryService {
         }
     }
 
+    /** Sort keys accepted by the Repositories list (M8.6). Anything else falls back to the severity default. */
+    public static final String SORT_SEVERITY = "severity";
+    public static final String SORT_NAME = "name";
+    public static final String SORT_LAST_SCAN = "lastscan";
+
+    /**
+     * One page of the workspace's selected repositories with M8.6 server-side search, filters and sort (item 3).
+     * The whole workspace's repos + rollups are already loaded together (no N+1); search/filter/sort/paginate run
+     * on the server so the client only ever receives one filtered, ordered page.
+     *
+     * <p>{@code search} = case-insensitive substring on the project path (≤ 100 chars). Filters:
+     * {@code includeInactive} (default false → active only), {@code hasOpenIssues} (any open finding),
+     * {@code lastScanFailed} (last scan failed or partial — a scanner failed). {@code sort}: {@code severity}
+     * (default; most-severe open counts first), {@code name}, {@code lastscan} (most recent finish first).
+     */
     @Transactional(readOnly = true)
-    public PagedResponse<RepositoryView> listSelected(int page, int size) {
+    public PagedResponse<RepositoryView> listSelected(String search, boolean includeInactive, boolean hasOpenIssues,
+                                                      boolean lastScanFailed, String sort, int page, int size) {
+        if (search != null && search.length() > SEARCH_MAX) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
+        }
+        int pageIndex = Math.max(0, page);
+        int perPage = Math.min(Math.max(1, size), 200);
+        String q = search == null ? null : search.trim().toLowerCase(java.util.Locale.ROOT);
+
         Map<UUID, GitlabConnection> byId = connections.findByWorkspaceId(WORKSPACE).stream()
                 .collect(Collectors.toMap(GitlabConnection::getId, Function.identity()));
         Map<UUID, RepositorySummaryService.RepositorySummary> rollups = summaries.summariesByRepo(WORKSPACE);
-        return PagedResponse.fromPage(
-                repositories.findByWorkspaceId(WORKSPACE, PageRequest.of(Math.max(0, page), Math.max(1, size)))
-                        .map(r -> RepositoryView.of(r, byId.get(r.getConnectionId()),
-                                summaries.summaryOrEmpty(rollups, r.getId()))));
+
+        List<RepositoryView> all = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .map(r -> RepositoryView.of(r, byId.get(r.getConnectionId()),
+                        summaries.summaryOrEmpty(rollups, r.getId())))
+                .filter(v -> includeInactive || v.active())
+                .filter(v -> q == null || q.isEmpty()
+                        || v.pathWithNamespace().toLowerCase(java.util.Locale.ROOT).contains(q))
+                .filter(v -> !hasOpenIssues || openTotal(v) > 0)
+                .filter(v -> !lastScanFailed || isFailedScan(v.lastScan()))
+                .sorted(repoComparator(sort))
+                .toList();
+
+        int total = all.size();
+        int from = Math.min(pageIndex * perPage, total);
+        int to = Math.min(from + perPage, total);
+        int totalPages = (int) Math.ceil(total / (double) perPage);
+        return new PagedResponse<>(all.subList(from, to), pageIndex, perPage, total, totalPages);
+    }
+
+    private static long openTotal(RepositoryView v) {
+        RepositoryView.OpenBySeverity s = v.openBySeverity();
+        return s.critical() + s.high() + s.medium() + s.low();
+    }
+
+    // D-draft (M8.6 U3): the "last scan failed" filter matches a last scan of status failed OR partial — a
+    // partial scan means at least one scanner failed, so both belong in a "problem scans" filter.
+    private static boolean isFailedScan(RepositorySummaryService.LastScan last) {
+        return last != null && ("failed".equals(last.status()) || "partial".equals(last.status()));
+    }
+
+    private static Comparator<RepositoryView> repoComparator(String sort) {
+        Comparator<RepositoryView> byName =
+                Comparator.comparing(v -> v.pathWithNamespace().toLowerCase(java.util.Locale.ROOT));
+        if (SORT_NAME.equals(sort)) {
+            return byName;
+        }
+        if (SORT_LAST_SCAN.equals(sort)) {
+            // Most recently finished first; never-scanned (null) last.
+            return Comparator.<RepositoryView, Instant>comparing(
+                    v -> v.lastScan() == null ? null : v.lastScan().finishedAt(),
+                    Comparator.nullsLast(Comparator.reverseOrder())).thenComparing(byName);
+        }
+        // Default: most-severe open counts first (critical, then high, medium, low), then name.
+        return Comparator.<RepositoryView>comparingLong(v -> v.openBySeverity().critical()).reversed()
+                .thenComparing(Comparator.comparingLong((RepositoryView v) -> v.openBySeverity().high()).reversed())
+                .thenComparing(Comparator.comparingLong((RepositoryView v) -> v.openBySeverity().medium()).reversed())
+                .thenComparing(Comparator.comparingLong((RepositoryView v) -> v.openBySeverity().low()).reversed())
+                .thenComparing(byName);
+    }
+
+    /** One repository with its rollups (the repo page header). 404 if it is not in this workspace. */
+    @Transactional(readOnly = true)
+    public RepositoryView getRepository(UUID id) {
+        Repository repo = requireRepo(id);
+        GitlabConnection conn = repo.getConnectionId() == null ? null
+                : connections.findByIdAndWorkspaceId(repo.getConnectionId(), WORKSPACE).orElse(null);
+        RepositorySummaryService.RepositorySummary summary =
+                summaries.summaryOrEmpty(summaries.summariesByRepo(WORKSPACE), id);
+        return RepositoryView.of(repo, conn, summary);
     }
 
     private static final int SEARCH_MAX = 100;

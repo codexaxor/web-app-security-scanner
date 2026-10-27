@@ -49,7 +49,7 @@ export default function SelectRepositories() {
 
   function refreshSelected() {
     api
-      .listRepositories(0, 500)
+      .listRepositories({ size: 500 })
       .then((r) => setSelected(r.content))
       .catch(() => setSelected([]));
   }

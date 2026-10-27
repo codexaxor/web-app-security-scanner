@@ -252,9 +252,22 @@ export interface WorkspaceSettings {
 export interface FeedParams {
   repositoryId?: string;
   type?: IssueType;
+  category?: string;
   view?: View;
   band?: Band;
   includeInactive?: boolean;
+  page?: number;
+  size?: number;
+}
+
+export type RepoSort = "severity" | "name" | "lastscan";
+
+export interface RepoListParams {
+  search?: string;
+  includeInactive?: boolean;
+  hasOpenIssues?: boolean;
+  lastScanFailed?: boolean;
+  sort?: RepoSort;
   page?: number;
   size?: number;
 }
@@ -374,8 +387,11 @@ export const api = {
     ),
   selectRepositories: (connectionId: string, gitlabProjectIds: number[]) =>
     request<SelectResult>("POST", "/api/v1/repositories", { connectionId, gitlabProjectIds }),
-  listRepositories: (page: number, size: number) =>
-    request<Paged<RepositoryView>>("GET", `/api/v1/repositories?page=${page}&size=${size}`),
+  listRepositories: (p: RepoListParams = {}) =>
+    request<Paged<RepositoryView>>("GET", `/api/v1/repositories${repoQuery(p)}`),
+  getRepository: (id: string) => request<RepositoryView>("GET", `/api/v1/repositories/${id}`),
+  listRepositoryScans: (id: string, page: number, size: number) =>
+    request<Paged<ScanView>>("GET", `/api/v1/repositories/${id}/scans?page=${page}&size=${size}`),
   listRepositoryBranches: (repositoryId: string, search: string, page: number, size: number) =>
     request<Paged<BranchView>>(
       "GET",
@@ -430,12 +446,27 @@ export const api = {
     request<WorkspaceSettings>("PUT", "/api/v1/workspace/settings", body),
 };
 
+// Builds the repositories-list query string from a validated params object. `search` is user text, so it is
+// URL-encoded by URLSearchParams; the sort value is a closed enum validated server-side.
+function repoQuery(p: RepoListParams): string {
+  const q = new URLSearchParams();
+  if (p.search) q.set("search", p.search);
+  if (p.includeInactive) q.set("includeInactive", "true");
+  if (p.hasOpenIssues) q.set("hasOpenIssues", "true");
+  if (p.lastScanFailed) q.set("lastScanFailed", "true");
+  if (p.sort) q.set("sort", p.sort);
+  q.set("page", String(p.page ?? 0));
+  q.set("size", String(p.size ?? 50));
+  return `?${q.toString()}`;
+}
+
 // Builds the feed/summary query string from a validated params object (never from free data). `summary` omits
 // band/pagination, which the summary endpoint ignores.
 function feedQuery(p: FeedParams, summary = false): string {
   const q = new URLSearchParams();
   if (p.repositoryId) q.set("repositoryId", p.repositoryId);
   if (p.type) q.set("type", p.type);
+  if (p.category) q.set("category", p.category);
   q.set("view", p.view ?? "focus");
   if (p.includeInactive) q.set("includeInactive", "true");
   if (!summary) {

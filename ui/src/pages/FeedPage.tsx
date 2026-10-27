@@ -78,8 +78,8 @@ export default function FeedPage() {
     enabled: !invalid,
   });
   const repos = useQuery({
-    queryKey: qk.repositories(0, 100),
-    queryFn: () => api.listRepositories(0, 100),
+    queryKey: qk.repositories({ size: 100 }),
+    queryFn: () => api.listRepositories({ size: 100 }),
     enabled: !invalid,
   });
 

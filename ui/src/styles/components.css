@@ -1339,3 +1339,117 @@ button.health-item {
   flex: 1;
   overflow-wrap: anywhere;
 }
+
+/* ---------- M8.6: inline-svg icon base, search field, row menu, repo page ---------- */
+.icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+/* search input with a leading icon */
+.search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.search-field .search-icon {
+  position: absolute;
+  left: var(--sp-2);
+  font-size: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.search-field input[type="search"] {
+  height: 34px;
+  min-width: 220px;
+  padding: 0 var(--sp-2) 0 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+/* row / header overflow (⋮) menu */
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.rowmenu {
+  position: relative;
+  display: inline-block;
+}
+.rowmenu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rowmenu-trigger:hover,
+.rowmenu-trigger[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.rowmenu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 25;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  text-align: left;
+}
+.rowmenu-item,
+.rowmenu-item-wrap > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px var(--sp-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.rowmenu-item:hover,
+.rowmenu-item-wrap > button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.rowmenu-item-wrap > button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* repository page header */
+.breadcrumb {
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.repo-header-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.repo-lastscan {
+  margin-top: calc(-1 * var(--sp-2));
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
