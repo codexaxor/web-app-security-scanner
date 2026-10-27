@@ -2,7 +2,7 @@
 - Train plan approved: yes (2026-10-27) — with binding changes appended to M8x-train-brief.md "Approved plan changes (2026-10-27)"
 - Current milestone: M8.5
 - Current slice: M8.5 DONE (S0–S8 complete)
-- Branch / last green commit: feature/m8.5-correctness-taxonomy @ 07de370
+- Branch / last green commit: feature/m8.5-correctness-taxonomy (tip; see `git log`)
 - Last gate results: G1 app 367 / core 179 / 0 failures | G2 vitest 22 + guard 48 clean | G3 e2e 84 passed ×2
 - HARD STOP: none
 - D-drafts so far: D-draft-1 (IaC platform heuristic — accepted, in D-087/report), D-draft-2 (advisory_summary
