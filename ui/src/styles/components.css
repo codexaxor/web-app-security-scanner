@@ -1522,3 +1522,118 @@ button.health-item {
   gap: 4px;
   max-width: 280px;
 }
+
+/* ---------- M8.6: issue side panel (gauge, sections, location grouping, nav) ---------- */
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.panel-firstseen {
+  font-size: var(--fs-xs);
+  margin-top: 2px;
+}
+.panel-nav {
+  gap: var(--sp-1);
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.icon-btn:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.category-chip {
+  font-weight: 600;
+}
+
+.gauge {
+  --gauge-color: var(--border-strong);
+  width: 60px;
+  height: 60px;
+  flex: none;
+  border-radius: 50%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  grid-auto-flow: row;
+  background: conic-gradient(var(--gauge-color) calc(var(--pct, 0) * 1%), var(--surface-3) 0);
+}
+.gauge::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.gauge-score {
+  position: relative;
+  z-index: 1;
+  font-weight: 750;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.gauge-band {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.gauge-critical {
+  --gauge-color: var(--sev-critical);
+}
+.gauge-high {
+  --gauge-color: var(--sev-high);
+}
+.gauge-medium {
+  --gauge-color: var(--sev-medium);
+}
+.gauge-low {
+  --gauge-color: var(--sev-low);
+}
+
+.panel-section {
+  margin-bottom: var(--sp-4);
+}
+.panel-h3 {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+}
+.panel-text {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.loc-group {
+  margin-top: var(--sp-4);
+}
+.loc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-bottom: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 650;
+  font-size: var(--fs-sm);
+}

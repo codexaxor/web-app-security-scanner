@@ -299,7 +299,12 @@ export default function FeedPage() {
       </div>
 
       {groupId ? (
-        <SubIssuePanel groupId={groupId} onClose={() => navigate({ pathname: "/feed", search: params.toString() })} />
+        <SubIssuePanel
+          groupId={groupId}
+          siblingIds={rows.map((g) => g.id)}
+          onNavigate={(id) => navigate({ pathname: `/feed/${id}`, search: params.toString() })}
+          onClose={() => navigate({ pathname: "/feed", search: params.toString() })}
+        />
       ) : null}
     </section>
   );

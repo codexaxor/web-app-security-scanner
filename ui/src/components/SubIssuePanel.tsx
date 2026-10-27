@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type IssueGroupView, type SubIssueView, type TriageEventView } from "../api";
+import { api, type SubIssueView, type TriageEventView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
-import { advisoryLink, titleCase } from "../lib/format";
+import { advisoryLink, bandOf, titleCase, type BandName } from "../lib/format";
 import { humanizeRuleId, reasonLabel, typeLabel } from "../lib/labels";
+import { issueFix, issueSummary } from "../lib/issueText";
 import RelativeTime from "./RelativeTime";
 import ErrorBanner from "./ErrorBanner";
 import IgnoreDialog from "./IgnoreDialog";
@@ -11,32 +12,65 @@ import ConfirmDialog from "./ConfirmDialog";
 import Dialog from "./Dialog";
 import Button from "./Button";
 import SeverityPill from "./SeverityPill";
+import StatusChip, { type StatusKind } from "./StatusChip";
 import TypeBadge from "./TypeBadge";
 import RepoName from "./RepoName";
+import Icon from "./icons";
+import { PathText } from "./ui";
 
-/**
- * Remediation line per issue type, from existing server data only. For SCA the fix comes from the group's
- * server-computed distinct `fixedVersions` over OPEN sub-issues (SF-7): one → "upgrade to <v>", several →
- * "see each location", none → no fix line at all (returns null). Other types keep their fixed guidance.
- */
-function remediation(group: IssueGroupView | undefined, subs: SubIssueView[]): string | null {
-  const type = group?.type ?? subs[0]?.type;
-  if (type === "sca") {
-    const pkg = group?.title ?? subs[0]?.packageName ?? "the dependency";
-    const fixed = group?.fixedVersions ?? [];
-    if (fixed.length === 1) return `Fix: upgrade ${pkg} to ${fixed[0]}`;
-    if (fixed.length > 1) return "Fix: several fixed versions — see each location below.";
-    return null; // no fixed version available → no fix line (SF-7)
-  }
-  if (type === "secret") return "Fix: rotate the exposed secret and remove it from the repository history.";
-  if (type === "iac") return "Fix: correct the flagged infrastructure configuration.";
-  if (type === "eol") return "Fix: upgrade to a supported runtime version.";
-  return "Fix: review and remediate the flagged code.";
+const BAND_LABEL: Record<BandName, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+function withinSevenDays(iso: string | null | undefined): boolean {
+  return iso != null && Date.now() - new Date(iso).getTime() < 7 * 86400 * 1000;
 }
 
-/** The full issue side panel (S6/S10d): a group header (title, severity, type, repo, remediation, affected
- *  locations, Ignore group…) then a compact locations list, each with its SPEC fields, triage and history. */
-export default function SubIssuePanel({ groupId, onClose }: { groupId: string; onClose: () => void }) {
+/** A band-colored severity gauge: a ring whose arc is the score/100, the number in the middle. The arc fraction
+ *  is data, so it is an inline CSS variable (CSP-safe via CSSOM, like SeverityBar). Null score → a neutral dash. */
+function ScoreGauge({ score }: { score: number | null | undefined }) {
+  const band = bandOf(score);
+  if (band === "ignored" || score == null) {
+    return (
+      <div className="gauge gauge-none" role="img" aria-label="No severity (ignored)">
+        <span className="gauge-score">—</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`gauge gauge-${band}`}
+      style={{ "--pct": String(Math.max(0, Math.min(100, score))) } as CSSProperties}
+      role="img"
+      aria-label={`Severity ${score} out of 100 (${BAND_LABEL[band]})`}
+    >
+      <span className="gauge-score">{score}</span>
+      <span className="gauge-band">{BAND_LABEL[band]}</span>
+    </div>
+  );
+}
+
+/**
+ * The issue side panel (M8.6 item 5). Header: severity gauge, title, subtitle, type + category chip, status,
+ * first seen, and prev/next through the current list. Body: a deterministic "TL;DR" and "How do I fix it?"
+ * (from stored fields only, no AI — {@link issueSummary}/{@link issueFix}), the stored advisory text, the
+ * sub-issues grouped by location (each keeping its CVE/KEV/EPSS/version/line/ignore/history detail), and a
+ * "Why this score" breakdown per finding. Esc / backdrop close via {@link Dialog}.
+ */
+export default function SubIssuePanel({
+  groupId,
+  onClose,
+  siblingIds,
+  onNavigate,
+}: {
+  groupId: string;
+  onClose: () => void;
+  siblingIds?: string[];
+  onNavigate?: (groupId: string) => void;
+}) {
   const group = useQuery({ queryKey: qk.group(groupId), queryFn: () => api.getGroup(groupId) });
   const q = useQuery({
     queryKey: qk.subIssues(groupId, 0),
@@ -49,7 +83,29 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
   const title = g ? (g.type === "sast" ? humanizeRuleId(g.title) : g.title) : "Issue";
   // N-3: the affected-locations count is the server total, not subs.length (which caps at the 100-row page).
   const affected = q.data?.totalElements ?? subs.length;
-  const fixLine = g ? remediation(g, subs) : null;
+
+  const summary = g ? issueSummary(g, subs) : null;
+  const fix = g ? issueFix(g, subs) : null;
+  // Stored advisory text (sub_issue.advisory_summary). Hidden when it merely repeats the title (e.g. IaC, where
+  // it carries the Checkov check_name that is already the title).
+  const advisory = subs.find((s) => s.advisorySummary)?.advisorySummary ?? null;
+  const showAdvisory = advisory && advisory !== g?.title;
+
+  const statusKind: StatusKind = g
+    ? g.status === "ignored"
+      ? "ignored"
+      : g.status === "solved"
+        ? "solved"
+        : withinSevenDays(g.firstSeenAt)
+          ? "new"
+          : "todo"
+    : "todo";
+
+  const idx = siblingIds ? siblingIds.indexOf(groupId) : -1;
+  const prevId = idx > 0 ? siblingIds![idx - 1] : null;
+  const nextId = idx >= 0 && siblingIds && idx < siblingIds.length - 1 ? siblingIds[idx + 1] : null;
+
+  const byLocation = groupByLocation(subs);
 
   return (
     <Dialog title="Issue details" onClose={onClose} variant="drawer">
@@ -57,28 +113,87 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
         <div className="row-between">
           <div className="row">
             {g ? <TypeBadge type={g.type} /> : null}
-            {g ? <SeverityPill score={g.severityScore} /> : null}
+            {g?.level2Category ? <span className="chip chip-todo category-chip">{g.level2Category}</span> : null}
+            {g ? <StatusChip kind={statusKind} /> : null}
           </div>
-          <button className="panel-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <div className="row panel-nav">
+            {onNavigate && siblingIds ? (
+              <>
+                <button
+                  className="icon-btn"
+                  aria-label="Previous issue"
+                  disabled={!prevId}
+                  onClick={() => prevId && onNavigate(prevId)}
+                >
+                  <Icon name="chevronLeft" />
+                </button>
+                <button
+                  className="icon-btn"
+                  aria-label="Next issue"
+                  disabled={!nextId}
+                  onClick={() => nextId && onNavigate(nextId)}
+                >
+                  <Icon name="chevronRight" />
+                </button>
+              </>
+            ) : null}
+            <button className="panel-close" onClick={onClose} aria-label="Close">
+              ×
+            </button>
+          </div>
         </div>
-        <h2 className="panel-title">{title}</h2>
-        {g ? (
-          <div className="muted panel-sub">
-            <RepoName path={g.repositoryPath} showPath />
-            {g.repositoryBranch ? ` · ${g.repositoryBranch}` : ""} · {typeLabel(g.type)}
+        <div className="panel-title-row">
+          <ScoreGauge score={g?.severityScore} />
+          <div>
+            <h2 className="panel-title">{title}</h2>
+            {g ? (
+              <div className="muted panel-sub">
+                <RepoName path={g.repositoryPath} showPath />
+                {g.repositoryBranch ? ` · ${g.repositoryBranch}` : ""} · {typeLabel(g.type)}
+              </div>
+            ) : null}
+            {g ? (
+              <div className="muted panel-firstseen">
+                First seen <RelativeTime iso={g.firstSeenAt} />
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </div>
       </div>
 
       <div className="panel-body">
         {group.error ? <ErrorBanner error={group.error} /> : null}
         {q.error ? <ErrorBanner error={q.error} /> : null}
 
+        {summary ? (
+          <section className="panel-section">
+            <h3 className="panel-h3">TL;DR</h3>
+            <p className="panel-text" data-testid="tldr">
+              {summary}
+            </p>
+          </section>
+        ) : null}
+
+        {fix ? (
+          <section className="panel-section">
+            <h3 className="panel-h3">How do I fix it?</h3>
+            <p className="panel-text" data-testid="howtofix">
+              {fix}
+            </p>
+          </section>
+        ) : null}
+
+        {showAdvisory ? (
+          <section className="panel-section">
+            <h3 className="panel-h3">Advisory</h3>
+            <p className="panel-text subtitle-text" data-testid="advisory">
+              {advisory}
+            </p>
+          </section>
+        ) : null}
+
         {g ? (
           <div className="group-head">
-            {fixLine ? <div className="remediation">{fixLine}</div> : null}
             <div className="row-between">
               <span className="muted" data-testid="affected-count">
                 {affected} affected location{affected === 1 ? "" : "s"}
@@ -93,8 +208,17 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
         ) : null}
 
         {q.isLoading ? <p className="muted">Loading…</p> : null}
-        {subs.map((s) => (
-          <LocationCard key={s.id} sub={s} groupId={groupId} />
+
+        {byLocation.map(([file, locSubs]) => (
+          <div className="loc-group" key={file}>
+            <div className="loc-head">
+              <PathText path={file} />
+              <span className="muted"> · {locSubs.length}</span>
+            </div>
+            {locSubs.map((s) => (
+              <LocationCard key={s.id} sub={s} groupId={groupId} />
+            ))}
+          </div>
         ))}
 
         {ignoreGroup && subs[0] ? (
@@ -108,6 +232,19 @@ export default function SubIssuePanel({ groupId, onClose }: { groupId: string; o
       </div>
     </Dialog>
   );
+}
+
+/** Group a group's sub-issues by their file path (findings with no path fall under "No file"), preserving the
+ *  server order of first appearance. */
+function groupByLocation(subs: SubIssueView[]): [string, SubIssueView[]][] {
+  const map = new Map<string, SubIssueView[]>();
+  for (const s of subs) {
+    const key = s.filePath ?? "No file";
+    const list = map.get(key);
+    if (list) list.push(s);
+    else map.set(key, [s]);
+  }
+  return Array.from(map.entries());
 }
 
 function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) {
@@ -142,12 +279,7 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
               idLabel
             )}
           </span>
-          {sub.filePath ? (
-            <div className="file-path muted" title={sub.filePath}>
-              {sub.filePath}
-              {sub.line != null ? `:${sub.line}` : ""}
-            </div>
-          ) : null}
+          {sub.line != null ? <span className="muted"> line {sub.line}</span> : null}
         </div>
         <span className="location-badges">
           {sub.inKev ? (
@@ -199,10 +331,10 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
       {sub.scoreBreakdown && sub.scoreBreakdown.length ? (
         <>
           <button className="disclosure" onClick={() => setShowBreakdown((v) => !v)}>
-            {showBreakdown ? "Hide score breakdown" : "Score breakdown"}
+            {showBreakdown ? "Hide why this score" : "Why this score"}
           </button>
           {showBreakdown ? (
-            <ul className="breakdown">
+            <ul className="breakdown" data-testid="why-score">
               {sub.scoreBreakdown.map((l, i) => (
                 <li key={i}>
                   <span>{l.detail}</span>

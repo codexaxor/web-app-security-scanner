@@ -158,6 +158,9 @@ export interface SubIssueView {
   ruleReason: string | null;
   ruleCreatedBy: string | null;
   ruleGlobal: boolean;
+  level2Category: string | null;
+  owaspCategory: string | null;
+  advisorySummary: string | null;
 }
 
 export interface TriageEventView {

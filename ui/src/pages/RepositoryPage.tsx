@@ -404,7 +404,14 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
         </button>
       </div>
 
-      {openIssue && openIssueOk ? <SubIssuePanel groupId={openIssue} onClose={closePanel} /> : null}
+      {openIssue && openIssueOk ? (
+        <SubIssuePanel
+          groupId={openIssue}
+          siblingIds={rows.map((g) => g.id)}
+          onNavigate={openPanel}
+          onClose={closePanel}
+        />
+      ) : null}
     </div>
   );
 }

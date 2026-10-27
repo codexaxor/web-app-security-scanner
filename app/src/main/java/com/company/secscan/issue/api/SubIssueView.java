@@ -29,7 +29,8 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            String cwePhrase, Boolean inKev, BigDecimal epss, String epssAttribution,
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
                            UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
-                           boolean ruleGlobal, String level2Category, String owaspCategory) {
+                           boolean ruleGlobal, String level2Category, String owaspCategory,
+                           String advisorySummary) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
@@ -65,6 +66,6 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getCreatedBy(),
                 // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
                 rule != null && rule.getRepositoryId() == null,
-                cat.level2(), cat.owasp());
+                cat.level2(), cat.owasp(), s.getAdvisorySummary());
     }
 }
