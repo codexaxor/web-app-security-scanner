@@ -236,7 +236,7 @@ public class ReconcileService {
             }
         }
         touchedGroups.addAll(triageApplier.applyAtReconcile(workspaceId, repositoryId, scanId, triage,
-                findingByFp.keySet(), closingScanners, sastRuleIdsByFile, rebaselineScanners));
+                findingByFp.keySet(), closingScanners, sastRuleIdsByFile, rebaselineScanners, frozenFingerprints));
 
         for (UUID groupId : touchedGroups) {
             rollup.recompute(workspaceId, groupId, fixConfig);

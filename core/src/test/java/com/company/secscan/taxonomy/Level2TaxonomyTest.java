@@ -59,6 +59,39 @@ class Level2TaxonomyTest {
     }
 
     @Test
+    void sastFirstCweExtractedFromTheRealOpengrepCweString() {
+        // B-3: the real Opengrep sample (app/src/test/resources/samples/opengrep/real-csrf-duplicate.json) reports
+        // a CWE as the full "CWE-<n>: <name>" string, not a bare id. firstCwe must extract the leading CWE id so
+        // the mapping still resolves. Using the EXACT string from that sample.
+        Category csrf = tax.of(RawFinding.TYPE_SAST, "Sec.java", "rule",
+                List.of("CWE-352: Cross-Site Request Forgery (CSRF)"), null);
+        assertThat(csrf.level2()).isEqualTo("Cross-site request forgery");
+        assertThat(csrf.owasp()).isEqualTo("Broken Access Control");
+        // Case-insensitive and whitespace-tolerant, trailing name ignored.
+        Category sqli = tax.of(RawFinding.TYPE_SAST, "Dao.java", "rule",
+                List.of("  cwe-89: SQL Injection"), null);
+        assertThat(sqli.level2()).isEqualTo("SQL injection");
+        assertThat(sqli.owasp()).isEqualTo("Injection");
+        // A string with no CWE id → fallback class, null OWASP.
+        Category none = tax.of(RawFinding.TYPE_SAST, "X.java", "rule", List.of("no cwe here"), null);
+        assertThat(none.level2()).isEqualTo("Code weakness");
+        assertThat(none.owasp()).isNull();
+    }
+
+    @Test
+    void secretKindMatchesOnTokenBoundariesNotSubstrings() {
+        // N-3: "monkey" must not read as a "key", "passwordless" must not read as a "password".
+        assertThat(tax.of(RawFinding.TYPE_SECRET, "a", "monkey-config", null, null).level2()).isEqualTo("Secret");
+        assertThat(tax.of(RawFinding.TYPE_SECRET, "a", "passwordless-login", null, null).level2())
+                .isEqualTo("Secret");
+        // Real kebab/snake rule ids still classify on their tokens.
+        assertThat(tax.of(RawFinding.TYPE_SECRET, "a", "generic-api-key", null, null).level2())
+                .isEqualTo("API token");
+        assertThat(tax.of(RawFinding.TYPE_SECRET, "a", "ssh-private-key", null, null).level2())
+                .isEqualTo("Private key");
+    }
+
+    @Test
     void iacPlatformHeuristicAndMisconfigOwasp() {
         assertThat(tax.of(RawFinding.TYPE_IAC, "docker/Dockerfile", "CKV_DOCKER_2", null, null).level2())
                 .isEqualTo("Dockerfile");

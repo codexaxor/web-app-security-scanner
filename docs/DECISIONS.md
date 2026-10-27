@@ -14,6 +14,23 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-089 M8.5 review fixes — same-branch orphan close + language scope (2026-10-27, accepted)
+Context: the /review-pr M8.5 round (D-086 train) found that the OD-19 ignored-orphan handling only fired on a
+branch switch, so a finding that genuinely disappears on the SAME branch (e.g. a SAST snippet shift) left a
+stale ignored row to accumulate; and that the static language detector counted data/markup formats as languages.
+Decision (refinement of D-083 / D-081, not a new rule):
+ - Reconcile closes a stale ignored orphan the moment it disappears on ANY authoritative scan of the tracked
+   branch (re-derivable hold, scanner succeeded + authoritative, fingerprint absent, not a frozen identity, not
+   a sub-issue-scope manual ignore): reason BRANCH_CHANGED when the scanner is re-baselining, else
+   SOLVED_NOT_DETECTED. The OD-19 one-off retire pass is therefore only a retroactive cleanup of orphans that
+   accumulated before this shipped; its ITs seed that legacy state directly. Domain rule 3 is unchanged (a
+   failed/non-authoritative scanner still closes nothing; a superseded secret key id / uncovered EOL is frozen).
+ - `lang_detect.py` counts only programming languages; data/markup formats (YAML, XML, JSON, SQL, Markdown,
+   CSV, .properties/.ini/.toml) are not reported, so `repository.languages` matches GitLab's language set
+   (HCL kept). A detection failure still never fails the scan and never clears stored languages.
+Consequences: no migration, no fingerprint change, no API contract change. Status still changes only through
+reconcile and the D-063 carve-outs, each with a triage_event.
+
 ## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
 Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure
 code", "Infrastructure misconfiguration", "End-of-life runtime". The UI actually shipped (S10f) a different,

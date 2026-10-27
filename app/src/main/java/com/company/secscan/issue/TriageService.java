@@ -126,7 +126,11 @@ public class TriageService {
         TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled());
         Set<UUID> touched = new HashSet<>();
         List<UUID> reopenedToOpen = new java.util.ArrayList<>();
-        for (SubIssue sub : subIssues.findByWorkspaceIdAndIgnoredByRuleId(WORKSPACE, ruleId)) {
+        // B-2: only the still-IGNORED rows this rule holds are re-resolved. A finding the OD-19 retire pass
+        // solved while it was ignored has had its ignore markers cleared (SubIssue.solveIgnored), so deleting
+        // the rule must never resurrect it — the status filter guarantees that even against a stale pointer.
+        for (SubIssue sub : subIssues.findByWorkspaceIdAndStatusAndIgnoredByRuleId(
+                WORKSPACE, SubIssue.STATUS_IGNORED, ruleId)) {
             TriageResolver.Desired desired =
                     TriageResolver.resolve(sub, groupKeyOf(sub.getGroupId()), others, api);
             if (desired != null) {
