@@ -9,6 +9,7 @@ import Button from "../components/Button";
 import ConfirmDialog from "../components/ConfirmDialog";
 import TypeBadge from "../components/TypeBadge";
 import { EmptyState, PageHeader, PathText } from "../components/ui";
+import { TableSkeleton } from "../components/Skeleton";
 import CreateRuleDialog, { type RulePrefill } from "../components/CreateRuleDialog";
 
 const SIZE = 50;
@@ -61,6 +62,9 @@ export default function IgnoredPage() {
                 <th>When</th>
               </tr>
             </thead>
+            {items.isLoading ? (
+              <TableSkeleton columns={4} />
+            ) : (
             <tbody>
               {items.data?.content.map((it) => (
                 <tr key={it.subIssueId} data-testid="ignored-item">
@@ -86,6 +90,7 @@ export default function IgnoredPage() {
                 </tr>
               ))}
             </tbody>
+            )}
           </table>
         </div>
       )}
