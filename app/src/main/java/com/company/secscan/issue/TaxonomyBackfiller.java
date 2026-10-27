@@ -45,12 +45,16 @@ public class TaxonomyBackfiller {
                 // Any sub-issue of the group yields the same category (the group's subs share the categorizing
                 // fields); the per-workspace query keeps this scoped (domain rule 1).
                 List<SubIssue> subs = subIssues.findByWorkspaceIdAndGroupId(workspaceId, g.getId());
+                Level2Taxonomy.Category cat;
                 if (subs.isEmpty()) {
-                    continue; // nothing to derive from (an orphaned group); leave null, reconcile will set it
+                    // N-2: an orphaned group (no sub-issues) still gets its TYPE's fallback category, so the
+                    // null-count-0 invariant holds for every group — never left null.
+                    cat = tax.of(g.getType(), null, null, null, null);
+                } else {
+                    SubIssue rep = subs.get(0);
+                    cat = tax.of(rep.getType(), rep.getFilePath(), rep.getRuleId(), rep.getCwe(),
+                            rep.getPackageName());
                 }
-                SubIssue rep = subs.get(0);
-                Level2Taxonomy.Category cat = tax.of(rep.getType(), rep.getFilePath(), rep.getRuleId(),
-                        rep.getCwe(), rep.getPackageName());
                 filled += groups.backfillTaxonomyIfNull(g.getId(), workspaceId, cat.level2(), cat.owasp());
             }
         }

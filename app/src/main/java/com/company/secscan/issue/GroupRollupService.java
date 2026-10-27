@@ -100,6 +100,12 @@ public class GroupRollupService {
                     if (ScanFinding.TYPE_IAC.equals(g.getType()) && rep.getAdvisorySummary() != null) {
                         g.setTitle(rep.getAdvisorySummary());
                     }
+                } else {
+                    // N-2: a group with no sub-issues still gets its type's fallback category (never left null).
+                    Level2Taxonomy.Category cat = Level2Taxonomy.getInstance()
+                            .of(g.getType(), null, null, null, null);
+                    g.setLevel2Category(cat.level2());
+                    g.setOwaspCategory(cat.owasp());
                 }
                 groups.save(g);
             } else {

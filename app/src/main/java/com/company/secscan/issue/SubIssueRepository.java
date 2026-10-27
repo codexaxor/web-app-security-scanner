@@ -42,7 +42,8 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
             select count(distinct s.id)
             from SubIssue s, com.company.secscan.repository.Repository r,
                  com.company.secscan.scan.Scan fs
-            where s.workspaceId = :ws and r.id = s.repositoryId and fs.id = s.firstSeenScanId
+            where s.workspaceId = :ws and r.workspaceId = :ws and fs.workspaceId = :ws
+              and r.id = s.repositoryId and fs.id = s.firstSeenScanId
               and s.createdAt >= :since
               and fs.branch = coalesce(r.scanBranch, r.defaultBranch)
               and (:repositoryId is null or s.repositoryId = :repositoryId)
@@ -96,6 +97,29 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
 
     /** The sub-issues currently held ignored by one rule — unignore when the rule is removed (D-058). */
     List<SubIssue> findByWorkspaceIdAndIgnoredByRuleId(UUID workspaceId, UUID ignoredByRuleId);
+
+    /**
+     * The sub-issues with a given status held by one rule (B-2): {@link TriageService#removeRule} iterates only
+     * the {@code ignored} ones, so a row the retire pass solved (its {@code ignored_by_rule_id} is cleared by
+     * {@link SubIssue#solveIgnored()}, and even a stale pointer is filtered out here) is never reopened by a
+     * later rule deletion. Workspace-scoped (domain rule 1).
+     */
+    List<SubIssue> findByWorkspaceIdAndStatusAndIgnoredByRuleId(UUID workspaceId, String status,
+                                                                UUID ignoredByRuleId);
+
+    /**
+     * OD-19 column-scoped retire (N-1): solves one stale ignored orphan IN PLACE — status ignored → solved,
+     * stamping {@code solved_at} and CLEARING the ignore markers (B-2) — and ONLY while it is still
+     * {@code ignored} in this workspace. A full-entity save is avoided so a concurrent reconcile that already
+     * changed the row makes this a no-op (0 rows) rather than clobbering it; the caller then writes no
+     * {@code triage_event}. {@code clearAutomatically} drops the stale first-level cache so the group rollup
+     * that follows re-reads the solved rows. Returns the number of rows updated (0 or 1).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "update sub_issue set status = 'solved', solved_at = now(), ignore_reason = null, "
+            + "ignored_by_rule_id = null, ignored_at = null "
+            + "where id = :id and workspace_id = :ws and status = 'ignored'", nativeQuery = true)
+    int solveIgnoredOrphanIfStillIgnored(@Param("id") UUID id, @Param("ws") UUID ws);
 
     Page<SubIssue> findByWorkspaceIdAndGroupId(UUID workspaceId, UUID groupId, Pageable pageable);
 
