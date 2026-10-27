@@ -128,18 +128,22 @@ public final class Level2Taxonomy {
         if (ruleId == null) {
             return "Secret";
         }
-        String r = ruleId.toLowerCase(Locale.ROOT);
-        if (r.contains("private-key") || r.contains("privatekey")) {
+        // N-3: match on TOKEN boundaries, not substrings, so "monkey" does not read as a "key" and
+        // "passwordless" does not read as a "password". Betterleaks rule ids are kebab/snake (e.g.
+        // "aws-access-token", "private-key", "generic-api-key"), so split on any non-alphanumeric run.
+        java.util.Set<String> t = new java.util.HashSet<>(
+                java.util.Arrays.asList(ruleId.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")));
+        if (t.contains("private") || t.contains("privatekey") || t.contains("pem")) {
             return "Private key";
         }
-        if (r.contains("aws") || r.contains("gcp") || r.contains("azure") || r.contains("cloud")) {
+        if (t.contains("aws") || t.contains("gcp") || t.contains("azure") || t.contains("cloud")) {
             return "Cloud credential";
         }
-        if (r.contains("password") || r.contains("passwd")) {
+        if (t.contains("password") || t.contains("passwd") || t.contains("pwd")) {
             return "Password";
         }
-        if (r.contains("token") || r.contains("pat") || r.contains("api-key") || r.contains("apikey")
-                || r.contains("secret") || r.contains("key")) {
+        if (t.contains("token") || t.contains("pat") || t.contains("apikey") || t.contains("secret")
+                || t.contains("key")) {
             return "API token";
         }
         return "Secret";
@@ -163,12 +167,23 @@ public final class Level2Taxonomy {
         return id == null ? null : cweOwasp.get(id);
     }
 
+    /**
+     * The canonical {@code CWE-<n>} id from the first entry (B-3). Opengrep reports a CWE as the full string
+     * {@code "CWE-352: Cross-Site Request Forgery (CSRF)"}; we extract only the leading {@code CWE-<digits>} so it
+     * matches the property-file keys. Case-insensitive, leading whitespace tolerated. Null when the first entry is
+     * null/blank or has no CWE id.
+     */
     private static String firstCwe(List<String> cweIds) {
         if (cweIds == null || cweIds.isEmpty() || cweIds.get(0) == null) {
             return null;
         }
-        return cweIds.get(0).trim().toUpperCase(Locale.ROOT);
+        java.util.regex.Matcher m = CWE_ID.matcher(cweIds.get(0));
+        return m.find() ? m.group(1).toUpperCase(Locale.ROOT) : null;
     }
+
+    /** Leading {@code CWE-<digits>} (case-insensitive), ignoring any trailing name/description (B-3). */
+    private static final java.util.regex.Pattern CWE_ID =
+            java.util.regex.Pattern.compile("^\\s*(CWE-\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
 
     // --- IaC: coarse platform heuristic (D-draft-1) ---
 
