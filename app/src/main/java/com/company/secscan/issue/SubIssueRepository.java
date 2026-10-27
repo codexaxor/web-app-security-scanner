@@ -112,6 +112,19 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     java.util.List<Object[]> countByGroupIdsAndStatus(@Param("ws") UUID ws, @Param("groupIds") List<UUID> groupIds);
 
     /**
+     * Per-group location stats for the Feed/Issues-tab "location (+N more)" column (M8.6): a deterministic
+     * representative file path ({@code min}) and the number of DISTINCT file paths per group, over sub-issues
+     * with a file path. One query per page (no N+1); workspace-scoped. Groups with no file-path finding are
+     * absent. Returns rows [groupId, primaryFilePath, distinctLocationCount].
+     */
+    @Query("""
+            select s.groupId, min(s.filePath), count(distinct s.filePath) from SubIssue s
+            where s.workspaceId = :ws and s.groupId in :groupIds and s.filePath is not null
+            group by s.groupId
+            """)
+    java.util.List<Object[]> locationStatsByGroupIds(@Param("ws") UUID ws, @Param("groupIds") List<UUID> groupIds);
+
+    /**
      * Writes ONLY the derived score columns of a sub-issue, and ONLY while it is still {@code open} (B1). The
      * {@code status = 'open'} guard means a row that reconcile has solved in the window since the re-score read
      * it is skipped: its {@code status}/{@code solved_at}/{@code last_seen_scan_id} are never touched and its

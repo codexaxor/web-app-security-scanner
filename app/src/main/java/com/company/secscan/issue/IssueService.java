@@ -62,24 +62,69 @@ public class IssueService {
     @Transactional(readOnly = true)
     public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String view,
                                                     String band, boolean includeInactive, int page, int size) {
+        return listGroups(repositoryId, type, category, null, view, band, includeInactive, page, size);
+    }
+
+    /** As above, plus an optional free-text {@code search} on the group title/subtitle (M8.6 repo Issues tab). */
+    @Transactional(readOnly = true)
+    public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String search,
+                                                    String view, String band, boolean includeInactive, int page,
+                                                    int size) {
         int[] range = bandRange(band);
         var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), blankToNull(category),
-                statusesFor(view), range == null ? null : range[0], range == null ? null : range[1],
-                includeInactive, Pagination.of(page, size));
+                likeOrNull(search), statusesFor(view), range == null ? null : range[0],
+                range == null ? null : range[1], includeInactive, Pagination.of(page, size));
         Map<UUID, Repository> repos = repoById();
         Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
+        Map<UUID, Object[]> locations = locationStats(pageResult.getContent());
         // Feed rows omit fixedVersions (an SCA-only, per-group detail shown in the side panel, not the table).
-        return PagedResponse.fromPage(pageResult.map(g -> toView(g, repos, counts, List.of())));
+        return PagedResponse.fromPage(pageResult.map(g -> toView(g, repos, counts, locations, List.of())));
+    }
+
+    /** Distinct level-2 categories present in the feed scope, each with its group count (category filter). */
+    @Transactional(readOnly = true)
+    public List<CategoryCount> listCategories(UUID repositoryId, String view, boolean includeInactive) {
+        return groups.categoryCounts(WORKSPACE, repositoryId, statusesFor(view), includeInactive).stream()
+                .map(r -> new CategoryCount((String) r[0], ((Number) r[1]).longValue()))
+                .toList();
+    }
+
+    /** One distinct level-2 category and how many groups carry it (category filter option). */
+    public record CategoryCount(String category, long count) {
+    }
+
+    /** A blank/null search → no filter; otherwise a lower-cased {@code %term%} for a case-insensitive LIKE. */
+    private static String likeOrNull(String search) {
+        if (search == null || search.isBlank()) {
+            return null;
+        }
+        return "%" + search.trim().toLowerCase(java.util.Locale.ROOT) + "%";
     }
 
     /** Build a view with its open/ignored/solved sub-issue counts (0,0,0 when the group has no sub-issue). */
     private IssueGroupView toView(IssueGroup g, Map<UUID, Repository> repos, Map<UUID, long[]> counts,
-                                  List<String> fixedVersions) {
+                                  Map<UUID, Object[]> locations, List<String> fixedVersions) {
         long[] c = counts.getOrDefault(g.getId(), new long[3]);
         Repository repo = repos.get(g.getRepositoryId());
         String path = repo == null ? null : repo.getPathWithNamespace();
         String branch = repo == null ? null : repo.effectiveBranch();   // D-076: the branch this repo scans
-        return IssueGroupView.of(g, path, branch, c[0], c[1], c[2], fixedVersions);
+        Object[] loc = locations.get(g.getId());
+        String primaryLocation = loc == null ? null : (String) loc[1];
+        long locationCount = loc == null ? 0 : ((Number) loc[2]).longValue();
+        return IssueGroupView.of(g, path, branch, c[0], c[1], c[2], fixedVersions, primaryLocation, locationCount);
+    }
+
+    /** Per-group [primaryFilePath, distinctLocationCount] for a feed page, in one query (no N+1). */
+    private Map<UUID, Object[]> locationStats(List<IssueGroup> pageGroups) {
+        if (pageGroups.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> ids = pageGroups.stream().map(IssueGroup::getId).toList();
+        Map<UUID, Object[]> out = new HashMap<>();
+        for (Object[] row : subIssues.locationStatsByGroupIds(WORKSPACE, ids)) {
+            out.put((UUID) row[0], row);
+        }
+        return out;
     }
 
     /**
@@ -113,7 +158,7 @@ public class IssueService {
         // SF-7: the distinct fixed versions across this group's OPEN sub-issues (SQL, workspace-scoped, nulls
         // excluded). The panel renders "upgrade to <v>" for one, "see each location" for several, nothing for none.
         List<String> fixedVersions = subIssues.findOpenFixedVersions(WORKSPACE, groupId);
-        return toView(g, repoById(), findingCounts(List.of(g)), fixedVersions);
+        return toView(g, repoById(), findingCounts(List.of(g)), locationStats(List.of(g)), fixedVersions);
     }
 
     /** The Feed summary bar (OD-14 item 4): band group counts for the view + 7-day finding buckets (change 3). */

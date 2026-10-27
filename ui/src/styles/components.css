@@ -1453,3 +1453,72 @@ button.health-item {
   margin-bottom: var(--sp-4);
   font-size: var(--fs-sm);
 }
+
+/* ---------- M8.6: repo page tabs, coverage banner, issue-table cells ---------- */
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  margin: var(--sp-4) 0;
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.coverage-banner {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+.coverage-banner .coverage-icon {
+  font-size: 18px;
+  color: var(--warn);
+  margin-top: 2px;
+}
+.coverage-banner ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.settings-card {
+  padding: var(--sp-4);
+}
+.type-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.category-tag {
+  font-size: var(--fs-xs);
+}
+.location-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 280px;
+}

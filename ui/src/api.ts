@@ -94,6 +94,8 @@ export interface IssueGroupView {
   type: IssueType;
   title: string;
   subtitle: string | null;
+  level2Category: string | null;
+  owaspCategory: string | null;
   status: string;
   severityScore: number | null;
   fixTimeMinutes: number | null;
@@ -102,6 +104,8 @@ export interface IssueGroupView {
   ignoredCount: number;
   solvedCount: number;
   fixedVersions: string[];
+  primaryLocation: string | null;
+  locationCount: number;
 }
 
 export interface FeedSummaryView {
@@ -177,6 +181,26 @@ export interface ScanView {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string | null;
+  warningCount: number;
+}
+
+export interface ScanTaskView {
+  scanner: string;
+  status: string;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export interface ScanDetailView {
+  scan: ScanView;
+  toolVersions: Record<string, string>;
+  tasks: ScanTaskView[];
+  findingCount: number;
+}
+
+export interface CategoryCount {
+  category: string;
+  count: number;
 }
 
 export interface BranchView {
@@ -253,6 +277,7 @@ export interface FeedParams {
   repositoryId?: string;
   type?: IssueType;
   category?: string;
+  search?: string;
   view?: View;
   band?: Band;
   includeInactive?: boolean;
@@ -403,7 +428,7 @@ export const api = {
     request<RepositoryView>("PATCH", `/api/v1/repositories/${id}`, patch),
   startScan: (repositoryId: string) =>
     request<ScanView>("POST", `/api/v1/repositories/${repositoryId}/scans`),
-  getScan: (scanId: string) => request<{ scan: ScanView }>("GET", `/api/v1/scans/${scanId}`),
+  getScan: (scanId: string) => request<ScanDetailView>("GET", `/api/v1/scans/${scanId}`),
   listScanWarnings: (scanId: string, page: number, size: number) =>
     request<Paged<ScanWarningView>>("GET", `/api/v1/scans/${scanId}/warnings?page=${page}&size=${size}`),
   listScansAll: (page: number, size: number) =>
@@ -413,6 +438,11 @@ export const api = {
     request<Paged<IssueGroupView>>("GET", `/api/v1/issue-groups${feedQuery(p)}`),
   feedSummary: (p: FeedParams) =>
     request<FeedSummaryView>("GET", `/api/v1/issue-groups/summary${feedQuery(p, true)}`),
+  listIssueCategories: (repositoryId: string | undefined, view: View) =>
+    request<CategoryCount[]>(
+      "GET",
+      `/api/v1/issue-groups/categories?view=${view}${repositoryId ? `&repositoryId=${repositoryId}` : ""}`,
+    ),
   getGroup: (groupId: string) => request<IssueGroupView>("GET", `/api/v1/issue-groups/${groupId}`),
   listSubIssues: (groupId: string, page: number, size: number) =>
     request<Paged<SubIssueView>>(
@@ -467,6 +497,7 @@ function feedQuery(p: FeedParams, summary = false): string {
   if (p.repositoryId) q.set("repositoryId", p.repositoryId);
   if (p.type) q.set("type", p.type);
   if (p.category) q.set("category", p.category);
+  if (p.search) q.set("search", p.search);
   q.set("view", p.view ?? "focus");
   if (p.includeInactive) q.set("includeInactive", "true");
   if (!summary) {

@@ -14,14 +14,24 @@ public record IssueGroupView(UUID id, UUID repositoryId, String repositoryPath, 
                              String type, String title, String subtitle, String level2Category,
                              String owaspCategory, String status, Integer severityScore,
                              Integer fixTimeMinutes, Instant firstSeenAt, long openCount, long ignoredCount,
-                             long solvedCount, List<String> fixedVersions) {
+                             long solvedCount, List<String> fixedVersions, String primaryLocation,
+                             long locationCount) {
 
     public static IssueGroupView of(IssueGroup g, String repositoryPath, String repositoryBranch, long openCount,
                                     long ignoredCount, long solvedCount, List<String> fixedVersions) {
+        return of(g, repositoryPath, repositoryBranch, openCount, ignoredCount, solvedCount, fixedVersions,
+                null, 0);
+    }
+
+    /** With the M8.6 location summary: {@code primaryLocation} a representative file path and
+     *  {@code locationCount} the number of distinct file paths in the group (for "+N more"). */
+    public static IssueGroupView of(IssueGroup g, String repositoryPath, String repositoryBranch, long openCount,
+                                    long ignoredCount, long solvedCount, List<String> fixedVersions,
+                                    String primaryLocation, long locationCount) {
         return new IssueGroupView(g.getId(), g.getRepositoryId(), repositoryPath, repositoryBranch, g.getType(),
                 g.getTitle(), g.getSubtitle(), g.getLevel2Category(), g.getOwaspCategory(), g.getStatus(),
                 g.getSeverityScore(), g.getFixTimeMinutes(),
                 g.getFirstSeenAt(), openCount, ignoredCount, solvedCount,
-                fixedVersions == null ? List.of() : fixedVersions);
+                fixedVersions == null ? List.of() : fixedVersions, primaryLocation, locationCount);
     }
 }

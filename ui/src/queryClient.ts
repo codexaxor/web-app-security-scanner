@@ -41,6 +41,8 @@ export const qk = {
   dashboard: (includeInactive: boolean) => ["dashboard", includeInactive] as const,
   dashboardAll: ["dashboard"] as const,
   scansRecent: ["scans-recent"] as const,
+  scanDetail: (scanId: string) => ["scan-detail", scanId] as const,
+  issueCategories: (params: unknown) => ["issue-categories", params] as const,
   workspaceSettings: ["workspace-settings"] as const,
 };
 
