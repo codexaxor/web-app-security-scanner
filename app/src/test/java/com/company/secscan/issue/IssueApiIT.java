@@ -8,6 +8,8 @@ import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.issue.api.SubIssueView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.Scan;
+import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scoring.ScoreLine;
 import com.company.secscan.support.AbstractGitLabIT;
 import com.company.secscan.workspace.Workspace;
@@ -34,6 +36,8 @@ class IssueApiIT extends AbstractGitLabIT {
     RepositoryRepository repositories;
     @Autowired
     GitlabConnectionRepository connections;
+    @Autowired
+    ScanRepository scans;
     @Autowired
     ObjectMapper objectMapper;
 
@@ -111,6 +115,22 @@ class IssueApiIT extends AbstractGitLabIT {
         assertThat(cats).extracting(IssueService.CategoryCount::category)
                 .containsExactly("SQL injection", "Path traversal"); // ordered by count desc
         assertThat(cats.get(0).count()).isEqualTo(2);
+    }
+
+    @Test
+    void subIssueViewExposesSourceHostAndCommitForLinks() {
+        Repository repo = seedRepository(420L, "acme/linked"); // connection baseUrl "http://localhost"
+        Scan scan = scans.save(Scan.manual(WORKSPACE, repo.getId()));
+        scan.recordCommit("a".repeat(40));
+        scans.save(scan);
+        IssueGroup g = seedGroup(repo.getId(), "sast", "sast|rule", "Rule");
+        SubIssue s = new SubIssue(WORKSPACE, g.getId(), repo.getId(), "sast", "sast", "fp-link", scan.getId());
+        s.setFilePath("src/App.java");
+        subIssues.save(s);
+        SubIssueView view = service.listSubIssues(g.getId(), 0, 50).content().get(0);
+        // D-084: host = the connection's authority; commitSha = the last-seen scan's commit.
+        assertThat(view.host()).isEqualTo("localhost");
+        assertThat(view.commitSha()).isEqualTo("a".repeat(40));
     }
 
     @Test

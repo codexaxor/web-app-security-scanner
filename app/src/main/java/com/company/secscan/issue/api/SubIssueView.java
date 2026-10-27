@@ -30,22 +30,31 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
                            UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
                            boolean ruleGlobal, String level2Category, String owaspCategory,
-                           String advisorySummary) {
+                           String advisorySummary, String host, String commitSha) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
 
     /** Without a holding rule (auto-ignore causes carry no rule; the reason code is {@code ignoreReason}). */
     public static SubIssueView of(SubIssue s) {
-        return of(s, null);
+        return of(s, null, null, null);
+    }
+
+    public static SubIssueView of(SubIssue s, IgnoreRule rule) {
+        return of(s, rule, null, null);
     }
 
     /**
      * {@code rule} is the manual/.secscan.yml rule holding this finding ignored (from {@code ignored_by_rule_id}),
      * or null for an auto-ignore cause or an open/solved finding (OD-14 item 6). The rule fields drive the
      * panel's "ignored by rule / scope / reason / creator" block and the unignore-vs-409-vs-auto-cause logic.
+     *
+     * <p>M8.6 (D-084): {@code host} is the repository's source-host authority (host[:port]) and {@code commitSha}
+     * the commit this finding was last seen at — the only data, with the stored project path and file path, from
+     * which the UI builds a file/commit deep link. Both may be null (e.g. a detached repo), in which case no link
+     * is rendered.
      */
-    public static SubIssueView of(SubIssue s, IgnoreRule rule) {
+    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha) {
         Integer score = s.getScore();
         String cwePhrase = CweDictionary.getInstance().phrase(s.getCwe(), s.getAdvisorySummary());
         String epssAttribution = s.getEpss() != null ? EPSS_ATTRIBUTION : null;
@@ -66,6 +75,6 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getCreatedBy(),
                 // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
                 rule != null && rule.getRepositoryId() == null,
-                cat.level2(), cat.owasp(), s.getAdvisorySummary());
+                cat.level2(), cat.owasp(), s.getAdvisorySummary(), host, commitSha);
     }
 }

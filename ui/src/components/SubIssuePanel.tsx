@@ -5,6 +5,8 @@ import { invalidateFor, qk } from "../queryClient";
 import { advisoryLink, bandOf, titleCase, type BandName } from "../lib/format";
 import { humanizeRuleId, reasonLabel, typeLabel } from "../lib/labels";
 import { issueFix, issueSummary } from "../lib/issueText";
+import { secretFixGuidance } from "../lib/secretGuidance";
+import { sourceCommitLink, sourceFileLink } from "../lib/sourceLink";
 import RelativeTime from "./RelativeTime";
 import ErrorBanner from "./ErrorBanner";
 import IgnoreDialog from "./IgnoreDialog";
@@ -85,7 +87,12 @@ export default function SubIssuePanel({
   const affected = q.data?.totalElements ?? subs.length;
 
   const summary = g ? issueSummary(g, subs) : null;
-  const fix = g ? issueFix(g, subs) : null;
+  // For secrets the fix guidance is category-specific (D-084 item 6); other types use the generic generator.
+  const fix = g
+    ? g.type === "secret"
+      ? secretFixGuidance(subs[0]?.level2Category ?? null)
+      : issueFix(g, subs)
+    : null;
   // Stored advisory text (sub_issue.advisory_summary). Hidden when it merely repeats the title (e.g. IaC, where
   // it carries the Checkov check_name that is already the title).
   const advisory = subs.find((s) => s.advisorySummary)?.advisorySummary ?? null;
@@ -216,7 +223,7 @@ export default function SubIssuePanel({
               <span className="muted"> · {locSubs.length}</span>
             </div>
             {locSubs.map((s) => (
-              <LocationCard key={s.id} sub={s} groupId={groupId} />
+              <LocationCard key={s.id} sub={s} groupId={groupId} projectPath={g?.repositoryPath ?? null} />
             ))}
           </div>
         ))}
@@ -247,7 +254,15 @@ function groupByLocation(subs: SubIssueView[]): [string, SubIssueView[]][] {
   return Array.from(map.entries());
 }
 
-function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) {
+function LocationCard({
+  sub,
+  groupId,
+  projectPath,
+}: {
+  sub: SubIssueView;
+  groupId: string;
+  projectPath: string | null;
+}) {
   const [showIgnore, setShowIgnore] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
@@ -265,6 +280,11 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
   const isSecscanYml = sub.ruleCreatedBy === "secscan.yml";
   const heldByRule = sub.ignoreRuleId != null;
   const idLabel = sub.vulnId ?? sub.ruleId ?? sub.packageName ?? sub.type;
+
+  // D-084: file + commit deep links, built only from the stored host/project/commit/path/line (never data).
+  const ref = { host: sub.host, projectPath, commitSha: sub.commitSha };
+  const fileLink = sub.filePath ? sourceFileLink(ref, sub.filePath, sub.line) : null;
+  const commitLink = sourceCommitLink(ref);
 
   return (
     <div className="location" data-testid="subissue">
@@ -344,6 +364,21 @@ function LocationCard({ sub, groupId }: { sub: SubIssueView; groupId: string }) 
             </ul>
           ) : null}
         </>
+      ) : null}
+
+      {fileLink || commitLink ? (
+        <div className="source-links" data-testid="source-links">
+          {fileLink ? (
+            <a href={fileLink} target="_blank" rel="noopener noreferrer" data-testid="open-file-link">
+              <Icon name="external" /> Open file at scanned commit
+            </a>
+          ) : null}
+          {commitLink ? (
+            <a href={commitLink} target="_blank" rel="noopener noreferrer" data-testid="view-commit-link">
+              <Icon name="external" /> View commit
+            </a>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="location-actions">

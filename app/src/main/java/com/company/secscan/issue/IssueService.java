@@ -46,16 +46,19 @@ public class IssueService {
     private final IgnoreRuleRepository ignoreRules;
     private final RepositoryRepository repositories;
     private final com.company.secscan.scan.ScanRepository scans;
+    private final com.company.secscan.gitlab.GitlabConnectionRepository connections;
 
     public IssueService(IssueGroupRepository groups, SubIssueRepository subIssues,
                         TriageEventRepository triageEvents, IgnoreRuleRepository ignoreRules,
-                        RepositoryRepository repositories, com.company.secscan.scan.ScanRepository scans) {
+                        RepositoryRepository repositories, com.company.secscan.scan.ScanRepository scans,
+                        com.company.secscan.gitlab.GitlabConnectionRepository connections) {
         this.groups = groups;
         this.subIssues = subIssues;
         this.triageEvents = triageEvents;
         this.ignoreRules = ignoreRules;
         this.repositories = repositories;
         this.scans = scans;
+        this.connections = connections;
     }
 
     /** The Feed (OD-14 item 3): view (focus/all), optional band, type and repository filters, includeInactive. */
@@ -188,13 +191,58 @@ public class IssueService {
     /** One group's sub-issues, with the holding ignore rule's fields populated (OD-14 item 6). 404 if not in ws. */
     @Transactional(readOnly = true)
     public PagedResponse<SubIssueView> listSubIssues(UUID groupId, int page, int size) {
-        groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
+        IssueGroup grp = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
         var pageResult = subIssues.findByWorkspaceIdAndGroupId(WORKSPACE, groupId,
                 PageRequest.of(Math.max(0, page), Math.max(1, size)));
         Map<UUID, IgnoreRule> rules = rulesFor(pageResult.getContent());
+        // D-084: host (from the repo's connection) + per-finding commit (from its last-seen scan) are the only
+        // inputs, with the stored project path, the UI uses to build a file/commit deep link. Both may be null.
+        String host = sourceHostOf(grp.getRepositoryId());
+        Map<UUID, String> commitByScan = commitShas(pageResult.getContent());
         return PagedResponse.fromPage(pageResult.map(s ->
-                SubIssueView.of(s, s.getIgnoredByRuleId() == null ? null : rules.get(s.getIgnoredByRuleId()))));
+                SubIssueView.of(s, s.getIgnoredByRuleId() == null ? null : rules.get(s.getIgnoredByRuleId()),
+                        host, s.getLastSeenScanId() == null ? null : commitByScan.get(s.getLastSeenScanId()))));
+    }
+
+    /** The source-host authority (host[:port]) of a repository's connection, or null if detached/unparseable. */
+    private String sourceHostOf(UUID repositoryId) {
+        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE).orElse(null);
+        if (repo == null || repo.getConnectionId() == null) {
+            return null;
+        }
+        var conn = connections.findByIdAndWorkspaceId(repo.getConnectionId(), WORKSPACE).orElse(null);
+        return conn == null ? null : authority(conn.getBaseUrl());
+    }
+
+    private static String authority(String baseUrl) {
+        if (baseUrl == null) {
+            return null;
+        }
+        try {
+            java.net.URI u = java.net.URI.create(baseUrl);
+            String h = u.getHost();
+            if (h == null) {
+                return null;
+            }
+            return u.getPort() == -1 ? h : h + ":" + u.getPort();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** The commit SHA of each sub-issue's last-seen scan, keyed by scan id (workspace-scoped). */
+    private Map<UUID, String> commitShas(List<SubIssue> subs) {
+        List<UUID> scanIds = subs.stream().map(SubIssue::getLastSeenScanId).filter(Objects::nonNull).distinct()
+                .toList();
+        if (scanIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> out = new HashMap<>();
+        for (var scan : scans.findByWorkspaceIdAndIdIn(WORKSPACE, scanIds)) {
+            out.put(scan.getId(), scan.getCommitSha());
+        }
+        return out;
     }
 
     /** One sub-issue's status history, newest first (OD-14 item 5). 404 if the sub-issue is not in this workspace. */

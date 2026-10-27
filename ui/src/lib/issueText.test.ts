@@ -67,6 +67,8 @@ function sub(p: Partial<SubIssueView>): SubIssueView {
     level2Category: null,
     owaspCategory: null,
     advisorySummary: null,
+    host: null,
+    commitSha: null,
     ...p,
   };
 }

@@ -161,6 +161,8 @@ export interface SubIssueView {
   level2Category: string | null;
   owaspCategory: string | null;
   advisorySummary: string | null;
+  host: string | null;
+  commitSha: string | null;
 }
 
 export interface TriageEventView {
