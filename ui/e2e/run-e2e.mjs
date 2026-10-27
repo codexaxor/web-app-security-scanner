@@ -111,6 +111,11 @@ async function main() {
 
     // The Playwright container runs as the HOST user (see --user below) so it writes this bind-mounted artifacts
     // dir as its OWNER — the dir is therefore NOT world-writable (M8.5 housekeeping; was 0o707 = others rwx).
+    // Wipe any leftover artifacts first (a one-shot root container, since older runs created files owned by the
+    // image's pwuser (uid 1001) that the host user cannot delete); the host-uid run then starts from a clean,
+    // non-world-writable dir and only ever writes files owned by the host user.
+    run("docker", ["run", "--rm", "--user", "0", "-v", `${ARTIFACTS}:/artifacts`, PW_IMAGE,
+      "bash", "-c", "rm -rf /artifacts/* /artifacts/.[!.]* 2>/dev/null || true"], { allowFail: true });
     chmodSync(ARTIFACTS, 0o755);
 
     console.log("[e2e] running Playwright (in Docker)");
