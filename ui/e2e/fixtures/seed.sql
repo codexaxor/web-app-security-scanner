@@ -94,6 +94,16 @@ select gen_random_uuid(), ig.workspace_id, ig.id, ig.repository_id, ig.type, ig.
 from issue_group ig
 where ig.workspace_id = '00000000-0000-0000-0000-000000000001' and ig.group_key like 'bulk|%';
 
+-- M8.6 item 9: give some OPEN bulk groups (active repo → focus scope) a level-2 category so the Feed category
+-- filter has focus-scope data to narrow. Value-only (no new rows, no status/count change), so every existing
+-- count oracle — including core-keycloak's "64 groups" — is unaffected. Two categories keyed off the
+-- round-robin type: sast bulk → "Injection" (13 groups), sca bulk → "Vulnerable dependency" (12). The other
+-- open groups keep a null level2_category, so a category filter returns exactly its own subset.
+update issue_group set level2_category = 'Injection'
+ where workspace_id = '00000000-0000-0000-0000-000000000001' and group_key like 'bulk|%' and type = 'sast';
+update issue_group set level2_category = 'Vulnerable dependency'
+ where workspace_id = '00000000-0000-0000-0000-000000000001' and group_key like 'bulk|%' and type = 'sca';
+
 -- A KEV + EPSS SCA finding (ib-api-v2): band Critical, attribution shown, KEV badge.
 insert into issue_group (id, workspace_id, repository_id, type, group_key, title, subtitle, status,
                          severity_score, fix_time_minutes, first_seen_at)
