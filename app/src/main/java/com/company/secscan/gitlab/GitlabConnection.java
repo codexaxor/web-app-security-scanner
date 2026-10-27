@@ -134,6 +134,35 @@ public class GitlabConnection {
         return c;
     }
 
+    /** A GitHub owner (user/org) connection: all repositories the fine-grained PAT can see under that owner. */
+    public static GitlabConnection forGitHubOwner(UUID workspaceId, String baseUrl, String ownerLogin,
+                                                  String tokenCiphertext, String tokenScopes,
+                                                  LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_OWNER, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.provider = PROVIDER_GITHUB;
+        c.ownerLogin = ownerLogin;
+        return c;
+    }
+
+    /**
+     * A single-repository connection: a GitHub repo (token) or a public repo on any provider (credentialKind
+     * {@code none}, no token). providerRepoId is the provider's stable numeric id (as text); repoFullName the
+     * owner/name display path.
+     */
+    public static GitlabConnection forSingleRepo(UUID workspaceId, String baseUrl, String provider,
+                                                 String credentialKind, String providerRepoId, String repoFullName,
+                                                 String tokenCiphertext, String tokenScopes,
+                                                 LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_REPO, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.provider = provider;
+        c.credentialKind = credentialKind;
+        c.providerRepoId = providerRepoId;
+        c.repoFullName = repoFullName;
+        return c;
+    }
+
     /** Rotates the stored token (same target). Marks the connection freshly verified. */
     public void updateToken(String baseUrl, String tokenCiphertext, String tokenScopes, LocalDate tokenExpiresAt) {
         this.baseUrl = baseUrl;

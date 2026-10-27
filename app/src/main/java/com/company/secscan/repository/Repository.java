@@ -50,7 +50,7 @@ public class Repository {
 
     // The GitLab project id (null for GitHub rows). Kept for GitLab display / API calls; no longer the identity.
     @Column(name = "gitlab_project_id")
-    private long gitlabProjectId;
+    private Long gitlabProjectId;
 
     @Column(name = "path_with_namespace", nullable = false)
     private String pathWithNamespace;
@@ -104,11 +104,28 @@ public class Repository {
      */
     public Repository(UUID workspaceId, UUID connectionId, long gitlabProjectId, String pathWithNamespace,
                       String defaultBranch, List<String> languages) {
+        this(workspaceId, connectionId, "gitlab", gitlabProjectId, Long.toString(gitlabProjectId),
+                pathWithNamespace, defaultBranch, languages);
+    }
+
+    /**
+     * A GitHub repository: identity is GitHub's stable numeric repository id (as text); gitlab_project_id is null;
+     * fullName is the owner/name display path. host is filled by the V22 trigger from the connection.
+     */
+    public static Repository github(UUID workspaceId, UUID connectionId, long githubRepoId, String fullName,
+                                    String defaultBranch, List<String> languages) {
+        return new Repository(workspaceId, connectionId, "github", null, Long.toString(githubRepoId), fullName,
+                defaultBranch, languages);
+    }
+
+    private Repository(UUID workspaceId, UUID connectionId, String provider, Long gitlabProjectId,
+                       String providerRepoId, String pathWithNamespace, String defaultBranch,
+                       List<String> languages) {
         this.workspaceId = workspaceId;
         this.connectionId = connectionId;
+        this.provider = provider;
         this.gitlabProjectId = gitlabProjectId;
-        this.provider = "gitlab";
-        this.providerRepoId = Long.toString(gitlabProjectId);
+        this.providerRepoId = providerRepoId;
         this.pathWithNamespace = pathWithNamespace;
         this.defaultBranch = defaultBranch;
         this.languages = languages == null ? new ArrayList<>() : new ArrayList<>(languages);
@@ -237,7 +254,8 @@ public class Repository {
         return connectionId;
     }
 
-    public long getGitlabProjectId() {
+    /** The GitLab project id, or null for a GitHub repository. */
+    public Long getGitlabProjectId() {
         return gitlabProjectId;
     }
 

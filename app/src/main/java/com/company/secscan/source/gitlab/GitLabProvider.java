@@ -141,7 +141,7 @@ public class GitLabProvider implements SourceProvider {
     }
 
     /** Maps a GitLab error category to the provider-neutral one (transient flags preserved). */
-    static ProviderError toProviderError(GitLabException e) {
+    public static ProviderError toProviderError(GitLabException e) {
         return switch (e.getError()) {
             case INVALID_TOKEN, TOKEN_EXPIRED -> ProviderError.INVALID_CREDENTIAL;
             case MISSING_SCOPES -> ProviderError.FORBIDDEN;

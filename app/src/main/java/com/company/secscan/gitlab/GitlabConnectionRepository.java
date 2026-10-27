@@ -21,4 +21,10 @@ public interface GitlabConnectionRepository extends JpaRepository<GitlabConnecti
 
     Optional<GitlabConnection> findByWorkspaceIdAndProviderAndHostAndGitlabProjectId(
             UUID workspaceId, String provider, String host, long gitlabProjectId);
+
+    Optional<GitlabConnection> findByWorkspaceIdAndProviderAndHostAndOwnerLogin(
+            UUID workspaceId, String provider, String host, String ownerLogin);
+
+    Optional<GitlabConnection> findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+            UUID workspaceId, String provider, String host, String providerRepoId);
 }

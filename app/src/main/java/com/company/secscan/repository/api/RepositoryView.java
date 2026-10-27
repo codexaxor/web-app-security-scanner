@@ -15,7 +15,10 @@ import java.util.UUID;
  */
 public record RepositoryView(
         UUID id,
-        long gitlabProjectId,
+        Long gitlabProjectId,
+        String provider,
+        String host,
+        String providerRepoId,
         String pathWithNamespace,
         String defaultBranch,
         String scanBranch,
@@ -46,7 +49,8 @@ public record RepositoryView(
     }
 
     public static RepositoryView of(Repository r, GitlabConnection connection, RepositorySummary summary) {
-        return new RepositoryView(r.getId(), r.getGitlabProjectId(), r.getPathWithNamespace(),
+        return new RepositoryView(r.getId(), r.getGitlabProjectId(), r.getProvider(), r.getHost(),
+                r.getProviderRepoId(), r.getPathWithNamespace(),
                 r.getDefaultBranch(), r.getScanBranch(), r.effectiveBranch(), r.isBranchMissing(),
                 r.getLanguages(), r.isActive(), r.getSensitivity(), r.isIncludeDevDeps(),
                 r.getConnectionId(),

@@ -210,10 +210,12 @@ public class GitLabConnectionService {
         List<GitlabConnection> others = allOthers.stream()
                 .filter(c -> repo.getHost() != null && repo.getHost().equals(c.getHost()))
                 .toList();
-        // 1. A project-mode connection targeting the same project id (most recently verified wins a tie).
+        // 1. A single-repo connection targeting the same repository id (most recently verified wins a tie).
+        //    Match by provider_repo_id (the identity component) so it works for GitLab and GitHub alike.
         Optional<GitlabConnection> sameProject = others.stream()
                 .filter(GitlabConnection::isProject)
-                .filter(c -> c.getGitlabProjectId() != null && c.getGitlabProjectId() == repo.getGitlabProjectId())
+                .filter(c -> c.getProviderRepoId() != null
+                        && c.getProviderRepoId().equals(repo.getProviderRepoId()))
                 .max(byVerified());
         if (sameProject.isPresent()) {
             return sameProject;
