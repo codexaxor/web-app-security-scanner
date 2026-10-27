@@ -57,6 +57,7 @@ public class RepositoryService {
     private final RepositoryUpserter upserter;
     private final TokenCipherHolder cipher;
     private final RepositorySummaryService summaries;
+    private final com.company.secscan.source.ProviderRegistry providers;
     // api-only bean (@Profile("api")); injected via a provider so the worker, which also creates this service,
     // starts without it. patch() runs only from the api controller, where the provider resolves.
     private final org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore;
@@ -66,6 +67,7 @@ public class RepositoryService {
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
                              RepositoryUpserter upserter, TokenCipherHolder cipher,
                              RepositorySummaryService summaries,
+                             com.company.secscan.source.ProviderRegistry providers,
                              org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore,
                              PlatformTransactionManager txManager) {
         this.client = client;
@@ -75,8 +77,64 @@ public class RepositoryService {
         this.upserter = upserter;
         this.cipher = cipher;
         this.summaries = summaries;
+        this.providers = providers;
         this.reScore = reScore;
         this.txTemplate = new TransactionTemplate(txManager);
+    }
+
+    /** A provider-neutral descriptor of the connection's target, for the adapters (M8.7). */
+    private static com.company.secscan.source.SourceConnectionRef refOf(GitlabConnection c) {
+        return new com.company.secscan.source.SourceConnectionRef(c.getProvider(), c.getBaseUrl(), c.getHost(),
+                c.getTargetType(), c.targetId(), c.targetPath(), c.getOwnerLogin(), c.getProviderRepoId(),
+                c.getRepoFullName());
+    }
+
+    /** The decrypted token, or null for a public (credential_kind none) connection. */
+    private String tokenFor(GitlabConnection conn) {
+        return GitlabConnection.CREDENTIAL_NONE.equals(conn.getCredentialKind())
+                ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+    }
+
+    /**
+     * Provider-neutral listing of a connection's selectable repositories (GitHub owner / single repo / public),
+     * server-side paginated/searched via the provider adapter. Workspace-scoped (the connection is).
+     */
+    public PagedResponse<com.company.secscan.source.SourceRepo> listSourceRepositories(
+            UUID connectionId, String search, int page, int size) {
+        GitlabConnection conn = requireConnection(connectionId);
+        com.company.secscan.source.SourcePage<com.company.secscan.source.SourceRepo> p =
+                providers.require(conn.getProvider()).listRepositories(refOf(conn), tokenFor(conn), search, page, size);
+        return new PagedResponse<>(p.items(), page, size, p.totalElements(), p.totalPages());
+    }
+
+    /**
+     * Provider-neutral selection (GitHub / public): resolves each repository by the provider's id and upserts a
+     * {@link Repository} with provider-neutral identity. GitLab keeps its own {@link #select} path.
+     */
+    public List<RepositoryView> selectSource(UUID connectionId, List<String> providerRepoIds) {
+        GitlabConnection conn = requireConnection(connectionId);
+        String provider = conn.getProvider();
+        String host = conn.getHost();
+        String token = tokenFor(conn);
+        com.company.secscan.source.SourceProvider adapter = providers.require(provider);
+        List<RepositoryView> result = new ArrayList<>();
+        for (String id : new java.util.LinkedHashSet<>(providerRepoIds)) {
+            com.company.secscan.source.SourceRepo r = adapter.getRepository(conn.getBaseUrl(), token, id);
+            if (!r.selectable()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        r.fullName() + ": " + r.notSelectableReason());
+            }
+            Repository repo;
+            try {
+                repo = upserter.upsertSource(conn.getId(), provider, host, id, r.fullName(), r.defaultBranch(),
+                        List.of());
+            } catch (DataIntegrityViolationException race) {
+                repo = upserter.reattachSource(conn.getId(), provider, host, id, r.fullName(), r.defaultBranch(),
+                        List.of());
+            }
+            result.add(RepositoryView.of(repo, conn));
+        }
+        return result;
     }
 
     /**

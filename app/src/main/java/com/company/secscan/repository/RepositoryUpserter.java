@@ -59,6 +59,42 @@ class RepositoryUpserter {
         return applyAndSave(r, connectionId, pathWithNamespace, defaultBranch, languages);
     }
 
+    /**
+     * Provider-neutral upsert (GitHub / public). Identity is (workspace, provider, host, provider_repo_id);
+     * inserts a GitLab or GitHub row accordingly (host filled by the V22 trigger from the connection). Race on
+     * the identity index surfaces as {@code DataIntegrityViolationException} for the caller to {@link
+     * #reattachSource reattach}.
+     */
+    @Transactional
+    public Repository upsertSource(UUID connectionId, String provider, String host, String providerRepoId,
+                                   String fullName, String defaultBranch, List<String> languages) {
+        return repositories.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+                        WORKSPACE, provider, host, providerRepoId)
+                .map(r -> applyAndSave(r, connectionId, fullName, defaultBranch, languages))
+                .orElseGet(() -> repositories.saveAndFlush(newRow(connectionId, provider, providerRepoId, fullName,
+                        defaultBranch, languages)));
+    }
+
+    @Transactional
+    public Repository reattachSource(UUID connectionId, String provider, String host, String providerRepoId,
+                                     String fullName, String defaultBranch, List<String> languages) {
+        Repository r = repositories.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
+                        WORKSPACE, provider, host, providerRepoId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Repository " + provider + ":" + providerRepoId + " disappeared after a concurrent insert."));
+        return applyAndSave(r, connectionId, fullName, defaultBranch, languages);
+    }
+
+    private static Repository newRow(UUID connectionId, String provider, String providerRepoId, String fullName,
+                                     String defaultBranch, List<String> languages) {
+        if ("github".equals(provider)) {
+            return Repository.github(WORKSPACE, connectionId, Long.parseLong(providerRepoId), fullName,
+                    defaultBranch, languages);
+        }
+        return new Repository(WORKSPACE, connectionId, Long.parseLong(providerRepoId), fullName, defaultBranch,
+                languages);
+    }
+
     private Repository applyAndSave(Repository r, UUID connectionId, String pathWithNamespace,
                                     String defaultBranch, List<String> languages) {
         if (r.getConnectionId() == null || !r.isActive()) {
