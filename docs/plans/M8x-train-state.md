@@ -1,10 +1,10 @@
 # M8.x train state
 - Train plan approved: yes (2026-10-27) — with binding changes appended to M8x-train-brief.md "Approved plan changes (2026-10-27)"
-- Current milestone: M8.7 (in progress); M8.6 DONE + pre-check gap fixed (category-filter E2E, commit d6d5269)
-- Current slice: V5 DONE (host policy + D-089); M8.7 PAUSED after V5 — foundation complete, integration half remains
-- Branch / last green commit: feature/m8.7-multi-source @ b624e81 (stacked on feature/m8.6-ui-uplift @ d6d5269)
-- Last gate results: G1 app 411 / core 179 / 0 failures (V5) | G2 (M8.6 pre-check) vitest 79 + guard 64 | G3 e2e 90 ×2
-- HARD STOP: none (everything committed is green). M8.7 is NOT finished — paused at a clean boundary (V0–V5 done).
+- Current milestone: done — TRAIN DONE (M8.5 → M8.6 → M8.7 all built & green). M8.6 pre-check gap fixed (d6d5269).
+- Current slice: M8.7 DONE (V0–V9 complete + finish)
+- Branch / last green commit: feature/m8.7-multi-source @ 72e0b14 (stacked on feature/m8.6-ui-uplift @ d6d5269)
+- Last gate results: G1 clean build app 427 / core 179 / 0 failures | G2 vitest 87 + guard 67 | G3 e2e 92 ×2
+- HARD STOP: none. Train done; next: /review-pr per milestone (fresh sessions), then human merges m8.5 → m8.6 → m8.7.
 - Done so far: V0 (SQL+decisions), V1 (V22 migration + MigrationV22IT, 7 ITs), V2 (SourceProvider contract +
   HttpErrors), V3 (GitLab adapter + provider-neutral identity + CrossHostIdentityIT), V4 (GitHub adapter +
   GitHubProviderIT, 11), V5 (host policy built-in-SaaS default-on + retire D-085 → D-089). Both provider adapters
@@ -49,8 +49,8 @@ and the V22 schema are ready to wire in.
 - HARD STOP: none
 - D-drafts so far (M8.7): (V1) repository identity columns filled on insert by a DB trigger as a compatibility
   shim; entities map/set them in V3/V4. In docs/reports/M8.7-worklog.md.
-- Next action: continue M8.7 Phase B — V2 provider adapter contract, V3 GitLab adapter + entity/service
-  generalization + collision IT, V4 GitHub adapter (WireMock), V5 public repos, V6 host policy (+ retire D-085
-  restriction), V7 scanner/worker, V8 UI Sources + sourceLink GitHub shapes, V9 tests + finish. Per
-  docs/plans/M8x-train-brief.md "M8.7" + approval items 11–17 and docs/reports/M8.7-worklog.md slice plan.
-  Pending manual walkthroughs for the whole train run at the end. Not merged to develop (human merges in order).
+- Next action: **train done; next: /review-pr per milestone**. Run `/review-pr M8.5`, `/review-pr M8.6`,
+  `/review-pr M8.7` in fresh sessions; a fix to an earlier branch is committed there and MERGED FORWARD (git
+  merge, never rebase/force-push) into the later branches; the human then merges m8.5 → m8.6 → m8.7 into
+  develop/main in order. Pending manual walkthroughs for the whole train are listed in docs/reports/M8.5.md,
+  M8.6.md and M8.7.md (ib-api-v2 onboarded then, D-083); they run at the end of the train.
