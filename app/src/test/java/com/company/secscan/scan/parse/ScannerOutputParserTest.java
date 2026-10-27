@@ -583,6 +583,10 @@ class ScannerOutputParserTest {
         Path err = outDir.resolve("err.json");
         java.nio.file.Files.writeString(err, "{\"languages\":[],\"status\":\"error\"}");
         assertThat(parser.readLanguages(err)).isEmpty();
+        // N-4: a non-"ok" status is honoured even when the array is non-empty — the stored languages are kept.
+        Path stale = outDir.resolve("stale.json");
+        java.nio.file.Files.writeString(stale, "{\"languages\":[\"Java\"],\"status\":\"error\"}");
+        assertThat(parser.readLanguages(stale)).isEmpty();
     }
 
     @org.junit.jupiter.api.Test

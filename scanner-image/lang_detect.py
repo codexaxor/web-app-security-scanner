@@ -52,12 +52,12 @@ EXT_LANG = {
     ".sh": "Shell", ".bash": "Shell",
     ".ps1": "PowerShell",
     ".ftl": "FreeMarker", ".ftlh": "FreeMarker",
-    ".sql": "SQL",
     ".swift": "Swift",
     ".tf": "HCL", ".hcl": "HCL",
-    ".yaml": "YAML", ".yml": "YAML",
-    ".xml": "XML",
 }
+# S-5: data/markup formats (YAML, XML, JSON, SQL, Markdown, CSV, .properties/.ini/.toml) are intentionally NOT
+# counted as languages, so the repository's reported languages match what GitLab shows (programming languages,
+# not config/data). HCL stays (an IaC language, surfaced alongside Terraform findings).
 
 
 def _language_of(name):

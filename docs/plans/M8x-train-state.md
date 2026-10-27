@@ -7,10 +7,10 @@
 - HARD STOP: none. Train done; next: /review-pr per milestone (fresh sessions), then human merges m8.5 → m8.6 → m8.7.
 - Done so far: V0 (SQL+decisions), V1 (V22 migration + MigrationV22IT, 7 ITs), V2 (SourceProvider contract +
   HttpErrors), V3 (GitLab adapter + provider-neutral identity + CrossHostIdentityIT), V4 (GitHub adapter +
-  GitHubProviderIT, 11), V5 (host policy built-in-SaaS default-on + retire D-085 → D-089). Both provider adapters
+  GitHubProviderIT, 11), V5 (host policy built-in-SaaS default-on + retire D-085 → D-090). Both provider adapters
   complete with full error/rate-limit/redirect/token-safety coverage; identity = (workspace, provider, host,
   provider_repo_id) live in the GitLab path.
-- D-entries added: D-089 (host policy + D-085 retired). D-drafts: (V1) repository identity columns filled on
+- D-entries added: D-090 (host policy + D-085 retired). D-drafts: (V1) repository identity columns filled on
   insert by a DB trigger (compatibility shim); documented in M8.7-worklog.md.
 
 ### REMAINING for M8.7 (V6–V9) — precise handoff

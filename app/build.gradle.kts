@@ -201,7 +201,29 @@ val branchVectorsInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-081 gate (M8.5, review N-5): the language detector's filesystem-sensitive cases (symlink-out not followed,
+// vendored dirs skipped, empty repo) run INSIDE the built scanner image against the SHIPPED lang_detect.py, so
+// os.walk/islink/realpath behaviour is proven on the real container runtime, not only the host. Runs as
+// --user 0 for a logic-only check (like branchVectorsInImageTest); the production USER 10001 is unchanged.
+val langDetectInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the language detector's filesystem tests inside the scanner image (M8.5, D-081, N-5)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("lang_detect.py")).withPropertyName("langDetect")
+    inputs.file(scannerDir.resolve("lang_detect_in_image_test.py")).withPropertyName("langDetectInImageTest")
+    val marker = layout.buildDirectory.file("lang-detect-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/lang_detect_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
-        branchVectorsInImageTest)
+        branchVectorsInImageTest, langDetectInImageTest)
 }

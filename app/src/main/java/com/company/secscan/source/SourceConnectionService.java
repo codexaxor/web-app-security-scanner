@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
  * and public repositories (by URL, anonymous), persisting {@code gitlab_connection} rows with the right
  * provider / credential_kind / target / identity (V22, D-080/D-085). GitLab connections keep their own service
  * (group/project listing). Tokens are encrypted at rest and never logged (D-014). Every host is checked against
- * the allowlist (D-018/D-089) before any network call.
+ * the allowlist (D-018/D-090) before any network call.
  */
 @Service
 public class SourceConnectionService {

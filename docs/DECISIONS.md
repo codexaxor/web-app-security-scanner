@@ -14,7 +14,9 @@ Consequences: what this implies / what we gave up.
 
 ---
 
-## D-089 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
+## D-090 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
+(Renumbered from D-089 at the m8.6→m8.7 train merge: D-089 was already taken by the M8.5 review-fix decision,
+which merges to develop first; this M8.7 decision, merging last, takes the next free number.)
 Context: M8.7 ships the provider-neutral connection/identity model (V22), so a workspace may hold GitLab
 (self-managed + gitlab.com), GitHub and public repositories. D-085 had forbidden adding a second GitLab host
 until M8.7 shipped (identity was the bare GitLab project id); V22 makes identity = workspace + provider + host +
@@ -30,6 +32,23 @@ Decision:
 Consequences: gitlab.com and github.com work out of the box; an operator can still lock egress to self-managed
 hosts only. `GitLabHostPolicy` keeps its name for now (it is the shared source-host allowlist); a rename is
 cosmetic and deferred.
+
+## D-089 M8.5 review fixes — same-branch orphan close + language scope (2026-10-27, accepted)
+Context: the /review-pr M8.5 round (D-086 train) found that the OD-19 ignored-orphan handling only fired on a
+branch switch, so a finding that genuinely disappears on the SAME branch (e.g. a SAST snippet shift) left a
+stale ignored row to accumulate; and that the static language detector counted data/markup formats as languages.
+Decision (refinement of D-083 / D-081, not a new rule):
+ - Reconcile closes a stale ignored orphan the moment it disappears on ANY authoritative scan of the tracked
+   branch (re-derivable hold, scanner succeeded + authoritative, fingerprint absent, not a frozen identity, not
+   a sub-issue-scope manual ignore): reason BRANCH_CHANGED when the scanner is re-baselining, else
+   SOLVED_NOT_DETECTED. The OD-19 one-off retire pass is therefore only a retroactive cleanup of orphans that
+   accumulated before this shipped; its ITs seed that legacy state directly. Domain rule 3 is unchanged (a
+   failed/non-authoritative scanner still closes nothing; a superseded secret key id / uncovered EOL is frozen).
+ - `lang_detect.py` counts only programming languages; data/markup formats (YAML, XML, JSON, SQL, Markdown,
+   CSV, .properties/.ini/.toml) are not reported, so `repository.languages` matches GitLab's language set
+   (HCL kept). A detection failure still never fails the scan and never clears stored languages.
+Consequences: no migration, no fingerprint change, no API contract change. Status still changes only through
+reconcile and the D-063 carve-outs, each with a triage_event.
 
 ## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
 Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure

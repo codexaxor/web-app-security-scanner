@@ -202,6 +202,20 @@ public class SubIssue {
     }
 
     /**
+     * Transitions an <em>ignored</em> finding to {@code solved} (OD-19: absent on an authoritative scan, a
+     * re-derivable hold — reconcile branch-switch and the one-off retire pass), CLEARING the ignore markers
+     * ({@code ignore_reason}, {@code ignored_by_rule_id}, {@code ignored_at}) so a solved row never carries a
+     * stale reason/rule (B-2). The caller writes the {@code triage_event} (BRANCH_CHANGED or SOLVED_NOT_DETECTED).
+     */
+    public void solveIgnored() {
+        this.status = STATUS_SOLVED;
+        this.solvedAt = Instant.now();
+        this.ignoreReason = null;
+        this.ignoredByRuleId = null;
+        this.ignoredAt = null;
+    }
+
+    /**
      * Moves the finding to {@code ignored} (M7, domain rule 2: status changes only through reconcile, each with a
      * triage_event written by the caller). {@code reasonCode} is one of the triage reason codes; {@code ruleId}
      * is the manual/.secscan.yml rule holding it, or null for a cause-based auto-ignore (EXCLUDED_PATH, LOW_EPSS,

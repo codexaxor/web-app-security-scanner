@@ -443,7 +443,17 @@ public class ScannerOutputParser {
         }
         try {
             com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(file.toFile());
-            com.fasterxml.jackson.databind.JsonNode arr = root == null ? null : root.get("languages");
+            if (root == null) {
+                return List.of();
+            }
+            // N-4: honour the detector's status — a non-"ok" status (an error result) yields an empty list, so
+            // the worker leaves the stored languages unchanged. A missing status field is treated as ok (the
+            // languages array, if present and well-formed, is used) for backward compatibility.
+            com.fasterxml.jackson.databind.JsonNode status = root.get("status");
+            if (status != null && status.isTextual() && !"ok".equals(status.asText())) {
+                return List.of();
+            }
+            com.fasterxml.jackson.databind.JsonNode arr = root.get("languages");
             if (arr == null || !arr.isArray()) {
                 return List.of();
             }
