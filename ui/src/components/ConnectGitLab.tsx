@@ -126,7 +126,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   return (
     <div className="stack-4 onboarding">
       <div>
-        <h2 className="section-head">Sources</h2>
+        <h2 className="section-head">Connected sources</h2>
         {connections.length === 0 ? (
           <EmptyState title="No sources yet">Add a GitLab group/project, a GitHub owner/repository, or a public repository below.</EmptyState>
         ) : (
