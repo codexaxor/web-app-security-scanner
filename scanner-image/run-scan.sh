@@ -36,6 +36,20 @@ OSV_CONFIG=/etc/secscan/osv-scanner.toml
 : "${SCAN_CLONE_URL:?SCAN_CLONE_URL is required}"
 BRANCH="${SCAN_BRANCH:-}"
 DEPTH="${SCAN_CLONE_DEPTH:-1}"
+# git basic-auth username for a token clone: oauth2 (GitLab) or x-access-token (GitHub). Default oauth2.
+CLONE_USER="${SCAN_CLONE_USER:-oauth2}"
+
+# Defense in depth: accept only an https clone URL (any host — the worker enforces the host allowlist, D-018)
+# or the local file:// fixture clone used by tests. Refuse anything else (ssh, git, http to a real host) here.
+case "$SCAN_CLONE_URL" in
+    https://* | file:///* ) : ;;
+    * )
+        jq -nc --arg err "clone URL scheme not allowed (https or file:// only)" \
+            '{schemaVersion:1, cloneFailed:true, error:$err, scanners:[]}' > "$OUT/result.json"
+        echo "run-scan.sh: refusing non-https clone URL" >&2
+        exit 12
+        ;;
+esac
 
 # Defense in depth (D-076 A2/A4): re-validate the requested branch with the same rules as the app and refuse an
 # invalid one BEFORE git runs. The branch only ever reaches git as a single --branch=<name> argv element below.
@@ -54,8 +68,9 @@ GIT_CONFIG_GLOBAL="$WORK/gitconfig"
 export GIT_CONFIG_GLOBAL
 : > "$GIT_CONFIG_GLOBAL"
 if [ -s "$TOKEN_FILE" ]; then
-    # Basic auth: user "oauth2", password = token. Build the header value without putting the token on argv.
-    basic="$(printf 'oauth2:%s' "$(cat "$TOKEN_FILE")" | base64 | tr -d '\n')"
+    # Basic auth: user "$CLONE_USER" (oauth2 for GitLab, x-access-token for GitHub), password = token. Build the
+    # header value without putting the token on argv.
+    basic="$(printf '%s:%s' "$CLONE_USER" "$(cat "$TOKEN_FILE")" | base64 | tr -d '\n')"
     {
         echo '[http]'
         printf '\textraHeader = Authorization: Basic %s\n' "$basic"

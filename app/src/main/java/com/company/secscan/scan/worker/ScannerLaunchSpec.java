@@ -28,5 +28,8 @@ public record ScannerLaunchSpec(
         long pidsLimit,
         boolean networkDisabled,
         String runAsUser,
-        Duration timeout) {
+        Duration timeout,
+        // The git basic-auth username for the clone when a token is present: "oauth2" for GitLab,
+        // "x-access-token" for GitHub (D-014: the token itself is the password, delivered via the one-time file).
+        String cloneAuthUser) {
 }

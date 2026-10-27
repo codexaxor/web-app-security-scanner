@@ -64,11 +64,13 @@ public class ScanJobProcessor {
     private final ScanStateService state;
     private final ScannerProperties props;
     private final GitLabHostPolicy hostPolicy;
+    private final com.company.secscan.source.ProviderRegistry providers;
 
     public ScanJobProcessor(ScanRepository scans, ScanJobRepository jobs, RepositoryRepository repositories,
                             GitlabConnectionRepository connections, TokenCipherHolder cipher, GitLabClient client,
                             RepositoryConnectionGuard guard, ScannerLauncher launcher, ScannerOutputParser parser,
-                            ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy) {
+                            ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy,
+                            com.company.secscan.source.ProviderRegistry providers) {
         this.scans = scans;
         this.jobs = jobs;
         this.repositories = repositories;
@@ -81,6 +83,7 @@ public class ScanJobProcessor {
         this.state = state;
         this.props = props;
         this.hostPolicy = hostPolicy;
+        this.providers = providers;
     }
 
     public void process(UUID jobId) {
@@ -127,7 +130,9 @@ public class ScanJobProcessor {
             }
         }
 
-        String token = isLocal(conn) ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+        // No token for a local fixture clone or a public (credential_kind none) connection — those clone anonymously.
+        String token = (isLocal(conn) || GitlabConnection.CREDENTIAL_NONE.equals(conn.getCredentialKind()))
+                ? null : cipher.require().decrypt(conn.getTokenCiphertext());
 
         ScanWorkspace ws;
         try {
@@ -215,7 +220,9 @@ public class ScanJobProcessor {
      */
     private boolean probeProvisionalAccess(Repository repo, GitlabConnection conn, String token, UUID workspaceId,
                                            UUID jobId, UUID scanId) {
-        if (!repo.isProvisional() || isLocal(conn)) {
+        // The D-020 provisional-reassignment probe is GitLab group/project reachability (RepositoryConnectionGuard);
+        // GitHub/public repos have no equivalent multi-connection reassignment, so they simply proceed.
+        if (!repo.isProvisional() || isLocal(conn) || !"gitlab".equals(repo.getProvider())) {
             return true;
         }
         try {
@@ -252,10 +259,12 @@ public class ScanJobProcessor {
         // The branch to clone was snapshotted onto the scan at enqueue (D-076); fall back to the repo default for
         // any legacy scan row with no branch.
         String branch = scan.getBranch() != null ? scan.getBranch() : repo.getDefaultBranch();
+        // git basic-auth username for a token clone: GitHub wants x-access-token, GitLab oauth2 (D-014).
+        String cloneAuthUser = "github".equals(repo.getProvider()) ? "x-access-token" : "oauth2";
         return new ScannerLaunchSpec(scan.getId().toString(), props.getImage(), cloneUrl,
                 branch, props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
                 props.getTmpfsSize(), props.getMemory().toBytes(), props.getCpus(), props.getPidsLimit(),
-                networkDisabled, ws.ownerUserSpec(), props.getTimeout());
+                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser);
     }
 
     private static String httpsCloneUrl(String baseUrl, String pathWithNamespace) {
@@ -287,19 +296,24 @@ public class ScanJobProcessor {
      * </ul>
      */
     BranchVerdict branchVerdict(Repository repo, GitlabConnection conn, String token, String branch) {
+        com.company.secscan.source.SourceProvider adapter = providers.require(repo.getProvider());
+        boolean branchExists;
         try {
-            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+            branchExists = adapter.branchExists(conn.getBaseUrl(), token, repo.getProviderRepoId(), branch);
+        } catch (com.company.secscan.source.ProviderException e) {
+            // Any non-404 error (401/403/5xx/timeout/redirect) → proceed rather than wrongly flag the branch gone.
+            return BranchVerdict.TRANSIENT;
+        }
+        if (branchExists) {
             return BranchVerdict.OK;
-        } catch (GitLabException e) {
-            if (e.getError() != GitLabError.BRANCH_NOT_FOUND) {
-                return BranchVerdict.TRANSIENT;
-            }
-            try {
-                client.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId());
-                return BranchVerdict.MISSING;              // project reachable, branch genuinely gone
-            } catch (GitLabException projectError) {
-                return BranchVerdict.PROJECT_UNREACHABLE;  // 404 was the project / no access, not the branch
-            }
+        }
+        // Branch not found — is the repository itself reachable? Reachable → the branch is genuinely gone;
+        // unreachable (404 / no access / other) → a distinct project failure, never a branch-missing flag.
+        try {
+            adapter.getRepository(conn.getBaseUrl(), token, repo.getProviderRepoId());
+            return BranchVerdict.MISSING;
+        } catch (com.company.secscan.source.ProviderException projectError) {
+            return BranchVerdict.PROJECT_UNREACHABLE;
         }
     }
 

@@ -129,6 +129,6 @@ class ScannerLauncherTest {
     private static ScannerLaunchSpec spec(String runAsUser) {
         return new ScannerLaunchSpec("scan-1", "img", "file:///src", "main", 1,
                 Path.of("/out"), null, Path.of("/src"), "2g", 1L, 1.0, 256, true, runAsUser,
-                Duration.ofMinutes(1));
+                Duration.ofMinutes(1), "oauth2");
     }
 }
