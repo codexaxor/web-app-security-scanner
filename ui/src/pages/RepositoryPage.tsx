@@ -22,7 +22,7 @@ import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import Icon from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip, PathText } from "../components/ui";
 
@@ -86,7 +86,7 @@ export default function RepositoryPage() {
       <div className="breadcrumb">
         <Link to="/repositories">← Repositories</Link>
       </div>
-      {repo.error ? <ErrorBanner error={repo.error} /> : null}
+      {repo.error ? <InlineError error={repo.error} /> : null}
       {r ? (
         <>
           <PageHeader
@@ -285,7 +285,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
         </select>
       </div>
 
-      {feed.error ? <ErrorBanner error={feed.error} /> : null}
+      {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
         <EmptyState title="No issues match these filters">
@@ -439,7 +439,7 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
 
   return (
     <div>
-      {scans.error ? <ErrorBanner error={scans.error} /> : null}
+      {scans.error ? <InlineError error={scans.error} /> : null}
       {rows.length === 0 && !scans.isLoading ? (
         <EmptyState title="No scans yet">This repository has not been scanned.</EmptyState>
       ) : (

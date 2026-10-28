@@ -4,7 +4,8 @@ import { api, type IgnoreRuleView, type IgnoredItemView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
 import { reasonLabel, humanizeRuleId, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
+import { useToast, errorMessage } from "../toast";
 import Button from "../components/Button";
 import ConfirmDialog from "../components/ConfirmDialog";
 import TypeBadge from "../components/TypeBadge";
@@ -31,6 +32,7 @@ export default function IgnoredPage() {
   const [rulesPage, setRulesPage] = useState(0);
   const [prefill, setPrefill] = useState<RulePrefill | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<IgnoreRuleView | null>(null);
+  const toast = useToast();
 
   const items = useQuery({ queryKey: qk.ignored(itemsPage), queryFn: () => api.listIgnored(itemsPage, SIZE) });
   const rules = useQuery({ queryKey: qk.ignoreRules(rulesPage), queryFn: () => api.listIgnoreRules(rulesPage, SIZE) });
@@ -39,8 +41,10 @@ export default function IgnoredPage() {
     mutationFn: (id: string) => api.deleteIgnoreRule(id),
     onSuccess: () => {
       setConfirmDelete(null);
+      toast.success("Ignore rule deleted.");
       return invalidateFor("triage");
     },
+    onError: (e) => toast.error(errorMessage(e, "Could not delete the ignore rule.")),
   });
 
   return (
@@ -48,7 +52,7 @@ export default function IgnoredPage() {
       <PageHeader title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them." />
 
       <h2 className="section-head">Ignored findings</h2>
-      {items.error ? <ErrorBanner error={items.error} /> : null}
+      {items.error ? <InlineError error={items.error} /> : null}
       {items.data && items.data.content.length === 0 ? (
         <EmptyState title="Nothing is ignored">Everything found is in the feed.</EmptyState>
       ) : (
@@ -97,7 +101,6 @@ export default function IgnoredPage() {
       <Pager page={itemsPage} totalPages={items.data?.totalPages ?? 1} onPage={setItemsPage} />
 
       <h2 className="section-head">Ignore rules</h2>
-      {removeRule.error ? <ErrorBanner error={removeRule.error} onDismiss={() => removeRule.reset()} /> : null}
       {rules.data && rules.data.content.length === 0 ? (
         <EmptyState title="No manual ignore rules">
           Ignore a finding from its side panel to create a rule.

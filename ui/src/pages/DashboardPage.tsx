@@ -8,7 +8,7 @@ import { typeAcronym, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
 import type { BandName } from "../lib/format";
 
@@ -42,7 +42,7 @@ export default function DashboardPage() {
   return (
     <section>
       <PageHeader title="Dashboard" subtitle="Posture across your connected repositories." />
-      {dash.error ? <ErrorBanner error={dash.error} /> : null}
+      {dash.error ? <InlineError error={dash.error} /> : null}
 
       <div className="cards">
         <BandCard title="Issue groups" total={d?.totalGroups} bands={d?.groupBands} prefix="group" link={bandLink} />

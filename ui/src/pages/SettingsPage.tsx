@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { invalidateFor, qk } from "../queryClient";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
+import { useToast, errorMessage } from "../toast";
 import Toggle from "../components/Toggle";
 import { Card, PageHeader } from "../components/ui";
 
@@ -11,6 +12,7 @@ import { Card, PageHeader } from "../components/ui";
  * after refetch (the mutation invalidates those families).
  */
 export default function SettingsPage() {
+  const toast = useToast();
   const settings = useQuery({ queryKey: qk.workspaceSettings, queryFn: () => api.getWorkspaceSettings() });
 
   const save = useMutation({
@@ -18,6 +20,7 @@ export default function SettingsPage() {
     onSuccess: async () => {
       await invalidateFor("workspaceSettings");
     },
+    onError: (e) => toast.error(errorMessage(e, "Could not save the setting.")),
   });
 
   // While saving show the in-flight value; once saved prefer the PUT response (no flip-back before the refetch).
@@ -29,8 +32,7 @@ export default function SettingsPage() {
   return (
     <section>
       <PageHeader title="Settings" subtitle="Workspace-wide scanning and triage preferences." />
-      {settings.error ? <ErrorBanner error={settings.error} /> : null}
-      {save.error ? <ErrorBanner error={save.error} onDismiss={() => save.reset()} /> : null}
+      {settings.error ? <InlineError error={settings.error} /> : null}
 
       <Card className="settings-card">
         <div className="row-between">

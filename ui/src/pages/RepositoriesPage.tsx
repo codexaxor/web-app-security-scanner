@@ -11,7 +11,7 @@ import ScanButton from "../components/ScanButton";
 import RowMenu from "../components/RowMenu";
 import RepoSettingsDialog from "../components/RepoSettingsDialog";
 import WarningsDrawer from "../components/WarningsDrawer";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import Icon from "../components/icons";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
@@ -170,7 +170,7 @@ export default function RepositoriesPage() {
         </label>
       </div>
 
-      {repos.error ? <ErrorBanner error={repos.error} /> : null}
+      {repos.error ? <InlineError error={repos.error} /> : null}
 
       {rows.length === 0 && !repos.isLoading ? (
         <EmptyState title="No repositories match">

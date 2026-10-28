@@ -13,7 +13,7 @@ import { qk } from "../queryClient";
 import { fixTime, titleCase } from "../lib/format";
 import { isUuid, oneOf } from "../lib/validate";
 import { humanizeRuleId, typeLabel } from "../lib/labels";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import SubIssuePanel from "../components/SubIssuePanel";
 import SeverityPill from "../components/SeverityPill";
 import StatusChip, { type StatusKind } from "../components/StatusChip";
@@ -239,7 +239,7 @@ export default function FeedPage() {
         </label>
       </div>
 
-      {feed.error ? <ErrorBanner error={feed.error} /> : null}
+      {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
         <EmptyState title="No issues match these filters">

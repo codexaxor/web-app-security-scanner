@@ -1693,3 +1693,78 @@ button.health-item {
   top: 0;
   z-index: 60;
 }
+
+/* ---------- M8.8 item 6: inline errors + toast system ---------- */
+.inline-error {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-4);
+}
+
+/* One fixed, polite aria-live region, bottom-right, above everything. */
+.toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-2, 0 6px 20px rgba(0, 0, 0, 0.18));
+  animation: toast-in 160ms ease-out;
+}
+.toast-message {
+  flex: 1;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.toast-success {
+  border-color: var(--sev-low, #3a7d44);
+  border-left: 4px solid var(--sev-low, #3a7d44);
+}
+.toast-info {
+  border-left: 4px solid var(--accent, #3b6ea5);
+}
+.toast-error {
+  border-color: var(--error-border);
+  border-left: 4px solid var(--danger);
+}
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, inherit);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
