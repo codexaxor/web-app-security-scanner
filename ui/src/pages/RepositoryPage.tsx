@@ -196,6 +196,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
   const view: View = (viewCheck.ok ? viewCheck.value : undefined) ?? "focus";
   const openIssue = sp.get("issue");
   const openIssueOk = !openIssue || isUuid(openIssue);
+  const openIgnore = sp.get("ignore") === "1"; // N2: the ⋮ "Ignore…" flag
 
   const filters = {
     repositoryId: repoId,
@@ -226,11 +227,20 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
   function openPanel(groupId: string) {
     const next = new URLSearchParams(sp);
     next.set("issue", groupId);
+    next.delete("ignore"); // a plain Open (or next/prev) never carries the ignore-dialog flag
+    setSp(next, { replace: false });
+  }
+  // N2: ⋮ "Ignore…" opens the panel with the group-ignore dialog already open (distinct from "Open").
+  function openPanelIgnore(groupId: string) {
+    const next = new URLSearchParams(sp);
+    next.set("issue", groupId);
+    next.set("ignore", "1");
     setSp(next, { replace: false });
   }
   function closePanel() {
     const next = new URLSearchParams(sp);
     next.delete("issue");
+    next.delete("ignore");
     setSp(next, { replace: false });
   }
 
@@ -370,7 +380,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                                 className="rowmenu-item"
                                 onClick={() => {
                                   close();
-                                  openPanel(g.id);
+                                  openPanelIgnore(g.id);
                                 }}
                               >
                                 Ignore…
@@ -410,6 +420,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
           siblingIds={rows.map((g) => g.id)}
           onNavigate={openPanel}
           onClose={closePanel}
+          initialIgnoreOpen={openIgnore}
         />
       ) : null}
     </div>

@@ -67,18 +67,21 @@ export default function SubIssuePanel({
   onClose,
   siblingIds,
   onNavigate,
+  initialIgnoreOpen = false,
 }: {
   groupId: string;
   onClose: () => void;
   siblingIds?: string[];
   onNavigate?: (groupId: string) => void;
+  /** N2: open the panel with the group-ignore dialog already showing (the Issues-tab ⋮ "Ignore…" action). */
+  initialIgnoreOpen?: boolean;
 }) {
   const group = useQuery({ queryKey: qk.group(groupId), queryFn: () => api.getGroup(groupId) });
   const q = useQuery({
     queryKey: qk.subIssues(groupId, 0),
     queryFn: () => api.listSubIssues(groupId, 0, 100),
   });
-  const [ignoreGroup, setIgnoreGroup] = useState(false);
+  const [ignoreGroup, setIgnoreGroup] = useState(initialIgnoreOpen);
 
   const subs = q.data?.content ?? [];
   const g = group.data;

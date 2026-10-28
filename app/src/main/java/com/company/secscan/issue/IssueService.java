@@ -96,12 +96,21 @@ public class IssueService {
     public record CategoryCount(String category, long count) {
     }
 
-    /** A blank/null search → no filter; otherwise a lower-cased {@code %term%} for a case-insensitive LIKE. */
+    /**
+     * A blank/null search → no filter; otherwise a lower-cased {@code %term%} for a case-insensitive LIKE. The
+     * LIKE wildcards {@code \ % _} inside the user's term are escaped (N3) so a literal "%" or "_" matches itself
+     * rather than acting as a wildcard; the query pairs this with {@code escape '\'}. The escape character {@code \}
+     * is escaped first, before the wildcards it would otherwise double-escape.
+     */
     private static String likeOrNull(String search) {
         if (search == null || search.isBlank()) {
             return null;
         }
-        return "%" + search.trim().toLowerCase(java.util.Locale.ROOT) + "%";
+        String escaped = search.trim().toLowerCase(java.util.Locale.ROOT)
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 
     /** Build a view with its open/ignored/solved sub-issue counts (0,0,0 when the group has no sub-issue). */

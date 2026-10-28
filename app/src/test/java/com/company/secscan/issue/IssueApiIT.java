@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.api.IssueGroupView;
 import com.company.secscan.issue.api.SubIssueView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
@@ -103,6 +104,23 @@ class IssueApiIT extends AbstractGitLabIT {
                 .hasSize(1);
         assertThat(service.listGroups(repo.getId(), null, null, "nomatch", "focus", null, false, 0, 50).content())
                 .isEmpty();
+    }
+
+    @Test
+    void listGroupsSearchTreatsLikeWildcardsAsLiterals() {   // N3: escape \ % _ + ESCAPE '\' in the JPQL LIKE
+        Repository repo = seedRepository(412L, "svc/wild");
+        seedGroup(repo.getId(), "sast", "sast|pct", "50% off coupon");
+        seedGroup(repo.getId(), "sast", "sast|und", "user_id leaked");
+        seedGroup(repo.getId(), "sast", "sast|plain", "clean title");
+        // "%" is a literal, not "match everything": only the title that contains a percent sign matches.
+        assertThat(service.listGroups(repo.getId(), null, null, "%", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("50% off coupon");
+        // "_" is a literal, not "match any single character".
+        assertThat(service.listGroups(repo.getId(), null, null, "_", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("user_id leaked");
+        // A term that embeds a percent still matches case-insensitively, anchored to the literal "%".
+        assertThat(service.listGroups(repo.getId(), null, null, "50% OFF", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("50% off coupon");
     }
 
     @Test

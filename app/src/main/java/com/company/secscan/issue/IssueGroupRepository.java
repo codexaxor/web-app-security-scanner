@@ -51,7 +51,8 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
               and (:category is null or g.level2Category = :category)
-              and (:search is null or lower(g.title) like :search or lower(g.subtitle) like :search)
+              and (:search is null or lower(g.title) like :search escape '\\'
+                   or lower(g.subtitle) like :search escape '\\')
               and g.status in :statuses
               and (:bandLo is null or (g.severityScore >= :bandLo and g.severityScore <= :bandHi))
               and (:includeInactive = true or r.active = true)
