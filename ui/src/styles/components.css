@@ -654,12 +654,39 @@ a.stat-link:hover .stat-num {
 }
 .repo-path {
   display: block;
-  max-width: 320px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+
+/* L1: the Repositories name cell — line 1 (badge + name + "· branch") never wraps (the name truncates), the
+   full path is line 2 (truncated, full path in a title tooltip). Identical at 1280 and 1440. */
+.repo-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+}
+.repo-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.repo-line .provider-badge,
+.repo-line .branch-label,
+.repo-line .chip {
+  flex: none; /* only the name shrinks/truncates */
+}
+.repo-line .repo-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
 }
 
 /* KEV / attribution small markers */
@@ -1263,12 +1290,16 @@ button.health-item {
 .mono-sub {
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  word-break: break-all;
+  /* L2: rule ids never break mid-word — one line, truncated with … (full id in the title tooltip). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 /* advisory / description subtitles stay in the body font (never monospace) */
 .subtitle-text {
   font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word; /* L2: wrap at word boundaries, never mid-word */
 }
 
 /* ---------- pager ---------- */
@@ -1534,10 +1565,27 @@ button.health-item {
   font-size: var(--fs-xs);
 }
 .location-cell {
-  display: inline-flex;
-  align-items: baseline;
+  /* L2: location on its own line (truncated from the START), "+N more" chip below it. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  max-width: 280px;
+  min-width: 0;
+  max-width: 100%;
+}
+.location-path {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Truncate from the START so the file name stays visible ("…/terraform/networking.tf"). */
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.more-chip {
+  font-size: var(--fs-xs);
 }
 
 /* ---------- M8.6: issue side panel (gauge, sections, location grouping, nav) ---------- */
@@ -1856,5 +1904,18 @@ button.health-item {
     animation: none;
     border-top-color: currentcolor;
     opacity: 0.5;
+  }
+}
+
+/* L5: Sources wizard — form + help box; the help box moves to a right-hand column at ≥1280, stacked below
+   on narrower screens. */
+.source-wizard {
+  display: grid;
+  gap: var(--sp-4);
+}
+@media (min-width: 1280px) {
+  .source-wizard {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
   }
 }

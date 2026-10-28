@@ -173,9 +173,10 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   return (
     <div className="stack-4">
       <Card>
+        <h3>Add a source</h3>
+        {/* L5: at ≥1280 the help box sits in a right-hand column next to the form; it stacks below on narrow. */}
+        <div className="source-wizard">
         <form className="form" data-testid="add-source-form" onSubmit={(e) => e.preventDefault()}>
-          <h3>Add a source</h3>
-
           <Segmented
             label="Provider"
             value={provider}
@@ -264,8 +265,6 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
             </div>
           ) : null}
 
-          <HelpBox provider={provider} glHost={glHost} access={access} />
-
           {error ? <p className="field-error" data-testid="source-error">{error}</p> : null}
 
           <div className="row">
@@ -274,6 +273,8 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
             </Button>
           </div>
         </form>
+        <HelpBox provider={provider} glHost={glHost} access={access} />
+        </div>
       </Card>
 
       {selecting ? (

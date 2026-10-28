@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { qk } from "../queryClient";
 import { useScanPolling, anyActive } from "../lib/scanPolling";
+import { truncatePathStart } from "../lib/truncatePath";
 import Pager, { DEFAULT_PAGE_SIZE } from "../components/Pager";
 import { isUuid, oneOf } from "../lib/validate";
 import { fixTime } from "../lib/format";
@@ -26,7 +27,7 @@ import Icon from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
-import { PageHeader, EmptyState, ScanStatusChip, PathText } from "../components/ui";
+import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const TABS = ["issues", "scans", "settings"] as const;
@@ -100,7 +101,7 @@ export default function RepositoryPage() {
             }
             actions={
               <>
-                <ScanButton repositoryId={r.id} disabled={!r.active} />
+                <ScanButton repositoryId={r.id} disabled={!r.active} primary />
                 <RowMenu label="Repository actions">
                   {(close) => (
                     <button
@@ -339,7 +340,10 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                         <div className="stack-tight">
                           <strong>{t.title}</strong>
                           {t.subtitle ? (
-                            <div className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}>
+                            <div
+                              className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}
+                              title={t.subtitle}
+                            >
                               {t.subtitle}
                             </div>
                           ) : null}
@@ -350,15 +354,18 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                       </td>
                       <td>
                         {g.primaryLocation ? (
-                          <span className="location-cell">
-                            <PathText path={g.primaryLocation} />
-                            {more > 0 ? <span className="muted"> +{more} more</span> : null}
-                          </span>
+                          <div className="location-cell">
+                            {/* L2: one line, truncated from the START (keeps the file name), full path in title. */}
+                            <span className="location-path file-line" title={g.primaryLocation}>
+                              {truncatePathStart(g.primaryLocation, 48)}
+                            </span>
+                            {more > 0 ? <span className="chip chip-muted more-chip">+{more} more</span> : null}
+                          </div>
                         ) : (
                           <span className="muted">—</span>
                         )}
                       </td>
-                      <td>{fixTime(g.fixTimeMinutes)}</td>
+                      <td className="nowrap">{fixTime(g.fixTimeMinutes)}</td>
                       <td>
                         <StatusChip kind={statusKind(g)} />
                       </td>

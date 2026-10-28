@@ -7,7 +7,6 @@ import Pager, { useUrlPaging } from "../components/Pager";
 import { useScanPolling, anyActive } from "../lib/scanPolling";
 import { useScanCompletionToasts } from "../lib/useScanCompletion";
 import RelativeTime from "../components/RelativeTime";
-import RepoName from "../components/RepoName";
 import ProviderBadge from "../components/ProviderBadge";
 import SeverityChips from "../components/SeverityChips";
 import ScanButton from "../components/ScanButton";
@@ -217,13 +216,22 @@ export default function RepositoriesPage() {
                     }}
                   >
                     <td>
-                      <div className="row">
-                        <ProviderBadge provider={r.provider} />
-                        <RepoName path={r.pathWithNamespace} showPath />
-                        {r.effectiveBranch ? (
-                          <span className="muted branch-label">· {r.effectiveBranch}</span>
-                        ) : null}
-                        {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+                      {/* L1: line 1 = badge + name + "· branch" on ONE non-wrapping line (name truncates); the
+                          full group/project path is line 2, truncated, with the full path in a title tooltip. */}
+                      <div className="repo-cell">
+                        <div className="repo-line">
+                          <ProviderBadge provider={r.provider} />
+                          <span className="repo-name" title={r.pathWithNamespace}>
+                            {r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
+                          </span>
+                          {r.effectiveBranch ? (
+                            <span className="muted branch-label">· {r.effectiveBranch}</span>
+                          ) : null}
+                          {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+                        </div>
+                        <div className="repo-path" title={r.pathWithNamespace}>
+                          {r.pathWithNamespace}
+                        </div>
                       </div>
                       {r.branchMissing ? (
                         <span className="expiry-warn">branch missing — choose another</span>

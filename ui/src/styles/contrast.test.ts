@@ -64,6 +64,8 @@ const STRONG_PAIRS: [string, string][] = [
   ["--sev-high", "--sev-high-bg"],
   ["--sev-medium", "--sev-medium-bg"],
   ["--sev-low", "--sev-low-bg"],
+  // L4: the Feed band-bar medium amber must stay a clean, AA-contrast color against the card surface.
+  ["--sev-medium", "--surface"],
 ];
 
 for (const [theme, selector] of [

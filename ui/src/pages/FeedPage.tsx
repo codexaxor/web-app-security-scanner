@@ -312,7 +312,7 @@ export default function FeedPage() {
                       <RepoName path={g.repositoryPath} />
                       {g.repositoryBranch ? <span className="muted branch-label"> · {g.repositoryBranch}</span> : null}
                     </td>
-                    <td>{fixTime(g.fixTimeMinutes)}</td>
+                    <td className="nowrap">{fixTime(g.fixTimeMinutes)}</td>
                     <td>
                       <StatusChip kind={statusKind(g)} />
                     </td>

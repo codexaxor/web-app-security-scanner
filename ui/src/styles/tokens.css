@@ -28,7 +28,7 @@
   /* severity bands — severity ONLY (AA text on --surface) */
   --sev-critical: #b3261e;
   --sev-high: #b45309;
-  --sev-medium: #8a6d00;
+  --sev-medium: #b45309;
   --sev-low: #2f7a34;
   --sev-critical-bg: #fbe9e7;
   --sev-high-bg: #fdf0e3;
