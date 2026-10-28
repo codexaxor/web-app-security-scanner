@@ -47,6 +47,12 @@ public class AppUser {
         this.role = role;
     }
 
+    /** Resets the stored password hash and role — used by the idempotent demo-mode re-bootstrap (D-091). */
+    public void updateCredentials(String passwordHash, String role) {
+        this.passwordHash = passwordHash;
+        this.role = role;
+    }
+
     public UUID getId() {
         return id;
     }

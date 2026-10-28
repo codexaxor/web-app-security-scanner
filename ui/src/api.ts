@@ -363,36 +363,89 @@ export class ApiError extends Error {
   }
 }
 
-let authHeader: string | null = null;
+// D-092: the browser authenticates with a server session cookie (HttpOnly, set by the server at /auth/login),
+// never an Authorization header — the SPA never constructs one. The only credential material the SPA holds is
+// the CSRF token (a session synchronizer token returned by /auth/login and /auth/session), kept in memory and
+// echoed on unsafe requests via X-CSRF-TOKEN. The password is never stored, and nothing goes to web storage.
+export interface SessionInfo {
+  username: string;
+  demoMode: boolean;
+  csrfToken: string;
+}
 
-// SF-3: a single unauthorized handler invoked by request() on ANY 401 — so direct (non-react-query) calls in
-// ConnectGitLab / SelectRepositories drop to the sign-in gate too, not only queries/mutations. auth.tsx registers
-// it to clear credentials + the query cache. Default no-op so api.ts stays usable in isolation (e.g. unit tests).
+let csrfToken: string | null = null;
+
+const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// SF-3: a single unauthorized handler invoked by request() on ANY 401 — so direct (non-react-query) calls drop
+// to the sign-in gate too, not only queries/mutations. auth.tsx registers it to clear session state + the query
+// cache. Default no-op so api.ts stays usable in isolation (e.g. unit tests).
 let onUnauthorized: () => void = () => {};
 export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn;
 }
 
-export function setCredentials(email: string, password: string): void {
-  authHeader = "Basic " + btoa(`${email}:${password}`);
+/** Signs in against the server session (JSON). Stores the CSRF token in memory; never retains the password. */
+export async function login(username: string, password: string): Promise<SessionInfo> {
+  const res = await fetch("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status === 401) {
+    throw new AuthRequiredError("Wrong email or password");
+  }
+  if (!res.ok) {
+    throw new ApiError(`Sign-in failed (${res.status})`, null);
+  }
+  const info = (await res.json()) as SessionInfo;
+  csrfToken = info.csrfToken;
+  return info;
 }
 
-export function clearCredentials(): void {
-  authHeader = null;
+/** Reads the current session on load (a refresh stays signed in). Returns null when not signed in (401). */
+export async function fetchSession(): Promise<SessionInfo | null> {
+  const res = await fetch("/api/v1/auth/session", { credentials: "same-origin" });
+  if (res.status === 401) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new ApiError(`Could not read the session (${res.status})`, null);
+  }
+  const info = (await res.json()) as SessionInfo;
+  csrfToken = info.csrfToken;
+  return info;
 }
 
-export function hasCredentials(): boolean {
-  return authHeader !== null;
+/** Ends the server session. Clears the in-memory CSRF token regardless of the outcome. */
+export async function logout(): Promise<void> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (csrfToken) {
+      headers["X-CSRF-TOKEN"] = csrfToken;
+    }
+    await fetch("/api/v1/auth/logout", {
+      method: "POST",
+      headers,
+      credentials: "same-origin",
+      body: "{}",
+    });
+  } finally {
+    csrfToken = null;
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (authHeader) {
-    headers["Authorization"] = authHeader;
+  // The session cookie is sent automatically (same-origin); unsafe requests also carry the CSRF token.
+  if (UNSAFE.has(method) && csrfToken) {
+    headers["X-CSRF-TOKEN"] = csrfToken;
   }
   const res = await fetch(path, {
     method,
     headers,
+    credentials: "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.status === 401) {
