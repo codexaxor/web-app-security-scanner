@@ -62,7 +62,7 @@ export default function SignInGate() {
         />
       </div>
       {error && <p className="field-error">{error}</p>}
-      <Button type="submit" variant="primary" disabled={busy}>
+      <Button type="submit" variant="primary" busy={busy}>
         {busy ? "Signing in…" : "Continue"}
       </Button>
     </form>

@@ -269,7 +269,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
           {error ? <p className="field-error" data-testid="source-error">{error}</p> : null}
 
           <div className="row">
-            <Button type="button" variant="primary" disabled={submitDisabled} onClick={submit}>
+            <Button type="button" variant="primary" busy={busy} disabled={submitDisabled} onClick={submit}>
               {busy ? "Adding…" : "Add source"}
             </Button>
           </div>
