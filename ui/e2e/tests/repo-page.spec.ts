@@ -54,6 +54,18 @@ test("an issue panel opens, navigates next/prev, and a reload keeps it open", as
   await expect(page.getByRole("dialog", { name: "Issue details" })).toBeVisible();
 });
 
+test('the Issues-tab ⋮ "Ignore…" opens the panel with the ignore dialog already open', async ({ page }) => {
+  // N2: "Ignore…" must differ from "Open" — it opens the issue panel AND the group-ignore dialog.
+  await signIn(page, `/repositories/${CORE_ID}?tab=issues`);
+  const firstRow = page.getByTestId("repo-issue-row").first();
+  await firstRow.getByRole("button", { name: "Row actions" }).click();
+  await page.getByRole("button", { name: "Ignore…" }).click();
+
+  await expect(page.getByRole("dialog", { name: "Issue details" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Ignore finding" })).toBeVisible();
+  await expect(page).toHaveURL(/[?&]ignore=1/); // URL-addressable (a reload reopens the dialog)
+});
+
 test("the secret panel renders source links with the exact expected hrefs", async ({ page }) => {
   await signIn(page, `/repositories/${CORE_ID}?tab=issues&issue=${LINK_SECRET}`);
   const panel = page.getByRole("dialog", { name: "Issue details" });
