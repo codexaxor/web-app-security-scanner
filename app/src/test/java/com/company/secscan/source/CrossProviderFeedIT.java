@@ -1,6 +1,7 @@
 package com.company.secscan.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.config.TokenCipherHolder;
 import com.company.secscan.gitlab.GitLabClient;
@@ -8,6 +9,10 @@ import com.company.secscan.gitlab.GitLabConnectionService;
 import com.company.secscan.gitlab.GitLabHostPolicy;
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.IssueGroup;
+import com.company.secscan.issue.IssueGroupRepository;
+import com.company.secscan.issue.IssueService;
+import com.company.secscan.issue.api.IssueGroupView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.repository.RepositoryService;
@@ -23,6 +28,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * M8.7 item 11 (automated portion): one workspace holds self-managed GitLab + a second GitLab host (gitlab.com)
@@ -41,6 +47,8 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
     @Autowired GitlabConnectionRepository connections;
     @Autowired RepositoryService repositoryService;
     @Autowired RepositoryRepository repositories;
+    @Autowired IssueService issueService;
+    @Autowired IssueGroupRepository groups;
     @Autowired TokenCipherHolder cipher;
     @Autowired GitLabHostPolicy hostPolicy;
     @Autowired GitHubClient gitHubClient;
@@ -80,8 +88,8 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
         return m;
     }
 
-    @Test
-    void oneWorkspaceHoldsFourSourcesAcrossProvidersInOneFeed() {
+    /** Selects the four cross-provider sources into the one workspace (reused by both tests). */
+    private void seedFourSources() {
         // Two GitLab hosts (self-managed + gitlab.com), token-credentialed.
         gitlabConnections.create(selfManaged.baseUrl(), GL_TOKEN, "project", "ns/a");
         gitlabConnections.create(dotCom.baseUrl(), GL_TOKEN, "project", "ns/b");
@@ -97,6 +105,11 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
         // A public repository added by URL (anonymous; credential_kind none) and selected.
         UUID pubConn = gh.createPublicRepo(publicGl.baseUrl() + "/pub/proj").getId();
         repositoryService.selectSource(pubConn, List.of("303"));
+    }
+
+    @Test
+    void oneWorkspaceHoldsFourSourcesAcrossProvidersInOneFeed() {
+        seedFourSources();
 
         List<Repository> repos = repositories.findByWorkspaceId(WS);
         assertThat(repos).hasSize(4);
@@ -119,6 +132,43 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
         assertThat(conns.stream().filter(c -> c.getCredentialKind().equals("none"))).singleElement()
                 .satisfies(c -> assertThat(c.getTokenCiphertext()).isNull());
         assertThat(conns.stream().filter(c -> c.getCredentialKind().equals("token")).count()).isEqualTo(3);
+    }
+
+    @Test
+    void providerFilterNarrowsTheRepositoriesListAndFeed() {   // SF-1
+        seedFourSources();
+        List<Repository> repos = repositories.findByWorkspaceId(WS);
+        Repository gitHubRepo = repos.stream().filter(r -> r.getProvider().equals("github")).findFirst().orElseThrow();
+        Repository gitLabRepo = repos.stream().filter(r -> r.getProvider().equals("gitlab")).findFirst().orElseThrow();
+        // An open issue group on one repo of each provider (so the feed has a row per provider).
+        openGroup(gitHubRepo.getId(), "gh", "gh finding");
+        openGroup(gitLabRepo.getId(), "gl", "gl finding");
+
+        // Repositories list: the provider filter is server-side + workspace-scoped (gitlab 3, github 1, none 4).
+        assertThat(repositoryService.listSelected(null, true, false, false, "github", "name", 0, 50).totalElements())
+                .isEqualTo(1);
+        assertThat(repositoryService.listSelected(null, true, false, false, "gitlab", "name", 0, 50).totalElements())
+                .isEqualTo(3);
+        assertThat(repositoryService.listSelected(null, true, false, false, null, "name", 0, 50).totalElements())
+                .isEqualTo(4);
+
+        // Feed (issue-groups): the provider filter narrows to that provider's groups.
+        assertThat(issueService.listGroups(null, null, null, null, "github", "all", null, true, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("gh finding");
+        assertThat(issueService.listGroups(null, null, null, null, "gitlab", "all", null, true, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("gl finding");
+
+        // Validated whitelist: anything else is a 400 on both endpoints (never trusted unchecked).
+        assertThatThrownBy(() -> repositoryService.listSelected(null, true, false, false, "bogus", "name", 0, 50))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> issueService.listGroups(null, null, null, null, "bogus", "all", null, true, 0, 50))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    private void openGroup(UUID repoId, String key, String title) {
+        IssueGroup g = new IssueGroup(WS, repoId, "sca", "sca|" + key, title, null);
+        g.setSeverityScore(90);
+        groups.save(g);
     }
 
     private UUID projectConn(GitLabWireMock host, long projectId) {

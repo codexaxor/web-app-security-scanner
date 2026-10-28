@@ -51,6 +51,7 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
               and (:category is null or g.level2Category = :category)
+              and (:provider is null or r.provider = :provider)
               and (:search is null or lower(g.title) like :search escape '\\'
                    or lower(g.subtitle) like :search escape '\\')
               and g.status in :statuses
@@ -62,6 +63,7 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
                                 @Param("repositoryId") UUID repositoryId,
                                 @Param("type") String type,
                                 @Param("category") String category,
+                                @Param("provider") String provider,
                                 @Param("search") String search,
                                 @Param("statuses") java.util.List<String> statuses,
                                 @Param("bandLo") Integer bandLo,

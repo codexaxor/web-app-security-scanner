@@ -43,6 +43,15 @@ class GitLabHostPolicyTest {
     }
 
     @Test
+    void allowsHttpForAllowlistedIpv6Loopback() {   // N-3: URI.getHost() returns "[::1]" for an IPv6 literal
+        GitLabHostPolicy policy = new GitLabHostPolicy("[::1]");
+
+        // Over http the loopback-scheme exemption must recognise the bracketed IPv6 literal (the old "::1"
+        // clause never matched, so this would have failed with "GitLab must be reached over https").
+        assertThatCode(() -> policy.requireAllowed("http://[::1]:8080")).doesNotThrowAnyException();
+    }
+
+    @Test
     void parsesCommaSeparatedHostsCaseInsensitively() {
         GitLabHostPolicy policy = new GitLabHostPolicy(" GitLab.Celloscope.NET , other.example.com ");
 

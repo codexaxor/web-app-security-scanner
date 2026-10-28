@@ -127,6 +127,8 @@ public class GitLabHostPolicy {
     }
 
     private static boolean isLoopback(String host) {
-        return host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1") || host.equals("::1");
+        // N-3: URI.getHost() returns an IPv6 literal wrapped in brackets, so the loopback address appears as
+        // "[::1]", never the bare "::1" the old clause compared against (which therefore matched nothing).
+        return host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1") || host.equals("[::1]");
     }
 }

@@ -360,6 +360,41 @@ values ('50000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-0000000
         'fp-allignore', 'CVE-2023-00003', 'org.example:allignore', '1.0.0', '2.0.0', 'open', 80,
         now() - interval '2 hours');
 
+-- SF-1 (M8.7 review): a GitHub source in the SAME workspace — a GitHub connection + repository + one OPEN High
+-- finding — so the Repositories list shows a GitHub provider badge, the provider filter narrows list and feed,
+-- and the GitHub repo is scannable. Severity 85 (High) so NO Critical-band oracle changes; feed/dashboard
+-- oracles compare UI == API == SQL, so the +1 active repo / +1 open group is consistent everywhere.
+insert into gitlab_connection (id, workspace_id, base_url, target_type, provider, credential_kind,
+                               token_ciphertext, provider_repo_id, repo_full_name, token_scopes, token_expires_at)
+values ('10000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001',
+        'https://github.com', 'repo', 'github', 'token', 'fake-ciphertext-gh', '900001', 'octo/widget',
+        'metadata,contents', now() + interval '60 days');
+
+insert into repository (id, workspace_id, connection_id, provider, host, provider_repo_id, gitlab_project_id,
+                        path_with_namespace, default_branch, active, sensitivity, include_dev_deps, languages,
+                        inactive_reason)
+values ('20000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-0000000000a1', 'github', 'github.com', '900001', null, 'octo/widget', 'main',
+        true, 'normal', false, '["TypeScript"]'::jsonb, null);
+
+insert into scan (id, workspace_id, repository_id, trigger, commit_sha, branch, status, started_at, finished_at)
+values ('30000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-0000000000a1', 'manual', 'ghsha01', 'main', 'completed',
+        now() - interval '1 hour', now() - interval '58 minutes');
+
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, subtitle, status,
+                         severity_score, fix_time_minutes, first_seen_at)
+values ('40000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-0000000000a1', 'sca', 'sca|gh-widget', 'GitHub widget dependency',
+        'A vulnerable transitive dependency', 'open', 85, 60, now() - interval '1 hour');
+
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, vuln_id, package,
+                       installed_version, fixed_version, file_path, status, score, created_at)
+values ('50000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-0000000000a1', '20000000-0000-0000-0000-0000000000a1', 'sca', 'sca',
+        'fp-gh-widget', 'CVE-2024-30000', 'octo:widget-lib', '1.0.0', '1.0.1', 'package-lock.json', 'open', 85,
+        now() - interval '1 hour');
+
 -- ========================================================================================================
 -- WORKSPACE 2 — the isolation oracle (must NEVER appear in the UI or any count)
 -- ========================================================================================================

@@ -38,10 +38,12 @@ public class RepositoryController {
             @RequestParam(defaultValue = "false") boolean includeInactive,
             @RequestParam(defaultValue = "false") boolean hasOpenIssues,
             @RequestParam(defaultValue = "false") boolean lastScanFailed,
+            @RequestParam(required = false) String provider,
             @RequestParam(defaultValue = "severity") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listSelected(search, includeInactive, hasOpenIssues, lastScanFailed, sort, page, size);
+        return service.listSelected(search, includeInactive, hasOpenIssues, lastScanFailed, provider, sort, page,
+                size);
     }
 
     /** One repository with its rollups (the M8.6 repository page header). 404 if not in this workspace. */

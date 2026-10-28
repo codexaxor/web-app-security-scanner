@@ -269,10 +269,12 @@ public class RepositoryService {
      */
     @Transactional(readOnly = true)
     public PagedResponse<RepositoryView> listSelected(String search, boolean includeInactive, boolean hasOpenIssues,
-                                                      boolean lastScanFailed, String sort, int page, int size) {
+                                                      boolean lastScanFailed, String provider, String sort,
+                                                      int page, int size) {
         if (search != null && search.length() > SEARCH_MAX) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
         }
+        String providerFilter = validProviderOrNull(provider);   // SF-1: validated whitelist (gitlab|github)
         int pageIndex = Math.max(0, page);
         int perPage = Math.min(Math.max(1, size), 200);
         String q = search == null ? null : search.trim().toLowerCase(java.util.Locale.ROOT);
@@ -287,6 +289,7 @@ public class RepositoryService {
                 .filter(v -> includeInactive || v.active())
                 .filter(v -> q == null || q.isEmpty()
                         || v.pathWithNamespace().toLowerCase(java.util.Locale.ROOT).contains(q))
+                .filter(v -> providerFilter == null || providerFilter.equals(v.provider()))
                 .filter(v -> !hasOpenIssues || openTotal(v) > 0)
                 .filter(v -> !lastScanFailed || isFailedScan(v.lastScan()))
                 .sorted(repoComparator(sort))
@@ -342,6 +345,21 @@ public class RepositoryService {
     }
 
     private static final int SEARCH_MAX = 100;
+
+    /**
+     * SF-1: a blank provider → no filter; otherwise it must be one of the validated whitelist {@code gitlab} or
+     * {@code github} (case-insensitive). Anything else is a 400 — the value is never trusted unchecked.
+     */
+    private static String validProviderOrNull(String provider) {
+        if (provider == null || provider.isBlank()) {
+            return null;
+        }
+        String p = provider.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!p.equals("gitlab") && !p.equals("github")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown provider. Use gitlab or github.");
+        }
+        return p;
+    }
 
     /**
      * One page of a repository's GitLab branches for the "Branch to scan" picker (D-076). {@code search} (≤ 100

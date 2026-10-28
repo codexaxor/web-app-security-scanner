@@ -296,11 +296,14 @@ export interface WorkspaceSettings {
   epssAutoIgnoreEnabled: boolean;
 }
 
+export type Provider = "gitlab" | "github";
+
 export interface FeedParams {
   repositoryId?: string;
   type?: IssueType;
   category?: string;
   search?: string;
+  provider?: Provider;
   view?: View;
   band?: Band;
   includeInactive?: boolean;
@@ -315,6 +318,7 @@ export interface RepoListParams {
   includeInactive?: boolean;
   hasOpenIssues?: boolean;
   lastScanFailed?: boolean;
+  provider?: Provider;
   sort?: RepoSort;
   page?: number;
   size?: number;
@@ -522,6 +526,7 @@ function repoQuery(p: RepoListParams): string {
   if (p.includeInactive) q.set("includeInactive", "true");
   if (p.hasOpenIssues) q.set("hasOpenIssues", "true");
   if (p.lastScanFailed) q.set("lastScanFailed", "true");
+  if (p.provider) q.set("provider", p.provider);
   if (p.sort) q.set("sort", p.sort);
   q.set("page", String(p.page ?? 0));
   q.set("size", String(p.size ?? 50));
@@ -536,6 +541,7 @@ function feedQuery(p: FeedParams, summary = false): string {
   if (p.type) q.set("type", p.type);
   if (p.category) q.set("category", p.category);
   if (p.search) q.set("search", p.search);
+  if (p.provider) q.set("provider", p.provider);
   q.set("view", p.view ?? "focus");
   if (p.includeInactive) q.set("includeInactive", "true");
   if (!summary) {

@@ -10,6 +10,7 @@ import {
 import Button from "./Button";
 import ConfirmDialog from "./ConfirmDialog";
 import RotateTokenDialog from "./RotateTokenDialog";
+import SelectSourceRepositories from "./SelectSourceRepositories";
 import { Card, EmptyState } from "./ui";
 import ProviderBadge from "./ProviderBadge";
 import { providerMeta, targetLabel } from "../lib/providerMeta";
@@ -54,6 +55,8 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const [pubUrl, setPubUrl] = useState("");
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceOk, setSourceOk] = useState<string | null>(null);
+  // SF-1: after adding a non-GitLab source, offer the "Select repositories" step for that connection.
+  const [selecting, setSelecting] = useState<ConnectionView | null>(null);
 
   async function addSource(run: () => Promise<ConnectionView>, reset: () => void) {
     setBusy(true);
@@ -62,7 +65,8 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
     try {
       const c = await run();
       reset();
-      setSourceOk(`Added ${providerMeta(c.provider).label} ${targetLabel(c.targetType).toLowerCase()}.`);
+      setSourceOk(`Added ${providerMeta(c.provider).label} ${targetLabel(c.targetType).toLowerCase()}. Now select its repositories.`);
+      setSelecting(c);
       await refresh();
     } catch (err) {
       setSourceError(err instanceof Error ? err.message : "Failed to add source");
@@ -324,6 +328,17 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
 
       {sourceOk && <p className="ok-text" data-testid="source-ok">{sourceOk}</p>}
       {sourceError && <p className="field-error" data-testid="source-error">{sourceError}</p>}
+
+      {selecting ? (
+        <Card>
+          <SelectSourceRepositories connection={selecting} onSelected={() => refresh()} />
+          <div className="row">
+            <Button variant="secondary" size="sm" onClick={() => setSelecting(null)}>
+              Done
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       {error && <p className="field-error">{error}</p>}
 

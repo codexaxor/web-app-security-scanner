@@ -78,7 +78,10 @@ public class GitlabConnection {
     @Column(name = "project_full_path")
     private String projectFullPath;
 
-    @Column(name = "token_ciphertext", nullable = false)
+    // Nullable since V22 (N-2): a public (credential_kind 'none') connection carries no token. The DB enforces
+    // the token-vs-credential-kind pairing via ck_gitlab_connection_token; this mapping must not re-impose
+    // NOT NULL, or persisting a public connection would fail Hibernate's own non-null check before the insert.
+    @Column(name = "token_ciphertext")
     private String tokenCiphertext;
 
     @Column(name = "token_scopes")

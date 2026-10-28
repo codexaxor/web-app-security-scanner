@@ -134,7 +134,11 @@ begin
     if new.provider is null then
         new.provider := 'gitlab';
     end if;
-    if new.provider_repo_id is null then
+    -- Derive provider_repo_id from the GitLab project id ONLY when that id is present (SF-2). A non-GitLab
+    -- insert that supplies no provider_repo_id (and has no gitlab_project_id to fall back to) is NOT given a
+    -- fabricated identity here — it leaves provider_repo_id NULL and is rejected by the NOT NULL constraint
+    -- below, rather than silently stored with a bogus id. GitHub/public inserts always set it explicitly.
+    if new.provider_repo_id is null and new.gitlab_project_id is not null then
         new.provider_repo_id := new.gitlab_project_id::text;
     end if;
     if new.host is null and new.connection_id is not null then

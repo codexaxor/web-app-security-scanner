@@ -1518,6 +1518,28 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.x train `/review-pr` deferred register (recorded 2026-10-28, for a later milestone):
+  - **Feed category-filter options ignore sibling filters (M8.6 N4):** `GET /issue-groups/categories` computes its
+    distinct level-2 categories + counts honouring only `repositoryId` + `view` + `includeInactive` — NOT the
+    currently-applied type/band/provider/search filters. So the category dropdown can offer a category whose
+    count, once combined with the other active filters, is zero. Accepted as-is (the dropdown is a convenience,
+    not an oracle; the list itself always reflects every filter). Revisit if users find empty-result categories
+    confusing — thread the sibling filters into `categoryCounts` then.
+  - **Repository "unresolved dependencies" count capped at 200 (M8.6 N5):** the repository rollup/coverage figure
+    for unresolved dependencies is clamped at 200 to bound the aggregate; a repository with more than 200 shows
+    "200" (effectively "200+"). Accepted for display; revisit by rendering it as "200+" or lifting the cap if a
+    real repository legitimately exceeds it.
+  - **Remove the `repository_fill_identity` trigger once all inserts are explicit (SF-2):** V22 added a
+    BEFORE INSERT trigger as a compatibility shim so legacy GitLab insert paths needed no change (it defaults
+    `provider`='gitlab' and fills `provider_repo_id` from `gitlab_project_id` only when that is non-null, and
+    `host` from the connection). Once every insert path sets provider/host/provider_repo_id explicitly (the
+    GitHub/public paths already do), drop the trigger + its function in a new migration so identity is never
+    implicitly derived. Until then the NOT NULL identity columns + the SF-2 `providerlessNonGitlabInsertFails`
+    guard keep a bad insert from being stored.
+  - **Relative-time E2E date-boundary flake (M8.x train):** a relative-time assertion (e.g. "9 hours ago" /
+    "3 days ago") can flip when the e2e run crosses a day/boundary between seeding and assertion (observed as a
+    one-off on a 3rd consecutive run; a re-run was clean). Accepted as a known flake; harden later by freezing the
+    clock in the e2e or asserting a tolerant range rather than an exact phrase.
 - Post-M8.1 deferred register moves (recorded 2026-10-26, D-080/D-081):
   - **Sajal's UI polish list (2026-10-25 walkthrough feedback) → M8.6 (D-081 (2)):** carried with the compact
     side-panel locations row above.

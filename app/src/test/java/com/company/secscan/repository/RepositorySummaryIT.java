@@ -86,7 +86,7 @@ class RepositorySummaryIT extends AbstractGitLabIT {
         seedOpenGroup(other.getId(), otherRepo.getId(), "crit", 99);
 
         // includeInactive=true preserves this rollup test's original "list all" behaviour (M8.6 default is active-only).
-        PagedResponse<RepositoryView> page = service.listSelected(null, true, false, false, "severity", 0, 50);
+        PagedResponse<RepositoryView> page = service.listSelected(null, true, false, false, null, "severity", 0, 50);
         // The other workspace's repo is never listed.
         assertThat(page.content()).extracting(RepositoryView::id).doesNotContain(otherRepo.getId());
 

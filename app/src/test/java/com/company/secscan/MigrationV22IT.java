@@ -222,6 +222,21 @@ class MigrationV22IT {
     }
 
     @Test
+    void providerlessNonGitlabInsertFails() {   // SF-2
+        migrateToLatest();
+        UUID ws = seedWorkspace("providerless-ws");
+        // A non-GitLab repository insert that supplies no provider_repo_id and has no gitlab_project_id to derive
+        // one from: the identity trigger fills provider_repo_id from gitlab_project_id ONLY when that is not null,
+        // so it is left NULL and the NOT NULL identity constraint rejects the row (no fabricated/bogus id stored).
+        assertThatThrownBy(() -> jdbc.update(
+                "insert into repository (id, workspace_id, connection_id, provider, host, path_with_namespace) "
+                        + "values (gen_random_uuid(), ?, null, 'github', 'github.com', 'octo/app')",
+                ws))
+                .hasMessageContaining("provider_repo_id");
+        assertThat(count("repository")).isZero();
+    }
+
+    @Test
     void publicConnectionRejectsAToken() {
         migrateToLatest();
         UUID ws = seedWorkspace("bad-public");

@@ -81,8 +81,11 @@ fi
 set +e
 # The branch is a single validated --branch=<name> argv element (never interpolated into a shell string, URL or
 # log line; D-076 A2). The equals form means a value is never parsed as a git option.
+# -c http.followRedirects=false (SF-3): never follow an HTTP redirect during the clone, so a malicious or
+# misconfigured host can never bounce the credentialled fetch to another origin (the token header would
+# otherwise be re-sent on the redirect target). TLS verification stays on (git default).
 # shellcheck disable=SC2086
-git clone --depth "$DEPTH" --single-branch ${BRANCH:+--branch="$BRANCH"} "$SCAN_CLONE_URL" "$CHECKOUT" 2>"$WORK/clone.err"
+git clone -c http.followRedirects=false --depth "$DEPTH" --single-branch ${BRANCH:+--branch="$BRANCH"} "$SCAN_CLONE_URL" "$CHECKOUT" 2>"$WORK/clone.err"
 CLONE_EXIT=$?
 set -e
 # The token header lives only here; drop it immediately after the clone.
