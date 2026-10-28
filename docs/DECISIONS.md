@@ -14,6 +14,72 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-089 M8.5 review fixes — same-branch orphan close + language scope (2026-10-27, accepted)
+Context: the /review-pr M8.5 round (D-086 train) found that the OD-19 ignored-orphan handling only fired on a
+branch switch, so a finding that genuinely disappears on the SAME branch (e.g. a SAST snippet shift) left a
+stale ignored row to accumulate; and that the static language detector counted data/markup formats as languages.
+Decision (refinement of D-083 / D-081, not a new rule):
+ - Reconcile closes a stale ignored orphan the moment it disappears on ANY authoritative scan of the tracked
+   branch (re-derivable hold, scanner succeeded + authoritative, fingerprint absent, not a frozen identity, not
+   a sub-issue-scope manual ignore): reason BRANCH_CHANGED when the scanner is re-baselining, else
+   SOLVED_NOT_DETECTED. The OD-19 one-off retire pass is therefore only a retroactive cleanup of orphans that
+   accumulated before this shipped; its ITs seed that legacy state directly. Domain rule 3 is unchanged (a
+   failed/non-authoritative scanner still closes nothing; a superseded secret key id / uncovered EOL is frozen).
+ - `lang_detect.py` counts only programming languages; data/markup formats (YAML, XML, JSON, SQL, Markdown,
+   CSV, .properties/.ini/.toml) are not reported, so `repository.languages` matches GitLab's language set
+   (HCL kept). A detection failure still never fails the scan and never clears stored languages.
+Consequences: no migration, no fingerprint change, no API contract change. Status still changes only through
+reconcile and the D-063 carve-outs, each with a triage_event.
+
+## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
+Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure
+code", "Infrastructure misconfiguration", "End-of-life runtime". The UI actually shipped (S10f) a different,
+final wording. Per the log no-edit rule, D-074's text stands; this entry is the authority for the shipped
+labels, which the M8.5 level-2 taxonomy sits beneath.
+Decision (errata): the shipped level-1 labels in `ui/src/lib/labels.ts` (`TYPE_LABEL`) are:
+ - `sca` → "Vulnerable dependency"
+ - `sast` → "Code weakness"
+ - `secret` → "Exposed secret"
+ - `iac` → "Infrastructure config"
+ - `eol` → "Outdated runtime"
+These are correct and unchanged; M8.5 adds only the level-2 category + optional OWASP 2025 name beneath them
+(D-083). Documentation accuracy only; no behaviour change.
+
+## D-087 IaC per-check_id severity override table (V20), scoring-only, global (2026-10-27, accepted)
+Context: M8.5 (D-083 OD-27). OSS Checkov checks carry no severity, so every IaC finding scores base MEDIUM
+(D-054). A maintained per-`check_id` override lets a specific check be scored CRITICAL/HIGH/MEDIUM/LOW.
+Decision: migration **V20** adds `iac_severity_override (check_id pk, severity, note, created_at)`. It is a
+global config table with **no `workspace_id`** (D-050 family, beside `kev_entry`/`epss_score`/`fix_time_config`/
+`eol_cycle`); its `IacSeverityOverrideRepository.findById(checkId)` lookup is added to the CLAUDE.md domain-rule-1
+exception list. The override is read by `SubIssueScorer` for IaC findings and fed to the pure `Scoring` as
+`ScoreInput.iacSeverityOverride`; it replaces the default MEDIUM base at scan time and on re-score (D-049). It is
+**scoring-only** — never a status change, never a `triage_event` — and `check_id` is unchanged as the IaC
+fingerprint/rule input (not a new fingerprint input). The table ships **empty**: a row is added only for a
+`check_id` confirmed in real Checkov output (never guessed, D-061 pattern). There is **no UI** to manage overrides
+yet (known gap). Proven by `ScoringTest.iacBaseUsesCheckIdOverrideWhenPresent` and
+`IacSeverityOverrideIT` (score changes, status unchanged, 0 triage_event).
+Consequences: one new global table; IaC scores become tunable without a status/fingerprint risk.
+
+## D-086 M8.x train execution model (2026-10-27, accepted)
+Context: M8.5, M8.6 and M8.7 (D-081 (1)(2)(3)) are planned together and approved once, then built back to back.
+This needs an execution model that keeps CLAUDE.md's "one milestone per session" and WORKFLOW's review/merge
+discipline while allowing a single combined plan.
+Decision (accepted by Sajal 2026-10-27; full text in `docs/plans/M8x-train-brief.md`):
+ - One combined Phase A plan for all three milestones; the architect approves it once.
+ - CLAUDE.md "don't start the next milestone in the same session" is KEPT: each milestone runs in its own
+   fresh session, started by the human. Continuity lives on disk: `docs/plans/M8x-train-brief.md` (source of
+   truth, incl. the "Approved plan changes" section), `docs/plans/M8x-train-state.md`, and per-milestone work
+   logs under `docs/reports/`.
+ - Branches are STACKED (deviation from WORKFLOW "branch from develop"): `feature/m8.6-ui-uplift` from the HEAD
+   of `feature/m8.5-correctness-taxonomy`; `feature/m8.7-multi-source` from the HEAD of `feature/m8.6-ui-uplift`.
+ - Review is per milestone after all three are built (`/review-pr` in fresh sessions). A fix to an earlier
+   branch is committed there and MERGED FORWARD (`git merge`, never rebase/force-push) into the later branches.
+   Human merges into develop/main in order m8.5 → m8.6 → m8.7.
+ - Real-data walkthroughs are deferred to the end of the train (listed per report under "Pending manual
+   walkthrough"); ib-api-v2 is onboarded only then (deviation from D-083's M8.1-baseline expectation).
+Consequences: the migration/identity/UI work proceeds as one reviewed train; the "3 real repos" and
+multi-provider walkthroughs happen once at the end against the fully built stack.
+
 ## D-082 M9 scheduling deferred after containers and git-history secrets (2026-10-27, accepted)
 Context: D-081 put M9 right after M8.7. Nothing in M8.5–M8.7 depends on scheduling.
 Decision: the order is M8.5 → M8.6 → M8.7 → container image scanning → git-history secrets + author → M9.

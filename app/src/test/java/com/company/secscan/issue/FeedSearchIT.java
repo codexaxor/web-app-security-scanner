@@ -58,10 +58,10 @@ class FeedSearchIT extends AbstractGitLabIT {
         group(WORKSPACE, repo.getId(), "solved1", 80, IssueGroup.STATUS_SOLVED);
         group(WORKSPACE, repo.getId(), "ignored1", null, IssueGroup.STATUS_IGNORED); // all-ignored → null score
 
-        var focus = service.listGroups(null, null, "focus", null, false, 0, 50);
+        var focus = service.listGroups(null, null, null, "focus", null, false, 0, 50);
         assertThat(focus.content()).extracting(IssueGroupView::title).containsExactly("open1");
 
-        var all = service.listGroups(null, null, "all", null, false, 0, 50);
+        var all = service.listGroups(null, null, null, "all", null, false, 0, 50);
         assertThat(all.content()).extracting(IssueGroupView::title).containsExactlyInAnyOrder("open1", "ignored1");
         // The all-ignored group has a null score (shown "Ignored", no band).
         assertThat(all.content()).filteredOn(g -> g.title().equals("ignored1"))
@@ -82,7 +82,7 @@ class FeedSearchIT extends AbstractGitLabIT {
         sol.solve();
         subIssues.save(sol);
 
-        var page = service.listGroups(repo.getId(), null, "all", null, false, 0, 50);
+        var page = service.listGroups(repo.getId(), null, null, "all", null, false, 0, 50);
         assertThat(page.content()).filteredOn(v -> v.title().equals("mixed")).singleElement().satisfies(v -> {
             assertThat(v.openCount()).isEqualTo(2);
             assertThat(v.ignoredCount()).isEqualTo(1);
@@ -102,10 +102,10 @@ class FeedSearchIT extends AbstractGitLabIT {
         group(WORKSPACE, repo.getId(), "high", 75, IssueGroup.STATUS_OPEN);
         group(WORKSPACE, repo.getId(), "ignored", null, IssueGroup.STATUS_IGNORED);
 
-        assertThat(service.listGroups(null, null, "all", "critical", false, 0, 50).content())
+        assertThat(service.listGroups(null, null, null, "all", "critical", false, 0, 50).content())
                 .extracting(IssueGroupView::title).containsExactly("crit");
         // No band filter returns the null-score ignored group too (in All view).
-        assertThat(service.listGroups(null, null, "all", null, false, 0, 50).totalElements()).isEqualTo(3);
+        assertThat(service.listGroups(null, null, null, "all", null, false, 0, 50).totalElements()).isEqualTo(3);
     }
 
     @Test
@@ -115,7 +115,7 @@ class FeedSearchIT extends AbstractGitLabIT {
         group(WORKSPACE, repo.getId(), "top", 95, IssueGroup.STATUS_OPEN);
         group(WORKSPACE, repo.getId(), "ign", null, IssueGroup.STATUS_IGNORED);
 
-        var all = service.listGroups(null, null, "all", null, false, 0, 50);
+        var all = service.listGroups(null, null, null, "all", null, false, 0, 50);
         assertThat(all.content()).extracting(IssueGroupView::title).containsExactly("top", "mid", "ign");
     }
 
@@ -126,11 +126,11 @@ class FeedSearchIT extends AbstractGitLabIT {
         group(WORKSPACE, active.getId(), "a", 90, IssueGroup.STATUS_OPEN);
         group(WORKSPACE, inactive.getId(), "b", 90, IssueGroup.STATUS_OPEN);
 
-        var def = service.listGroups(null, null, "focus", null, false, 0, 50);
+        var def = service.listGroups(null, null, null, "focus", null, false, 0, 50);
         assertThat(def.content()).extracting(IssueGroupView::title).containsExactly("a");
         assertThat(def.content().get(0).repositoryPath()).isEqualTo("svc/8104");
 
-        var incl = service.listGroups(null, null, "focus", null, true, 0, 50);
+        var incl = service.listGroups(null, null, null, "focus", null, true, 0, 50);
         assertThat(incl.content()).extracting(IssueGroupView::title).containsExactlyInAnyOrder("a", "b");
     }
 
@@ -142,7 +142,7 @@ class FeedSearchIT extends AbstractGitLabIT {
         Repository otherRepo = seedRepo(other.getId(), 8199L, true);
         group(other.getId(), otherRepo.getId(), "theirs", 99, IssueGroup.STATUS_OPEN);
 
-        var focus = service.listGroups(null, null, "focus", null, true, 0, 50);
+        var focus = service.listGroups(null, null, null, "focus", null, true, 0, 50);
         assertThat(focus.content()).extracting(IssueGroupView::title).containsExactly("mine");
     }
 }

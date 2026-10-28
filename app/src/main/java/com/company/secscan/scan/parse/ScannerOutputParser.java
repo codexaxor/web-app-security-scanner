@@ -107,8 +107,9 @@ public class ScannerOutputParser {
         String scopeStatus = m.scopeInventoryStatus == null ? ParsedScan.SCOPE_STATUS_OK : m.scopeInventoryStatus;
         List<String> unreadable = m.unreadableScopeManifests == null ? List.of()
                 : List.copyOf(m.unreadableScopeManifests);
+        List<String> languages = readLanguages(outDir.resolve("languages.json"));
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages);
     }
 
     /**
@@ -424,7 +425,47 @@ public class ScannerOutputParser {
                 line = range.get(0).asInt();
             }
             String severityLabel = text(c, "severity"); // usually null for OSS checks → base MEDIUM (D-054)
-            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel));
+            // D-083: Checkov's human description becomes the IaC title (carried via advisory_summary, reused);
+            // the check_id remains the subtitle and the fingerprint input.
+            String checkName = text(c, "check_name");
+            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel, checkName));
+        }
+    }
+
+    /**
+     * Reads {@code languages.json} (M8.5, D-081) → the ordered language list the worker stores on the repository.
+     * A missing or unparseable file, or a non-"ok" status, yields an empty list — the worker then leaves the
+     * stored languages unchanged (a detection failure never clears them).
+     */
+    List<String> readLanguages(Path file) {
+        if (!Files.exists(file)) {
+            return List.of();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(file.toFile());
+            if (root == null) {
+                return List.of();
+            }
+            // N-4: honour the detector's status — a non-"ok" status (an error result) yields an empty list, so
+            // the worker leaves the stored languages unchanged. A missing status field is treated as ok (the
+            // languages array, if present and well-formed, is used) for backward compatibility.
+            com.fasterxml.jackson.databind.JsonNode status = root.get("status");
+            if (status != null && status.isTextual() && !"ok".equals(status.asText())) {
+                return List.of();
+            }
+            com.fasterxml.jackson.databind.JsonNode arr = root.get("languages");
+            if (arr == null || !arr.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                if (n != null && n.isTextual() && !n.asText().isBlank()) {
+                    out.add(n.asText());
+                }
+            }
+            return out;
+        } catch (java.io.IOException e) {
+            return List.of();
         }
     }
 

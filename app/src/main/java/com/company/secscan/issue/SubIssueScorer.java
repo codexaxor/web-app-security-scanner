@@ -5,6 +5,8 @@ import com.company.secscan.finding.RawFinding;
 import com.company.secscan.intel.EolCycleRepository;
 import com.company.secscan.intel.EpssScore;
 import com.company.secscan.intel.EpssScoreRepository;
+import com.company.secscan.intel.IacSeverityOverride;
+import com.company.secscan.intel.IacSeverityOverrideRepository;
 import com.company.secscan.intel.KevEntryRepository;
 import com.company.secscan.scoring.ScoreInput;
 import com.company.secscan.scoring.ScoreLine;
@@ -36,12 +38,14 @@ public class SubIssueScorer {
     private final KevEntryRepository kevEntries;
     private final EpssScoreRepository epssScores;
     private final EolCycleRepository eolCycles;
+    private final IacSeverityOverrideRepository iacOverrides;
 
     public SubIssueScorer(KevEntryRepository kevEntries, EpssScoreRepository epssScores,
-                          EolCycleRepository eolCycles) {
+                          EolCycleRepository eolCycles, IacSeverityOverrideRepository iacOverrides) {
         this.kevEntries = kevEntries;
         this.epssScores = epssScores;
         this.eolCycles = eolCycles;
+        this.iacOverrides = iacOverrides;
     }
 
     /**
@@ -92,9 +96,17 @@ public class SubIssueScorer {
         // SAST test-path −15 (Scoring applies it only for SAST); derived from the finding's path, never stored.
         boolean testPath = TestPaths.isTestPath(sub.getFilePath());
 
+        // D-083 (OD-27, V20): a maintained per-check_id IaC severity override (global config, D-050) replaces the
+        // default-MEDIUM Checkov base. Looked up only for IaC findings; the table is tiny (PK get).
+        String iacSeverityOverride = null;
+        if (RawFinding.TYPE_IAC.equals(sub.getType()) && sub.getRuleId() != null) {
+            iacSeverityOverride = iacOverrides.findById(sub.getRuleId())
+                    .map(IacSeverityOverride::getSeverity).orElse(null);
+        }
+
         ScoreInput in = new ScoreInput(sub.getType(), sub.getToolSeverity(), sub.getSeverityLabel(),
                 sub.getRuleId(), onKev, repoSensitivity, eolStatus, testPath,
-                epss == null ? null : epss.doubleValue(), epssAdjustmentsEnabled);
+                epss == null ? null : epss.doubleValue(), epssAdjustmentsEnabled, iacSeverityOverride);
         ScoreResult result = Scoring.score(in);
 
         String unmapped = null;

@@ -15,6 +15,9 @@ package com.company.secscan.scoring;
  * @param testPath        true when a SAST finding is in a test path (the −15 adjustment, M6)
  * @param epss            the FIRST EPSS probability in [0,1], or null when unknown — the scoring-only tier (D-060)
  * @param epssAdjustmentsEnabled true when the workspace EPSS toggle is on; the EPSS tier applies only then (D-060)
+ * @param iacSeverityOverride for an IaC finding, a maintained per-check_id severity label (CRITICAL/HIGH/MEDIUM/
+ *                            LOW) that replaces the default MEDIUM base (D-083 OD-27, V20); null when none. It is
+ *                            consulted only for IaC and never changes status or the fingerprint.
  */
 public record ScoreInput(
         String type,
@@ -26,18 +29,28 @@ public record ScoreInput(
         String eolStatus,
         boolean testPath,
         Double epss,
-        boolean epssAdjustmentsEnabled) {
+        boolean epssAdjustmentsEnabled,
+        String iacSeverityOverride) {
 
     /** Backward-compatible convenience: no EOL status and not a test path (SCA/secret/KEV callers). */
     public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
                       boolean onKev, String repoSensitivity) {
-        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, null, false, null, false);
+        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, null, false, null, false,
+                null);
     }
 
     /** Convenience preserving the M6 arity (EOL status + test path), with EPSS adjustments off. */
     public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
                       boolean onKev, String repoSensitivity, String eolStatus, boolean testPath) {
         this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, eolStatus, testPath,
-                null, false);
+                null, false, null);
+    }
+
+    /** Convenience preserving the M5/M7 arity (EPSS toggle), with no IaC severity override. */
+    public ScoreInput(String type, String maxSeverity, String severityLabel, String secretRuleId,
+                      boolean onKev, String repoSensitivity, String eolStatus, boolean testPath,
+                      Double epss, boolean epssAdjustmentsEnabled) {
+        this(type, maxSeverity, severityLabel, secretRuleId, onKev, repoSensitivity, eolStatus, testPath,
+                epss, epssAdjustmentsEnabled, null);
     }
 }

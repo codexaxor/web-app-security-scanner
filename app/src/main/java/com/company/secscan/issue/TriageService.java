@@ -44,11 +44,14 @@ public class TriageService {
     private final TriageStatusResolver statusResolver;
     private final WorkspaceRepository workspaces;
     private final RepositoryRepository repositories;
+    /** Optional: present only in the api profile (ReScoreService is @Profile("api")); worker never unignores. */
+    private final org.springframework.beans.factory.ObjectProvider<ReScoreService> reScore;
 
     public TriageService(IgnoreRuleRepository ignoreRules, SubIssueRepository subIssues,
                          IssueGroupRepository groups, TriageEventRepository events, GroupRollupService rollup,
                          TriageStatusResolver statusResolver, WorkspaceRepository workspaces,
-                         RepositoryRepository repositories) {
+                         RepositoryRepository repositories,
+                         org.springframework.beans.factory.ObjectProvider<ReScoreService> reScore) {
         this.ignoreRules = ignoreRules;
         this.subIssues = subIssues;
         this.groups = groups;
@@ -57,6 +60,7 @@ public class TriageService {
         this.statusResolver = statusResolver;
         this.workspaces = workspaces;
         this.repositories = repositories;
+        this.reScore = reScore;
     }
 
     /** Create a generic rule (path / cve / rule, global or per-repo; also subissue/group given an explicit value). */
@@ -121,7 +125,12 @@ public class TriageService {
                 .filter(r -> !r.getId().equals(ruleId)).toList();
         TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled());
         Set<UUID> touched = new HashSet<>();
-        for (SubIssue sub : subIssues.findByWorkspaceIdAndIgnoredByRuleId(WORKSPACE, ruleId)) {
+        List<UUID> reopenedToOpen = new java.util.ArrayList<>();
+        // B-2: only the still-IGNORED rows this rule holds are re-resolved. A finding the OD-19 retire pass
+        // solved while it was ignored has had its ignore markers cleared (SubIssue.solveIgnored), so deleting
+        // the rule must never resurrect it — the status filter guarantees that even against a stale pointer.
+        for (SubIssue sub : subIssues.findByWorkspaceIdAndStatusAndIgnoredByRuleId(
+                WORKSPACE, SubIssue.STATUS_IGNORED, ruleId)) {
             TriageResolver.Desired desired =
                     TriageResolver.resolve(sub, groupKeyOf(sub.getGroupId()), others, api);
             if (desired != null) {
@@ -134,10 +143,19 @@ public class TriageService {
                 subIssues.save(sub);
                 events.save(TriageEvent.user(WORKSPACE, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
                         TriageEvent.REASON_UNIGNORED));
+                if (SubIssue.STATUS_OPEN.equals(newStatus)) {
+                    reopenedToOpen.add(sub.getId());
+                }
                 touched.add(sub.getGroupId());
             }
         }
         ignoreRules.delete(rule);
+        // D-2 (D-083): re-score each reopened finding immediately so its score reflects current intel without
+        // waiting for the next scan/sweep (column-scoped, status='open' guarded → no event, no status change).
+        // Done after the unignore loop (the re-score flushes/clears the context) and before the group rollup.
+        for (UUID subId : reopenedToOpen) {
+            reScore.ifAvailable(rs -> rs.rescoreSubIssue(WORKSPACE, subId));
+        }
         recomputeGroups(touched);
     }
 

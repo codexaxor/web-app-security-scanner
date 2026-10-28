@@ -60,10 +60,15 @@ public class TriageApplier {
      * Applies triage for one scan and returns the groups whose rollup must be recomputed. {@code incomingFps} are
      * the fingerprints seen in this scan; {@code solvableScanners} are the scanners authoritative to close findings
      * (so a cleared ignore returns to the correct open/solved — a failed/absent scanner closes nothing, so OPEN).
+     * {@code rebaselineScanners} are the scanners re-baselining because the branch changed (used only to pick the
+     * close reason: BRANCH_CHANGED vs SOLVED_NOT_DETECTED). {@code frozenFingerprints} are superseded/undeterminable
+     * identities (a secret under a replaced key id — D-029 — or an uncovered EOL finding) that must never be
+     * (false-)closed this scan (S-2); they are skipped by every close path here.
      */
     public Set<UUID> applyAtReconcile(UUID workspaceId, UUID repositoryId, UUID scanId, TriageContext triage,
                                       Set<String> incomingFps, Set<String> solvableScanners,
-                                      Map<String, Set<String>> sastRuleIdsByFile) {
+                                      Map<String, Set<String>> sastRuleIdsByFile, Set<String> rebaselineScanners,
+                                      Set<String> frozenFingerprints) {
         // Review S3 freeze: a present-but-unusable .secscan.yml or a failed scope inventory must not revoke or
         // unignore anything it governed. A frozen config SKIPS the CVE revoke lifecycle (its materialized rules
         // persist, so their findings stay IGNORE_RULE) and the exclude.paths are dropped from the auto-context so
@@ -108,6 +113,27 @@ public class TriageApplier {
                     events.save(TriageEvent.system(workspaceId, sub.getId(), from, SubIssue.STATUS_IGNORED,
                             desired.reasonCode(), scanId));
                     touched.add(sub.getGroupId());
+                } else if (!incomingFps.contains(sub.getFingerprint())
+                        && solvableScanners.contains(sub.getScanner())
+                        && !frozenFingerprints.contains(sub.getFingerprint())
+                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)
+                        && TriageResolver.isHoldReDerivable(sub, groupKeyById.get(sub.getGroupId()), rules)) {
+                    // D-083 (OD-19) reconcile path (B-1): an IGNORED finding ABSENT from this scan whose scanner is
+                    // authoritative (succeeded + closes findings, same-branch OR re-baselining), held by a
+                    // re-derivable cause (an auto cause or a group/path/cve/rule rule), is SOLVED — so a stale
+                    // ignored orphan is closed the moment it genuinely disappears, not left to accumulate. The
+                    // reason is BRANCH_CHANGED when the absence is caused by a branch switch (the scanner is
+                    // re-baselining), else SOLVED_NOT_DETECTED (a same-branch disappearance, e.g. a SAST snippet
+                    // shift that moved the finding to a new fingerprint). A sub-issue-scope manual ignore is
+                    // preserved (isHoldReDerivable == false); a superseded identity is frozen (skipped above). If
+                    // the present fingerprint reappears it is re-ignored by the same cause, so intent is kept.
+                    sub.solveIgnored();
+                    subIssues.save(sub);
+                    String closeReason = rebaselineScanners.contains(sub.getScanner())
+                            ? TriageEvent.REASON_BRANCH_CHANGED : TriageEvent.REASON_SOLVED_NOT_DETECTED;
+                    events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_IGNORED,
+                            SubIssue.STATUS_SOLVED, closeReason, scanId));
+                    touched.add(sub.getGroupId());
                 } else if (hasIgnoreChanged(sub, desired)
                         && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
                     // Still ignored (hard rule 6) but the holding rule/reason changed — refresh quietly, no event.
@@ -120,7 +146,7 @@ public class TriageApplier {
                 if (isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
                     continue; // S3: the source that ignored it is unusable this scan — leave it ignored
                 }
-                String newStatus = reconcileStatus(sub, incomingFps, solvableScanners);
+                String newStatus = reconcileStatus(sub, incomingFps, solvableScanners, frozenFingerprints);
                 sub.unignore(newStatus);
                 subIssues.save(sub);
                 events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
@@ -228,9 +254,14 @@ public class TriageApplier {
     }
 
     /** The reconcile-computed status when an ignore is cleared: OPEN if seen now; else SOLVED only if the scanner
-     * was authoritative this scan (a failed/absent scanner closes nothing → OPEN, review change #4). */
-    private String reconcileStatus(SubIssue sub, Set<String> incomingFps, Set<String> solvableScanners) {
+     * was authoritative this scan (a failed/absent scanner closes nothing → OPEN, review change #4). A frozen
+     * (superseded) identity is never solved on absence (S-2) — it returns OPEN so the row is never false-closed. */
+    private String reconcileStatus(SubIssue sub, Set<String> incomingFps, Set<String> solvableScanners,
+                                   Set<String> frozenFingerprints) {
         if (incomingFps.contains(sub.getFingerprint())) {
+            return SubIssue.STATUS_OPEN;
+        }
+        if (frozenFingerprints.contains(sub.getFingerprint())) {
             return SubIssue.STATUS_OPEN;
         }
         return solvableScanners.contains(sub.getScanner()) ? SubIssue.STATUS_SOLVED : SubIssue.STATUS_OPEN;

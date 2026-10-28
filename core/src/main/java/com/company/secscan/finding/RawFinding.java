@@ -96,9 +96,11 @@ public record RawFinding(
      * severity), which the scorer maps to the IaC base MEDIUM (D-054).
      */
     public static RawFinding iac(String ruleId, String filePath, String resourceName, Integer line,
-                                 String severityLabel) {
+                                 String severityLabel, String checkName) {
+        // checkName (Checkov's human description) is carried in advisorySummary (the last field): descriptive,
+        // never a fingerprint input (D-083). The title derives from it, the subtitle from the check_id.
         return new RawFinding(TYPE_IAC, SCANNER_IAC, ruleId, null, resourceName, null, null, null, filePath,
-                line, null, null, null, null, null, severityLabel, null, null, null);
+                line, null, null, null, null, null, severityLabel, null, null, checkName);
     }
 
     /**

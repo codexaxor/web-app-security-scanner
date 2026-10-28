@@ -149,6 +149,9 @@ public class ScanStateService {
 
         repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).ifPresent(repo -> {
             repo.recordScannedSha(parsed.commit());
+            // M8.5 (D-081): refresh content-detected languages on every successful scan; an empty list (detection
+            // failed or found none) is ignored by setLanguages, so existing languages are never cleared.
+            repo.setLanguages(parsed.languages());
             repositories.save(repo);
         });
 
@@ -288,8 +291,10 @@ public class ScanStateService {
                     f.snippetHash(), f.severityLabel(), f.toolSeverity(), f.cwe());
         }
         if (RawFinding.TYPE_IAC.equals(f.type())) {
-            return ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(), f.packageName(),
-                    f.line(), f.severityLabel());
+            ScanFinding iac = ScanFinding.iac(workspaceId, scanId, repositoryId, f.ruleId(), f.filePath(),
+                    f.packageName(), f.line(), f.severityLabel());
+            iac.setAdvisorySummary(f.advisorySummary()); // Checkov check_name → IaC title (D-083)
+            return iac;
         }
         if (RawFinding.TYPE_EOL.equals(f.type())) {
             return ScanFinding.eol(workspaceId, scanId, repositoryId, f.packageName(), f.installedVersion(),

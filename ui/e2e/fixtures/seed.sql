@@ -364,4 +364,16 @@ update repository set scan_branch = 'dev' where path_with_namespace = 'acme/web-
 update scan set branch = 'dev'
  where repository_id = (select id from repository where path_with_namespace = 'acme/web-portal');
 
+-- M8.5 (D-083): "New · 7d" now counts only findings first seen on the repository's effective branch, so every
+-- seeded sub-issue needs a first_seen_scan_id pointing at a scan of its repository on that branch (real
+-- findings always have one). Additive — no row counts change; it only populates the previously-null column.
+update sub_issue s set first_seen_scan_id = (
+    select sc.id from scan sc
+    join repository r on r.id = s.repository_id
+    where sc.repository_id = s.repository_id
+      and sc.branch = coalesce(r.scan_branch, r.default_branch)
+    order by sc.finished_at desc nulls last
+    limit 1)
+ where first_seen_scan_id is null;
+
 commit;

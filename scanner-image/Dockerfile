@@ -186,6 +186,12 @@ RUN chmod 0444 /usr/local/bin/secscan_config.py
 COPY scope_inventory.py /usr/local/bin/scope_inventory.py
 RUN chmod 0444 /usr/local/bin/scope_inventory.py
 
+# The static language detector (M8.5, D-081): run `python3 -I lang_detect.py` so the scanned tree is never on
+# sys.path; sizes files by extension (contents never read), no network. Its unit tests (lang_detect_test.py) are
+# NOT shipped (host-run, langDetectTest).
+COPY lang_detect.py /usr/local/bin/lang_detect.py
+RUN chmod 0444 /usr/local/bin/lang_detect.py
+
 COPY secscan-lib.sh /usr/local/bin/secscan-lib.sh
 COPY run-scan.sh /usr/local/bin/run-scan.sh
 RUN chmod 0555 /usr/local/bin/secscan-lib.sh /usr/local/bin/run-scan.sh

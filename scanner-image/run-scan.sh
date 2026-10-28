@@ -435,6 +435,22 @@ if [ "$EOL_STATUS" = "failed" ] && [ -s "$WORK/eol.log" ]; then
     tail -c 2000 "$WORK/eol.log" >&2 || true
 fi
 
+# --- Language detection (M8.5, D-081): identify the repository's languages by file SIZE per extension (file
+# CONTENTS are never read) so the worker can refresh repository.languages on every successful scan. `python3 -I`
+# keeps the scanned tree off sys.path; the detector skips .git/node_modules/vendor/build/dist/target/.gradle, is
+# symlink-safe and realpath-confined to the clone. A failure here NEVER fails the scan — it writes an empty list
+# and a warning, and the worker leaves the stored languages unchanged on an empty result. ---
+LANG_JSON="$OUT/languages.json"
+set +e
+python3 -I /usr/local/bin/lang_detect.py "$CHECKOUT" > "$LANG_JSON" 2>"$WORK/lang.log"
+LANG_EXIT=$?
+set -e
+if [ "$LANG_EXIT" -ne 0 ] || [ ! -s "$LANG_JSON" ] || ! jq -e 'has("languages")' "$LANG_JSON" >/dev/null 2>&1; then
+    printf '{"languages":[],"status":"error"}' > "$LANG_JSON"
+    add_warning "LANGUAGE_DETECT_FAILED" \
+        "Language detection did not complete; repository languages were left unchanged." ""
+fi
+
 # --- .secscan.yml (M7, D-057): read the OPTIONAL in-repo config as DATA ONLY and emit a bounded, whitelisted
 # JSON the worker applies at triage step 9. This is the ONLY carve-out of D-037, and only because the worker
 # surfaces + audits every suppression it yields. `python3 -I` keeps the scanned tree off sys.path; the reader is
