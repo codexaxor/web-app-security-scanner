@@ -50,15 +50,19 @@ public class AuthController {
     private final SecurityContextRepository securityContextRepository;
     private final CsrfTokenRepository csrfTokenRepository;
     private final DemoMode demoMode;
+    private final boolean cookieSecure;
 
     public AuthController(AuthenticationManager authManager,
                           SecurityContextRepository securityContextRepository,
                           CsrfTokenRepository csrfTokenRepository,
-                          DemoMode demoMode) {
+                          DemoMode demoMode,
+                          @org.springframework.beans.factory.annotation.Value(
+                                  "${SECSCAN_SESSION_COOKIE_SECURE:true}") boolean cookieSecure) {
         this.authManager = authManager;
         this.securityContextRepository = securityContextRepository;
         this.csrfTokenRepository = csrfTokenRepository;
         this.demoMode = demoMode;
+        this.cookieSecure = cookieSecure;
     }
 
     /**
@@ -102,12 +106,17 @@ public class AuthController {
 
     /** JSON-only + CSRF-protected (enforced by the CsrfFilter): invalidates the session and clears the cookie. */
     @PostMapping(path = "/logout", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Void> logout(HttpServletRequest request) {
+    public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
         }
         SecurityContextHolder.clearContext();
+        // Nit: explicitly expire the session cookie (Set-Cookie SECSCAN_SESSION=; Max-Age=0) so the browser drops it.
+        org.springframework.http.ResponseCookie cleared = org.springframework.http.ResponseCookie
+                .from("SECSCAN_SESSION", "").path("/").maxAge(0).httpOnly(true).secure(cookieSecure)
+                .sameSite("Strict").build();
+        response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cleared.toString());
         return ResponseEntity.noContent().build();
     }
 

@@ -126,6 +126,8 @@ public class SecurityConfig {
                         .requestMatchers(LOGIN).permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                // Nit: no saved-request cache (it would create a session for an anonymous request).
+                .requestCache(rc -> rc.disable())
                 .securityContext(sc -> sc.securityContextRepository(contextRepository))
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
@@ -133,7 +135,12 @@ public class SecurityConfig {
                         // X-CSRF-TOKEN header it echoes back.
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         .requireCsrfProtectionMatcher(csrfRequiredMatcher()))
-                .exceptionHandling(e -> e.authenticationEntryPoint(jsonUnauthorized))
+                // SF-5: a CSRF (or any access) denial on a request with NO authenticated session (e.g. an idle/
+                // expired session) is really "not signed in" → the JSON 401 (no WWW-Authenticate), not 403. A
+                // live session that is merely missing the CSRF token still → 403.
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint(jsonUnauthorized)
+                        .accessDeniedHandler(unauthenticatedAwareAccessDeniedHandler(jsonUnauthorized)))
                 // Enforce idle/absolute session lifetimes before the context is loaded (an expired session is
                 // invalidated → the request is anonymous → JSON 401).
                 .addFilterBefore(new SessionTimeoutFilter(IDLE_TIMEOUT, ABSOLUTE_TIMEOUT),
@@ -147,6 +154,24 @@ public class SecurityConfig {
      */
     private static RequestMatcher csrfRequiredMatcher() {
         return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request);
+    }
+
+    /** Access denied → 401 JSON when the caller is unauthenticated (no/expired session), else the default 403. */
+    private static org.springframework.security.web.access.AccessDeniedHandler
+            unauthenticatedAwareAccessDeniedHandler(AuthenticationEntryPoint entryPoint) {
+        return (request, response, ex) -> {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            boolean authenticated = auth != null && auth.isAuthenticated()
+                    && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken);
+            if (authenticated) {
+                response.setStatus(HttpStatus.FORBIDDEN.value());
+            } else {
+                entryPoint.commence(request, response,
+                        new org.springframework.security.authentication.InsufficientAuthenticationException(
+                                "No authenticated session."));
+            }
+        };
     }
 
     private static boolean isHttpBasic(jakarta.servlet.http.HttpServletRequest request) {

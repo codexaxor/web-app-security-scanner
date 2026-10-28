@@ -131,8 +131,16 @@ public class ScanJobProcessor {
         }
 
         // No token for a local fixture clone; a public (credential_kind none) connection resolves to null
-        // (anonymous) via the shared helper, which also rejects a token-kind connection with a blank ciphertext.
-        String token = isLocal(conn) ? null : credentials.tokenFor(conn);
+        // (anonymous) via the shared helper. A token-kind connection with a blank/missing ciphertext is a broken
+        // connection — fail the scan permanently (SF-5b), reconcile nothing, do not retry.
+        String token;
+        try {
+            token = isLocal(conn) ? null : credentials.tokenFor(conn);
+        } catch (com.company.secscan.source.MissingCredentialException e) {
+            state.failPermanently(workspaceId, jobId, scan.getId(), "CONNECTION_TOKEN_MISSING",
+                    "Connection needs a new token.");
+            return;
+        }
 
         ScanWorkspace ws;
         try {
