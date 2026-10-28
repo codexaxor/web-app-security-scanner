@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @Profile("api")
+@org.springframework.core.annotation.Order(2) // SF-4: runs AFTER AdminBootstrap (the real admin comes first)
 public class DemoBootstrap implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DemoBootstrap.class);
@@ -38,6 +39,11 @@ public class DemoBootstrap implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (!demoMode.enabled()) {
+            return;
+        }
+        // SF-2 defence (normally unreachable — DemoMode fails closed at construction on an '@' username).
+        if (demoMode.username().contains("@")) {
+            log.error("Demo mode username contains '@'; refusing to create/update a demo row.");
             return;
         }
         log.warn("DEMO MODE is ON: the demo user '{}' can sign in with a non-email username. NEVER enable demo "

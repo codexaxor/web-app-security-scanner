@@ -49,6 +49,19 @@ class DemoModeTest {
     }
 
     @Test
+    void refusesToStartWhenDemoModeIsOnAndTheUsernameLooksLikeAnEmail() {   // SF-2: fail closed
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> demo("true", "admin@corp.com", "demo-pass"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("@");
+    }
+
+    @Test
+    void anEmailShapedUsernameIsIgnoredWhenDemoModeIsOff() {
+        // Off → the username is irrelevant; construction must not fail.
+        assertThat(demo("false", "admin@corp.com", null).enabled()).isFalse();
+    }
+
+    @Test
     void usablePasswordRequiresAtLeastTheDemoFloor() {
         assertThat(demo("true", "admin", "demo").hasUsablePassword()).isTrue();    // 4 chars = floor
         assertThat(demo("true", "admin", "dem").hasUsablePassword()).isFalse();    // 3 chars

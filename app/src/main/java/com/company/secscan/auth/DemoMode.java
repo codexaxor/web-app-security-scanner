@@ -27,6 +27,13 @@ public class DemoMode {
         String u = env.getProperty("SECSCAN_DEMO_USERNAME", "admin");
         this.username = u == null ? "admin" : u.trim().toLowerCase(Locale.ROOT);
         this.password = env.getProperty("SECSCAN_DEMO_PASSWORD");
+        // SF-2 (fail closed): a demo username is a NON-email identifier. If demo mode is on and the username
+        // looks like an email ('@'), refuse to start rather than create/collide with a real email login.
+        if (enabled && username.contains("@")) {
+            throw new IllegalStateException(
+                    "SECSCAN_DEMO_USERNAME must not contain '@' (a demo login is a non-email username). "
+                            + "Refusing to start demo mode with an email-shaped username.");
+        }
     }
 
     public boolean enabled() {
