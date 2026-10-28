@@ -119,6 +119,18 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
     }
 
     @Test
+    void branchExistsDoesAFreshLookupEvenWhenTheBranchIsStillInTheCache() {
+        // Populate the branch-list cache with a search that includes "dev".
+        gh.stubBranchPage("octo/app", 1, branchesJson("dev", 1, 10, "dev"), 1);
+        gh.stubBranch("octo/app", "dev-search", 404);
+        provider.listBranches(gh.baseUrl(), null, "123", "dev-search", 0, 50); // caches the full list incl. "dev"
+
+        // "dev" is in the cached list, but upstream it has just been deleted (exact GET → 404).
+        gh.stubBranch("octo/app", "dev", 404);
+        assertThat(provider.branchExists(gh.baseUrl(), null, "123", "dev")).isFalse();
+    }
+
+    @Test
     void aRateLimitMidFetchSurfacesAsTransientRateLimited() {
         gh.stubBranchPage("octo/app", 1, branchesJson("feat", 1, 100), 5);
         gh.stubBranchPageStatus("octo/app", 2, 429, "Retry-After", "60");   // rate limited on page 2

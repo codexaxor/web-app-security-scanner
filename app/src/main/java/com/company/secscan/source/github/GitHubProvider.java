@@ -10,10 +10,11 @@ import com.company.secscan.source.github.dto.GitHubBranch;
 import com.company.secscan.source.github.dto.GitHubRepo;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 /**
@@ -36,9 +37,20 @@ public class GitHubProvider implements SourceProvider {
     private static final int MAX_SEARCH_PAGES = 10;          // cap: scan at most 1,000 branches
     static final int SEARCH_CAP = SEARCH_PAGE_SIZE * MAX_SEARCH_PAGES;
     private static final long CACHE_TTL_MS = Duration.ofMinutes(5).toMillis();
+    static final int MAX_CACHE_ENTRIES = 500;                // bound the cache; evict least-recently-used
 
     private final GitHubClient client;
-    private final Map<String, Entry> cache = new ConcurrentHashMap<>();
+    private final Map<String, Entry> cache = boundedLru(MAX_CACHE_ENTRIES);
+
+    /** An access-ordered LRU bounded to {@code maxEntries}, wrapped synchronized (listBranches runs concurrently). */
+    static <V> Map<String, V> boundedLru(int maxEntries) {
+        return Collections.synchronizedMap(new LinkedHashMap<String, V>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, V> eldest) {
+                return size() > maxEntries;
+            }
+        });
+    }
 
     /** A per-repo cache entry: the repo metadata (always), and the full branch list once a search has fetched it. */
     private record Entry(long at, GitHubRepo repo, List<GitHubBranch> allBranches, boolean truncated) {
@@ -170,6 +182,8 @@ public class GitHubProvider implements SourceProvider {
 
     @Override
     public boolean branchExists(String baseUrl, String token, String providerRepoId, String branch) {
+        // Deliberately does NOT read the branch-list cache: setting a scan branch (D-076) needs an authoritative
+        // fresh exact lookup, so a branch that is still in the cache but deleted upstream is correctly rejected.
         GitHubRepo repo = client.repoById(baseUrl, token, Long.parseLong(providerRepoId));
         return client.branchExists(baseUrl, token, repo.fullName(), branch);
     }
