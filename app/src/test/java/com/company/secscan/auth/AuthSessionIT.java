@@ -51,8 +51,8 @@ class AuthSessionIT extends AbstractApiServerIT {
 
     private static String sessionCookie(ResponseEntity<?> response) {
         for (String setCookie : response.getHeaders().getOrDefault(HttpHeaders.SET_COOKIE, List.of())) {
-            if (setCookie.startsWith("JSESSIONID=")) {
-                return setCookie.split(";", 2)[0];   // "JSESSIONID=<id>"
+            if (setCookie.startsWith("SECSCAN_SESSION=")) {
+                return setCookie.split(";", 2)[0];   // "SECSCAN_SESSION=<id>"
             }
         }
         return null;
@@ -82,7 +82,7 @@ class AuthSessionIT extends AbstractApiServerIT {
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         String setCookie = res.getHeaders().getOrDefault(HttpHeaders.SET_COOKIE, List.of()).stream()
-                .filter(c -> c.startsWith("JSESSIONID=")).findFirst().orElseThrow();
+                .filter(c -> c.startsWith("SECSCAN_SESSION=")).findFirst().orElseThrow();
         assertThat(setCookie).containsIgnoringCase("HttpOnly");
         assertThat(setCookie).containsIgnoringCase("Secure");
         assertThat(setCookie).containsIgnoringCase("SameSite=Strict");

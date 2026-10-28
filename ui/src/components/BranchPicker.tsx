@@ -78,6 +78,9 @@ export default function BranchPicker({
           </button>
         ))}
       </div>
+      {q.data?.searchTruncated ? (
+        <p className="muted">Showing matches from the first 1,000 branches. Refine your search to narrow it.</p>
+      ) : null}
       {q.data && q.data.totalPages > 1 ? (
         <div className="row">
           <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>

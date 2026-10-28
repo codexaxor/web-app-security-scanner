@@ -1,7 +1,9 @@
 package com.company.secscan.support;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 
@@ -70,6 +72,38 @@ public final class GitHubWireMock {
     public GitHubWireMock stubBranches(String fullName, String body) {
         server.stubFor(get(urlPathEqualTo("/repos/" + fullName + "/branches")).willReturn(json(body)));
         return this;
+    }
+
+    /** One page of a repository's branches (keyed by the {@code page} query param) with a Link rel="last" header. */
+    public GitHubWireMock stubBranchPage(String fullName, int page, String body, int lastPage) {
+        String link = "<https://api.github.com/x?page=" + lastPage + ">; rel=\"last\"";
+        server.stubFor(get(urlPathEqualTo("/repos/" + fullName + "/branches"))
+                .withQueryParam("page", equalTo(String.valueOf(page)))
+                .willReturn(json(body).withHeader("Link", link)));
+        return this;
+    }
+
+    /** A branch-list page that returns a status (e.g. 429 for a rate limit) for a given page. */
+    public GitHubWireMock stubBranchPageStatus(String fullName, int page, int status, String... headers) {
+        server.stubFor(get(urlPathEqualTo("/repos/" + fullName + "/branches"))
+                .withQueryParam("page", equalTo(String.valueOf(page)))
+                .willReturn(withHeaders(aResponse().withStatus(status), headers)));
+        return this;
+    }
+
+    /** How many branch-LIST requests (not the exact-branch GET) have hit this server since the last reset. */
+    public int branchListRequestCount(String fullName) {
+        return server.countRequestsMatching(
+                getRequestedFor(urlPathEqualTo("/repos/" + fullName + "/branches")).build()).getCount();
+    }
+
+    /** Count every request seen (any path) since the last reset. */
+    public int totalRequestCount() {
+        return server.getAllServeEvents().size();
+    }
+
+    public void resetRequests() {
+        server.resetRequests();
     }
 
     public GitHubWireMock stubBranch(String fullName, String branch, int status) {

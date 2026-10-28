@@ -87,6 +87,7 @@ public class SecurityConfig {
             if (factory instanceof AbstractServletWebServerFactory servlet) {
                 Session session = servlet.getSession();
                 Cookie cookie = session.getCookie();
+                cookie.setName("SECSCAN_SESSION");
                 cookie.setHttpOnly(true);
                 cookie.setSecure(secure);
                 cookie.setSameSite(Cookie.SameSite.STRICT);

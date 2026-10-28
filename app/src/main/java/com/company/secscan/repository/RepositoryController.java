@@ -60,7 +60,7 @@ public class RepositoryController {
 
     /** The branches for the "Branch to scan" picker (D-076): server-side {@code search} + pagination. */
     @GetMapping("/{id}/branches")
-    public PagedResponse<BranchView> branches(
+    public com.company.secscan.repository.api.BranchPage branches(
             @PathVariable UUID id,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,

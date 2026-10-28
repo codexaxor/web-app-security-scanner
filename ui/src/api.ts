@@ -233,6 +233,12 @@ export interface BranchView {
   lastCommitAt: string | null;
 }
 
+// The branch-picker page carries searchTruncated (M8.8 S5b): true when a provider search could only scan a
+// bounded prefix of the branches (GitHub has no server-side branch search).
+export interface BranchPage extends Paged<BranchView> {
+  searchTruncated: boolean;
+}
+
 export interface SelectResult {
   added: number;
   reactivated: number;
@@ -513,7 +519,7 @@ export const api = {
   listRepositoryScans: (id: string, page: number, size: number) =>
     request<Paged<ScanView>>("GET", `/api/v1/repositories/${id}/scans?page=${page}&size=${size}`),
   listRepositoryBranches: (repositoryId: string, search: string, page: number, size: number) =>
-    request<Paged<BranchView>>(
+    request<BranchPage>(
       "GET",
       `/api/v1/repositories/${repositoryId}/branches?search=${encodeURIComponent(search)}&page=${page}&size=${size}`,
     ),

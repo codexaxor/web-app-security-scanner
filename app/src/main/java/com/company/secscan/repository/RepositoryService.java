@@ -366,7 +366,8 @@ public class RepositoryService {
      * empty page for a repository with no live GitLab connection (e.g. a local {@code file:} connection). 404 if
      * the repository is not in this workspace.
      */
-    public PagedResponse<BranchView> listBranches(UUID repositoryId, String search, int page, int size) {
+    public com.company.secscan.repository.api.BranchPage listBranches(UUID repositoryId, String search, int page,
+                                                                      int size) {
         Repository repo = requireRepo(repositoryId);
         if (search != null && search.length() > SEARCH_MAX) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
@@ -375,7 +376,7 @@ public class RepositoryService {
         int perPage = Math.min(Math.max(1, size), 100);
         GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
         if (conn == null || isLocal(conn)) {
-            return new PagedResponse<>(List.of(), pageIndex, perPage, 0, 0);
+            return com.company.secscan.repository.api.BranchPage.empty(pageIndex, perPage);
         }
         // Provider-neutral (M8.8): go through the adapter, not the GitLab client, so a public GitHub/GitLab
         // connection (credential_kind none, token null) lists branches without decrypting a blank ciphertext.
@@ -384,7 +385,8 @@ public class RepositoryService {
                 providers.require(conn.getProvider()).listBranches(
                         conn.getBaseUrl(), token, repo.getProviderRepoId(), search, pageIndex, perPage);
         List<BranchView> views = paged.items().stream().map(BranchView::of).toList();
-        return new PagedResponse<>(views, pageIndex, perPage, paged.totalElements(), paged.totalPages());
+        return new com.company.secscan.repository.api.BranchPage(views, pageIndex, perPage,
+                paged.totalElements(), paged.totalPages(), paged.truncated());
     }
 
     /**
