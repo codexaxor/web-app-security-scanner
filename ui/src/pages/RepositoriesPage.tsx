@@ -108,7 +108,7 @@ export default function RepositoriesPage() {
         actions={
           <>
             <Link className="btn btn-secondary" to="/connect">
-              Connect GitLab
+              Add source
             </Link>
             <Link className="btn btn-primary" to="/select">
               Select repositories
@@ -183,7 +183,7 @@ export default function RepositoriesPage() {
         <EmptyState title="No repositories match">
           {search || hasOpenIssues || lastScanFailed
             ? "Clear a filter or search to see more repositories."
-            : "Connect GitLab and select repositories to start scanning."}
+            : "Add a source and select repositories to start scanning."}
         </EmptyState>
       ) : (
         <div className="table-wrap">
