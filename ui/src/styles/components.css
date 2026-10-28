@@ -1809,3 +1809,52 @@ button.health-item {
 .rowmenu-item.danger {
   color: var(--danger);
 }
+
+/* M8.8 item 9: the Ignored reason-filter chip (from the Workspace settings LOW_EPSS link). */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2, var(--surface));
+  font-size: var(--fs-sm);
+}
+
+/* M8.8 item 10: busy buttons show a spinner (reduced-motion → a static ring). */
+.btn.is-busy {
+  position: relative;
+  color: transparent !important;
+}
+.btn.is-busy::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid currentcolor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  color: var(--primary-contrast, #fff);
+  animation: btn-spin 0.6s linear infinite;
+}
+.btn-secondary.is-busy::after,
+.btn-ghost.is-busy::after {
+  color: var(--text);
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.is-busy::after {
+    animation: none;
+    border-top-color: currentcolor;
+    opacity: 0.5;
+  }
+}

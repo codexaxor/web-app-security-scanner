@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type IgnoreRuleView, type IgnoredItemView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
@@ -30,13 +31,22 @@ function ignoredBy(createdBy: string | null): string {
 export default function IgnoredPage() {
   const itemsPaging = useUrlPaging("page", "size");
   const rulesPaging = useUrlPaging("rulesPage", "rulesSize");
+  const [sp, setSp] = useSearchParams();
+  const reason = sp.get("reason") || undefined;
   const [prefill, setPrefill] = useState<RulePrefill | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<IgnoreRuleView | null>(null);
   const toast = useToast();
 
+  const clearReason = () => {
+    const next = new URLSearchParams(sp);
+    next.delete("reason");
+    next.delete("page");
+    setSp(next, { replace: true });
+  };
+
   const items = useQuery({
-    queryKey: qk.ignored(itemsPaging.page, itemsPaging.size),
-    queryFn: () => api.listIgnored(itemsPaging.page, itemsPaging.size),
+    queryKey: [...qk.ignored(itemsPaging.page, itemsPaging.size), reason ?? ""],
+    queryFn: () => api.listIgnored(itemsPaging.page, itemsPaging.size, reason),
   });
   const rules = useQuery({
     queryKey: qk.ignoreRules(rulesPaging.page, rulesPaging.size),
@@ -58,6 +68,16 @@ export default function IgnoredPage() {
       <PageHeader title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them." />
 
       <h2 className="section-head">Ignored findings</h2>
+      {reason ? (
+        <div className="filter-chip" data-testid="reason-filter">
+          <span>
+            Filtered by reason: <strong>{reasonLabel(reason)}</strong>
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={clearReason}>
+            Clear filter
+          </button>
+        </div>
+      ) : null}
       {items.error ? <InlineError error={items.error} /> : null}
       {items.data && items.data.content.length === 0 ? (
         <EmptyState title="Nothing is ignored">Everything found is in the feed.</EmptyState>

@@ -556,8 +556,11 @@ export const api = {
       `/api/v1/sub-issues/${subIssueId}/events?page=${page}&size=${size}`,
     ),
 
-  listIgnored: (page: number, size: number) =>
-    request<Paged<IgnoredItemView>>("GET", `/api/v1/ignored?page=${page}&size=${size}`),
+  listIgnored: (page: number, size: number, reason?: string) =>
+    request<Paged<IgnoredItemView>>(
+      "GET",
+      `/api/v1/ignored?page=${page}&size=${size}${reason ? `&reason=${encodeURIComponent(reason)}` : ""}`,
+    ),
   listIgnoreRules: (page: number, size: number) =>
     request<Paged<IgnoreRuleView>>("GET", `/api/v1/ignore-rules?page=${page}&size=${size}`),
   createIgnoreRule: (body: { scope: string; repositoryId?: string | null; matchValue: string; reason: string }) =>

@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { invalidateFor, qk } from "../queryClient";
@@ -31,29 +32,36 @@ export default function SettingsPage() {
 
   return (
     <section>
-      <PageHeader title="Settings" subtitle="Workspace-wide scanning and triage preferences." />
+      <PageHeader title="Workspace settings" subtitle="Settings that apply to every repository in this workspace." />
       {settings.error ? <InlineError error={settings.error} /> : null}
 
       <Card className="settings-card">
         <div className="row-between">
           <div>
-            <div className="field-label">EPSS auto-ignore</div>
+            <div className="field-label">Hide low-risk vulnerabilities (EPSS)</div>
             <p className="muted">
-              Auto-ignore findings with EPSS below 1% that are not on CISA KEV, and apply the EPSS scoring tiers.
+              EPSS is a published score that estimates how likely a vulnerability is to be exploited. When this is
+              on, findings with a very low exploit likelihood (under 1%) are hidden from the feed — unless they are
+              on CISA's Known Exploited Vulnerabilities list, which are always shown.
             </p>
           </div>
           <Toggle
             checked={enabled}
             disabled={settings.isLoading || save.isPending}
             onChange={(next) => save.mutate(next)}
-            label="EPSS auto-ignore"
+            label="Hide low-risk vulnerabilities"
             testid="epss-toggle"
           />
         </div>
         <p className="muted consequence">
           {enabled
-            ? "On — low-EPSS findings are ignored as LOW_EPSS and re-evaluated on each scan and immediately on toggle."
-            : "Off — low-EPSS findings stay in the feed and no EPSS scoring adjustment is applied."}
+            ? "On — low-likelihood findings are hidden (reason LOW_EPSS) and re-checked on every scan."
+            : "Off — every finding stays in the feed, whatever its exploit likelihood."}
+        </p>
+        <p>
+          <Link to="/ignored?reason=LOW_EPSS" data-testid="low-epss-link">
+            View findings ignored by this rule
+          </Link>
         </p>
         {save.isSuccess ? (
           <p className="muted" data-testid="settings-saved">

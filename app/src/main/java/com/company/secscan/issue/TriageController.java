@@ -75,8 +75,9 @@ public class TriageController {
 
     /** The Ignored view: every ignored finding with its reason code, rule and creator (paginated). */
     @GetMapping("/ignored")
-    public PagedResponse<IgnoredItemView> listIgnored(@RequestParam(defaultValue = "0") int page,
+    public PagedResponse<IgnoredItemView> listIgnored(@RequestParam(required = false) String reason,
+                                                      @RequestParam(defaultValue = "0") int page,
                                                       @RequestParam(defaultValue = "50") int size) {
-        return triage.listIgnored(page, size);
+        return triage.listIgnored(page, size, reason);
     }
 }

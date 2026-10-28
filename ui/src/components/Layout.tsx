@@ -38,7 +38,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/feed", label: "Feed", icon: "feed" },
   { to: "/repositories", label: "Repositories", icon: "repositories" },
   { to: "/ignored", label: "Ignored", icon: "ignored" },
-  { to: "/settings", label: "Settings", icon: "settings" },
+  { to: "/settings", label: "Workspace settings", icon: "settings" },
   { to: "/connect", label: "Sources", icon: "connect" },
 ];
 

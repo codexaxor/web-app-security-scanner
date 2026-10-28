@@ -33,6 +33,8 @@ import org.springframework.http.HttpStatus;
  * guard and the CSP are unchanged) — and echoed by the SPA in the {@code X-CSRF-TOKEN} header. The password is
  * never logged and never returned. HTTP Basic remains the stateless path for curl/scripts (SecurityConfig).
  */
+@org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication(
+        type = org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {

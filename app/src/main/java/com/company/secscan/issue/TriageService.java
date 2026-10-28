@@ -168,8 +168,16 @@ public class TriageService {
 
     @Transactional(readOnly = true)
     public PagedResponse<IgnoredItemView> listIgnored(int page, int size) {
-        org.springframework.data.domain.Page<SubIssue> ignored = subIssues.findByWorkspaceIdAndStatus(
-                WORKSPACE, SubIssue.STATUS_IGNORED, PageRequest.of(Math.max(0, page), Math.max(1, size)));
+        return listIgnored(page, size, null);
+    }
+
+    /** The Ignored view, optionally filtered to one reason code (e.g. {@code LOW_EPSS}); counts stay server-side. */
+    public PagedResponse<IgnoredItemView> listIgnored(int page, int size, String reason) {
+        PageRequest pr = PageRequest.of(Math.max(0, page), Math.max(1, size));
+        org.springframework.data.domain.Page<SubIssue> ignored = (reason == null || reason.isBlank())
+                ? subIssues.findByWorkspaceIdAndStatus(WORKSPACE, SubIssue.STATUS_IGNORED, pr)
+                : subIssues.findByWorkspaceIdAndStatusAndIgnoreReason(WORKSPACE, SubIssue.STATUS_IGNORED,
+                        reason.trim(), pr);
         // N1: load the holding rules for the whole page in ONE query (no per-row findById N+1).
         Map<UUID, IgnoreRule> rulesById = rulesFor(ignored.getContent());
         return PagedResponse.fromPage(ignored.map(sub -> IgnoredItemView.of(sub,
