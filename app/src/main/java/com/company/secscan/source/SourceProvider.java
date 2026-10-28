@@ -34,9 +34,12 @@ public interface SourceProvider {
     /**
      * One page of a repository's branches (branch picker). {@code search} is optional; {@code page} is 0-based;
      * {@code size} is capped at the provider's maximum. Totals come from the provider's paging headers.
+     * {@code cacheScope} is an opaque per-caller key ({@code workspaceId|connectionId}, from the caller) that an
+     * adapter which caches MUST fold into its cache key so one workspace/connection is never served another's
+     * entry, and a public (anonymous) connection is never served an entry fetched with a token (M8.8 SF-1).
      */
     SourcePage<SourceBranch> listBranches(String baseUrl, String token, String providerRepoId, String search,
-                                          int page, int size);
+                                          int page, int size, String cacheScope);
 
     /**
      * The authoritative existence check for a branch (exact match) — used when setting a scan branch (D-076) and

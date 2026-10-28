@@ -381,9 +381,11 @@ public class RepositoryService {
         // Provider-neutral (M8.8): go through the adapter, not the GitLab client, so a public GitHub/GitLab
         // connection (credential_kind none, token null) lists branches without decrypting a blank ciphertext.
         String token = tokenFor(conn);
+        // SF-1: cache scope = workspace + connection, so the GitHub branch cache never crosses tenants/credentials.
+        String cacheScope = WORKSPACE + "|" + conn.getId();
         com.company.secscan.source.SourcePage<com.company.secscan.source.SourceBranch> paged =
                 providers.require(conn.getProvider()).listBranches(
-                        conn.getBaseUrl(), token, repo.getProviderRepoId(), search, pageIndex, perPage);
+                        conn.getBaseUrl(), token, repo.getProviderRepoId(), search, pageIndex, perPage, cacheScope);
         List<BranchView> views = paged.items().stream().map(BranchView::of).toList();
         return new com.company.secscan.repository.api.BranchPage(views, pageIndex, perPage,
                 paged.totalElements(), paged.totalPages(), paged.truncated());

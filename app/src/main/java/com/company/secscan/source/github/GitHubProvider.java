@@ -31,8 +31,8 @@ public class GitHubProvider implements SourceProvider {
 
     // M8.8 S5b: GitHub has no server-side branch search, so for a search term we fetch branch pages and filter
     // in memory. To keep the picker responsive and bound the API cost, the repo metadata and the fetched branch
-    // list are cached per repository (key = baseUrl|providerRepoId; repo identity is unique per host, so this is
-    // effectively per-repo / per-workspace) for a short TTL, and the full fetch is capped.
+    // list are cached per (workspace, connection, repo) — key = workspaceId|connectionId|providerRepoId (SF-1) —
+    // for a short TTL, and the full fetch is capped.
     private static final int SEARCH_PAGE_SIZE = 100;         // GitHub's max per_page
     private static final int MAX_SEARCH_PAGES = 10;          // cap: scan at most 1,000 branches
     static final int SEARCH_CAP = SEARCH_PAGE_SIZE * MAX_SEARCH_PAGES;
@@ -41,6 +41,11 @@ public class GitHubProvider implements SourceProvider {
 
     private final GitHubClient client;
     private final Map<String, Entry> cache = boundedLru(MAX_CACHE_ENTRIES);
+
+    /** Test hook: drop all cached entries (the bean is a singleton, so tests reset it for isolation). */
+    void clearCache() {
+        cache.clear();
+    }
 
     /** An access-ordered LRU bounded to {@code maxEntries}, wrapped synchronized (listBranches runs concurrently). */
     static <V> Map<String, V> boundedLru(int maxEntries) {
@@ -100,8 +105,11 @@ public class GitHubProvider implements SourceProvider {
 
     @Override
     public SourcePage<SourceBranch> listBranches(String baseUrl, String token, String providerRepoId,
-                                                 String search, int page, int size) {
-        String key = baseUrl + "|" + providerRepoId;
+                                                 String search, int page, int size, String cacheScope) {
+        // SF-1: the cache key is workspaceId|connectionId|providerRepoId (cacheScope = workspaceId|connectionId
+        // from RepositoryService), so one workspace/connection is never served another's cached branch list and
+        // a public (anonymous) connection is never served an entry that was fetched with a token.
+        String key = cacheScope + "|" + providerRepoId;
         Entry entry = freshEntry(key, baseUrl, token, providerRepoId);   // repo metadata (cached, ≤5 min)
         GitHubRepo repo = entry.repo();
         boolean hasSearch = search != null && !search.isBlank();

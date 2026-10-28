@@ -36,6 +36,7 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
 
     @BeforeEach
     void setUp() {
+        provider.clearCache();
         gh = new GitHubWireMock().stubRepoById(123, REPO_JSON);
     }
 
@@ -67,7 +68,7 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
         // No exact branch named "release" → 404 so the search falls through to the full fetch.
         gh.stubBranch("octo/app", "release", 404);
 
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "release", 0, 50);
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "release", 0, 50, "ws|conn");
 
         assertThat(page.items()).extracting(SourceBranch::name).contains("release-candidate");
         assertThat(page.truncated()).isFalse();
@@ -77,11 +78,11 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
     void theExactMatchFastPathIsASingleBranchCall() {
         // Warm the repo cache with a no-search page call, then reset the request journal.
         gh.stubBranchPage("octo/app", 1, branchesJson("feat", 1, 10), 1);
-        provider.listBranches(gh.baseUrl(), null, "123", null, 0, 50);
+        provider.listBranches(gh.baseUrl(), null, "123", null, 0, 50, "ws|conn");
         gh.resetRequests();
 
         gh.stubBranch("octo/app", "main", 200);   // exact match exists
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "main", 0, 50);
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "main", 0, 50, "ws|conn");
 
         assertThat(page.items()).extracting(SourceBranch::name).containsExactly("main");
         // Exactly one GitHub call (the exact-branch GET); the repo metadata came from cache.
@@ -94,11 +95,11 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
         gh.stubBranchPage("octo/app", 2, branchesJson("feat", 101, 20, "zzz-target"), 2);
         gh.stubBranch("octo/app", "target", 404);
 
-        SourcePage<SourceBranch> first = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50);
+        SourcePage<SourceBranch> first = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50, "ws|conn");
         assertThat(first.items()).extracting(SourceBranch::name).contains("zzz-target");
 
         gh.resetRequests();
-        SourcePage<SourceBranch> second = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50);
+        SourcePage<SourceBranch> second = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50, "ws|conn");
 
         assertThat(second.items()).extracting(SourceBranch::name).contains("zzz-target");
         assertThat(gh.totalRequestCount()).isZero();   // served entirely from the 5-minute cache
@@ -112,7 +113,7 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
         }
         gh.stubBranch("octo/app", "feat", 404);
 
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "feat", 0, 50);
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "feat", 0, 50, "ws|conn");
 
         assertThat(page.truncated()).isTrue();
         assertThat(page.items()).isNotEmpty();
@@ -123,11 +124,26 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
         // Populate the branch-list cache with a search that includes "dev".
         gh.stubBranchPage("octo/app", 1, branchesJson("dev", 1, 10, "dev"), 1);
         gh.stubBranch("octo/app", "dev-search", 404);
-        provider.listBranches(gh.baseUrl(), null, "123", "dev-search", 0, 50); // caches the full list incl. "dev"
+        provider.listBranches(gh.baseUrl(), null, "123", "dev-search", 0, 50, "ws|conn"); // caches the full list incl. "dev"
 
         // "dev" is in the cached list, but upstream it has just been deleted (exact GET → 404).
         gh.stubBranch("octo/app", "dev", 404);
         assertThat(provider.branchExists(gh.baseUrl(), null, "123", "dev")).isFalse();
+    }
+
+    @Test
+    void aSecondWorkspaceOrConnectionIsNotServedAnothersCachedEntry() {   // SF-1
+        gh.stubBranchPage("octo/app", 1, branchesJson("feat", 1, 20, "zzz-target"), 1);
+        gh.stubBranch("octo/app", "target", 404);
+
+        // Workspace/connection A (with a token) caches the full branch list for repo 123.
+        provider.listBranches(gh.baseUrl(), "github_pat_A", "123", "target", 0, 50, "wsA|connA");
+        gh.resetRequests();
+
+        // A different workspace/connection B (public, anonymous) requests the SAME repo id → must NOT be served
+        // A's cached entry (which was fetched with a token); it does its own fetch.
+        provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50, "wsB|connB");
+        assertThat(gh.totalRequestCount()).isPositive();
     }
 
     @Test
@@ -136,7 +152,7 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
         gh.stubBranchPageStatus("octo/app", 2, 429, "Retry-After", "60");   // rate limited on page 2
         gh.stubBranch("octo/app", "feat", 404);
 
-        assertThatThrownBy(() -> provider.listBranches(gh.baseUrl(), null, "123", "feat", 0, 50))
+        assertThatThrownBy(() -> provider.listBranches(gh.baseUrl(), null, "123", "feat", 0, 50, "ws|conn"))
                 .isInstanceOf(ProviderException.class)
                 .satisfies(e -> {
                     ProviderException pe = (ProviderException) e;

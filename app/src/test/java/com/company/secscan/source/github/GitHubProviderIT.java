@@ -35,6 +35,7 @@ class GitHubProviderIT extends AbstractGitLabIT {
 
     @BeforeEach
     void setUp() {
+        provider.clearCache();
         gh = new GitHubWireMock();
     }
 
@@ -53,7 +54,7 @@ class GitHubProviderIT extends AbstractGitLabIT {
         // resolves the repo first, so a 403-with-exhausted-rate-limit there must map to the existing transient
         // RATE_LIMITED error — never a "repo gone" NOT_FOUND — and carry no Authorization header.
         gh.stubRepoByIdStatus(123, 403, "x-ratelimit-remaining", "0", "x-ratelimit-reset", "9999999999");
-        assertThatThrownBy(() -> provider.listBranches(gh.baseUrl(), null, "123", null, 0, 100))
+        assertThatThrownBy(() -> provider.listBranches(gh.baseUrl(), null, "123", null, 0, 100, "ws|conn"))
                 .isInstanceOf(ProviderException.class)
                 .satisfies(e -> {
                     ProviderException pe = (ProviderException) e;
@@ -120,7 +121,7 @@ class GitHubProviderIT extends AbstractGitLabIT {
         gh.stubRepoById(123, REPO_JSON);
         gh.stubBranches("octo/app",
                 "[{\"name\":\"main\",\"protected\":true},{\"name\":\"dev\",\"protected\":false}]");
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), TOKEN, "123", null, 0, 100);
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), TOKEN, "123", null, 0, 100, "ws|conn");
         assertThat(page.items()).anySatisfy(b -> {
             assertThat(b.name()).isEqualTo("main");
             assertThat(b.isDefault()).isTrue();
