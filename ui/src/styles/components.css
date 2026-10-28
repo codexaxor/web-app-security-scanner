@@ -1677,3 +1677,19 @@ button.health-item {
   border-color: var(--border-strong);
   color: var(--text);
 }
+
+/* M8.8 D-091: a persistent red banner across the top when the server runs in demo mode. Solid danger red with
+   white text for AA contrast in both themes; spans the full width above the app shell. */
+.demo-ribbon {
+  grid-column: 1 / -1;
+  background: var(--danger);
+  color: var(--danger-contrast);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: 6px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
