@@ -14,6 +14,56 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
+Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
+poor UX, and an avoidable secret-at-rest-in-memory. M8.8 adds a real browser session without weakening the
+D-067 security baseline.
+Decision: a server-side **in-memory** session for the browser.
+ - `POST /api/v1/auth/login` (JSON only — a non-JSON `Content-Type` → **415**) authenticates against `app_user`
+   (bcrypt) and starts an `HttpSession`; the session cookie is **HttpOnly + Secure + SameSite=Strict**; the
+   session id is **rotated on login** (fixation protection); **idle timeout 30 min**, **absolute cap 8 h**
+   (enforced by a filter on the session's creation time, independent of activity).
+ - `POST /api/v1/auth/logout` invalidates the session and clears the cookie; it is an unsafe request so it
+   **requires the CSRF token** (no token → 403).
+ - `GET /api/v1/auth/session` returns `{username, demoMode}` for a live session (401 otherwise).
+ - **CSRF ON** for cookie-authenticated unsafe requests (POST/PUT/PATCH/DELETE): a **session synchronizer
+   token** (stored server-side in the session, **delivered in the `/auth/login` and `/auth/session` JSON
+   bodies**, never in a JS-readable cookie — so the D-067(e) `document.cookie` guard stands and the CSP is
+   unchanged) echoed by the SPA in an **`X-CSRF-TOKEN`** header; a cookie-auth unsafe request without a valid
+   token → **403**. (This is a synchronizer token, chosen over a double-submit cookie because the guard forbids
+   `document.cookie`; it is strictly stronger.)
+ - **HTTP Basic is unchanged, stateless, and CSRF-exempt** (it carries no session cookie) for curl/scripts.
+   Basic stays safe to exempt because D-067(b) keeps the 401 free of `WWW-Authenticate`, so a browser never
+   silently replays Basic cross-site.
+ - The SPA **never constructs an `Authorization: Basic` header** (login is the JSON POST) and keeps no password
+   after login — only the in-memory CSRF token. A **refresh stays signed in** (the cookie survives; the SPA
+   calls `/auth/session` on load). Nothing is written to web storage. An api restart signs everyone out.
+ - **Idle-timer refresh:** the UI status-poll (only while scans are active AND the tab is visible, M8.8 item 5)
+   refreshes the idle timer; the 8 h absolute cap still applies regardless of polling.
+ - `SECSCAN_SESSION_COOKIE_SECURE` (default **true**) exists so the e2e compose project (if it reaches the UI
+   over plain http on a non-localhost host) can set it **false** — documented as never false anywhere else.
+Consequences: amends **D-067(a)** (a browser refresh no longer forces re-sign-in); D-067(b–e) unchanged; the UI
+gate guard stays green and is extended to fail on any `Authorization: Basic` construction in `ui/src`. Login
+attempt rate-limiting/lockout is out of scope here (deferred to M10).
+
+## D-091 M8.8 demo mode (`SECSCAN_DEMO_MODE`), never on a shared host (2026-10-28, accepted)
+Context: demos and trials want a memorable non-email login (e.g. `admin`) without weakening the rules for real
+accounts or the email identity model.
+Decision: `SECSCAN_DEMO_MODE` (default **false**).
+ - **On:** `SECSCAN_DEMO_USERNAME` (default `admin`, **may be a non-email username**) and
+   `SECSCAN_DEMO_PASSWORD` (**min 4 chars**) define a demo `app_user` **created/updated idempotently** (bcrypt)
+   at api startup; a **WARN logs at every startup** ("DEMO MODE ON — the demo user can sign in; never enable on
+   a shared/production host"); the UI shows a red **"DEMO MODE"** ribbon (`/auth/session` → `demoMode:true`).
+ - **Off:** the demo username is neither created nor updated, **and any login identifier without `@` is
+   refused** at authentication time — so a leftover demo row from a previous on-run can never sign in once demo
+   mode is turned off. Real users (emails, which contain `@`) are unaffected.
+ - The **12-char minimum** and the normal bootstrap rules stay for **every real user**; the relaxed 4-char floor
+   applies only to the demo user. `app_user.email` has **no format constraint** (lowercased-unique `text`, V1/
+   V3), so a non-email username needs **no migration**; it is stored lowercased like any identifier.
+ - README documents: **never enable demo mode on a shared/production host.**
+Consequences: a low-friction demo login that cannot leak into real deployments (the no-`@` lockout is the
+backstop); no migration; the 12-char rule is intact for real users.
+
 ## D-090 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
 (Renumbered from D-089 at the m8.6→m8.7 train merge: D-089 was already taken by the M8.5 review-fix decision,
 which merges to develop first; this M8.7 decision, merging last, takes the next free number.)

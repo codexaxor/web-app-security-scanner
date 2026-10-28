@@ -414,6 +414,42 @@ GitHub repo + a public GitHub repo in one feed; the mirror pair yields the same 
 existing repositories keep ids and findings after V22. (Detailed Done when: architect, before
 `/start-milestone M8.7`.)
 
+## M8.8 Usability + onboarding
+
+**Scope (D-091 + D-092).** Make the product usable end-to-end without rough edges. (1) **Blocker:** public
+repositories (`credential_kind='none'`) must not crash the branch picker or the default-branch refresh at
+enqueue — credentials are resolved through one provider-neutral helper (`null` = anonymous) and these paths go
+through the provider adapter, not the GitLab client. (2) An unhandled exception returns the generic
+`{"error":"INTERNAL","message":"Unexpected error."}` envelope (no class names/messages), logged server-side.
+(3) **D-092 browser session:** `POST /api/v1/auth/login` (JSON) creates a server session (cookie HttpOnly +
+Secure + SameSite=Strict, id rotated on login, idle 30 min, absolute 8 h), `POST /auth/logout` invalidates,
+`GET /auth/session` returns `{username, demoMode}`; CSRF ON (session synchronizer token in the JSON body,
+echoed in `X-CSRF-TOKEN`) for cookie-authenticated unsafe requests; HTTP Basic stays stateless + CSRF-exempt
+for curl/scripts; the password is never kept in JS memory and never in web storage; a refresh stays signed in.
+(4) **D-091 demo mode:** `SECSCAN_DEMO_MODE` (default false) creates/updates a demo user allowed a non-email
+username, WARN at every startup, red "DEMO MODE" ribbon; off ⇒ the demo username cannot sign in; the 12-char
+rule stays for every real user. (5) Live scan status: poll every 3 s while any queued/running scan is visible,
+stop when none, respect `document.hidden`, toast + invalidate on completion. (6) One toast system (success /
+info / transient error, `aria-live` polite, reduced-motion); form errors inline next to the field,
+confirmations in dialogs; the bottom `ErrorBanner` is retired. (7) Sources redesign: one provider-first page
+(provider → host → private/public), one URL-or-path input with detected provider/host/kind, per-path help,
+connected-sources table with a `⋮` menu, Rotate token hidden (and API-rejected) for `credential_kind='none'`.
+(8) One shared `Pager` ("1–50 of 282", 25/50/100, page in the URL, reset to page 1 on filter change) across
+every standard list view. (9) "Workspace settings" rename + plain-language EPSS text + link to the LOW_EPSS
+Ignored filter. (10) Polish: available-width layout, skeleton loaders, busy buttons, hover/focus, AA contrast
+in both themes. No new runtime deps, no CSS framework, CSP unchanged, scanner hardening unchanged.
+
+**Done when:** a public GitHub **and** a public GitLab repository list branches, set a scan branch, refresh the
+default branch at enqueue and handle a missing branch — all without a token (`PublicRepo*IT`); an unhandled
+exception yields the `INTERNAL` envelope and does not change security 401/403, 404 or existing 400s
+(`ApiExceptionHandlerIT`); login/logout/`session`, cookie flags, session-id rotation, idle AND absolute expiry,
+a cookie-auth unsafe request without the CSRF token → 403, and Basic still working are proven by ITs; demo mode
+on logs in with a non-email username (WARN) and off refuses any identifier without `@`; the status-poll hook,
+the toast system, the shared `Pager` and the Sources URL parser are unit-tested; e2e (×2) covers sign in →
+reload still signed in → sign out, the demo ribbon, live queued→running→completed with no reload, a success and
+a field error on Sources, `Pager` on Repositories and Feed, and the settings text + link. (Detailed Done when:
+architect, before `/start-milestone M8.8`.)
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
@@ -455,6 +491,7 @@ locally.
 | M8.5 | Correctness + taxonomy | OD-19 family (incl. M8.1 D-1, absent-but-ignored after a branch switch), level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, D-075 real-repo walkthrough (UI polish moved out) — D-081 (1), D-083 | See the "M8.5 Correctness + taxonomy" section |
 | M8.6 | UI uplift | New app shell (left sidebar), Repositories list redesign (clickable rows), repository detail page (issues / scans / settings, coverage banner, last scan age), issue side panel clarity, secret context, compact side-panel locations — D-081 (2), D-084 | See the "M8.6 UI uplift" section (detailed Done when: architect, before `/start-milestone M8.6`) |
 | M8.7 | Multi-provider sources | gitlab.com + GitHub + public repositories in one workspace, one shared feed; one adapter per provider; host policy per connection; provider-neutral connection + identity (V22) — D-080, D-081 (3), D-085 | See the "M8.7 Multiple sources" section (detailed Done when: architect, before `/start-milestone M8.7`) |
+| M8.8 | Usability + onboarding | Public-repo blocker fix (provider-neutral credential helper), generic INTERNAL error envelope, browser session (login/logout/session, cookie, CSRF; Basic kept), demo mode, live scan status polling, one toast system + inline errors, Sources redesign, shared Pager, Workspace settings, polish — D-091, D-092 | See the "M8.8 Usability + onboarding" section |
 | TBD | Container image scanning | Registry-agnostic OCI (any registry incl. self-hosted), public images first-class, spike before build; manual scan/re-check only until M9 — D-081 (5), D-082 | SPEC section pending (architect) |
 | later | Secrets in git history | Git-history secret scan + author attribution; own lifecycle decision — D-081 (6) | SPEC section pending (architect) |
 | M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner; provider-aware (D-080); deferred per D-082; also nightly container re-check | A new commit is scanned within 15 min; nightly run completes for all repos |
