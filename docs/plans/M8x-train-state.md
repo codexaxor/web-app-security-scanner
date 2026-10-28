@@ -1,5 +1,11 @@
 # M8.x train state
 - Train plan approved: yes (2026-10-27) — with binding changes appended to M8x-train-brief.md "Approved plan changes (2026-10-27)"
+- Review round M8.5 (2026-10-28): /review-pr M8.5 findings fixed on feature/m8.5-correctness-taxonomy
+  (fix(core)/fix(scanner)/fix(app)+docs; B-1..N-6, D-089) and MERGED FORWARD m8.5 → m8.6 → m8.7 (git merge
+  --no-ff, no rebase). Only conflict: docs/DECISIONS.md D-089 number clash — the M8.7 source-host entry was
+  renumbered to D-090 (merges to develop last), review-fix keeps D-089. m8.7 tip gates: G1 clean build app 436
+  / core 181 / 0 fail (incl. in-image lang 3 + branch-vectors 53); G2 vitest 87 + guard 67 clean; G3 e2e green
+  ×2 (one relative-time flake on a 3rd run, re-run clean). NOT pushed yet at time of writing → push all three.
 - Current milestone: done — TRAIN DONE (M8.5 → M8.6 → M8.7 all built & green). M8.6 pre-check gap fixed (d6d5269).
 - Current slice: M8.7 DONE (V0–V9 complete + finish)
 - Branch / last green commit: feature/m8.7-multi-source @ 72e0b14 (stacked on feature/m8.6-ui-uplift @ d6d5269)
