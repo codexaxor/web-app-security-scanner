@@ -76,9 +76,10 @@ export default function BranchPicker({
             <span className="branch-name">{b.name}</span>
             {b.isDefault ? <span className="chip chip-solved">default</span> : null}
             {b.isProtected ? <span className="chip chip-ignored">protected</span> : null}
-            {/* Last-commit time only when the provider gave one (GitHub gives none) — never "Invalid date"/a dash. */}
+            {/* Last-commit time only when the provider gave one (GitHub gives none) — never "Invalid date"/a dash.
+                aria-hidden so the option's accessible name stays the branch name (+ chips), not the timestamp. */}
             {b.lastCommitAt ? (
-              <span className="muted branch-commit">
+              <span className="muted branch-commit" aria-hidden="true">
                 <RelativeTime iso={b.lastCommitAt} />
               </span>
             ) : null}

@@ -28,8 +28,8 @@ for (const vp of VIEWPORTS) {
     for (const [name, path] of SCREENS) {
       test(`${name} ${vp.w}x${vp.h}`, async ({ page }) => {
         await signIn(page, path);
-        await page.waitForLoadState("networkidle");
-        await page.waitForTimeout(250); // let any band bars / pills settle
+        await page.waitForLoadState("domcontentloaded");
+        await page.waitForTimeout(800); // let any band bars / pills settle
         await page.screenshot({ path: `./artifacts/screens/${name}-${vp.w}x${vp.h}.png`, fullPage: true });
       });
     }
@@ -53,8 +53,8 @@ for (const scheme of ["light", "dark"] as const) {
     for (const [name, path] of THEMED) {
       test(`${name} ${scheme} 1440`, async ({ page }) => {
         await signIn(page, path);
-        await page.waitForLoadState("networkidle");
-        await page.waitForTimeout(250);
+        await page.waitForLoadState("domcontentloaded");
+        await page.waitForTimeout(800);
         await page.screenshot({ path: `./artifacts/screens/${name}-${scheme}-1440.png`, fullPage: true });
       });
     }

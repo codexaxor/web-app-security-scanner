@@ -67,12 +67,14 @@ export default function RepositoriesPage() {
   }
 
   // SF-1: the provider filter is URL-addressable (?provider=gitlab|github) so a filtered list is shareable.
+  // Reset the page in the SAME search-params update (not via useUrlPaging.setPage) — two separate useSearchParams
+  // setters in one tick race, and the last write would otherwise drop ?provider.
   function setProvider(v: string) {
     const next = new URLSearchParams(sp);
     if (v) next.set("provider", v);
     else next.delete("provider");
+    next.delete("page"); // filter change → back to page 1
     setSp(next, { replace: false });
-    setPage(0);
   }
 
   const repos = useQuery({

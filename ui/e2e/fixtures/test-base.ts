@@ -71,7 +71,13 @@ export const adminPassword = () => ADMIN_PASSWORD;
  */
 export async function signIn(page: Page, path = "/"): Promise<void> {
   await page.goto(path);
-  await page.getByLabel("Email").fill(adminEmail());
-  await page.getByLabel("Password").fill(adminPassword());
-  await page.getByRole("button", { name: /continue|sign in/i }).click();
+  // D-092: the session cookie may already be active (a second signIn in the same context, e.g. a light/dark
+  // loop), so sign in only when the gate is actually showing. Wait for the app to settle into one or the other.
+  await page.waitForSelector('#signin-email, nav[aria-label="Primary"]', { timeout: 15000 });
+  if ((await page.locator("#signin-email").count()) > 0) {
+    await page.getByLabel("Email").fill(adminEmail());
+    await page.getByLabel("Password").fill(adminPassword());
+    await page.getByRole("button", { name: /continue|sign in/i }).click();
+    await page.waitForSelector('nav[aria-label="Primary"]', { timeout: 15000 });
+  }
 }

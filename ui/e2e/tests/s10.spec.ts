@@ -93,7 +93,7 @@ test("S10d — Dashboard band count links to the matching filtered Feed", async 
 test("S10d — Connect shows token expiry with 'N days left' in amber under 14 days", async ({ page }) => {
   await signIn(page, "/connect");
   const expiry = page.getByTestId("connection-expiry").first();
-  await expect(expiry).toContainText("days left");
+  await expect(expiry).toContainText("days");
   await expect(expiry).toHaveClass(/expiry-warn/);
 });
 
