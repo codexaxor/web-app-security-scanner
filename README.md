@@ -132,8 +132,22 @@ cd ui && npm run e2e             # end-to-end UI tests: isolated `secscan-e2e` c
 
 The first admin is created on first `api` startup when `app_user` is empty and
 `SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set (see `.env.example`).
-`/actuator/health` is public; `/api/**` requires HTTP Basic. For the host dev loop the worker runs as your
-own user, so the work root just needs to exist and be writable by you.
+`/actuator/health` is public; everything under `/api/**` requires authentication.
+
+The browser signs in at `POST /api/v1/auth/login` and gets a **server session** (D-092): an HttpOnly + Secure +
+SameSite=Strict `SECSCAN_SESSION` cookie, idle timeout 30 min, absolute cap 8 h; unsafe requests carry a CSRF
+token header (`X-CSRF-TOKEN`). A reload keeps you signed in; `POST /api/v1/auth/logout` ends the session. **HTTP
+Basic still works, statelessly, for curl/scripts** (and is CSRF-exempt). `SECSCAN_SESSION_COOKIE_SECURE` defaults
+to `true`; set it `false` only where the UI is reached over plain http on a non-localhost host (the e2e compose
+project does this) — **never on a shared/production host**.
+
+**Demo mode (D-091).** `SECSCAN_DEMO_MODE=true` creates/updates a demo user at startup
+(`SECSCAN_DEMO_USERNAME`, default `admin`, may be a non-email username; `SECSCAN_DEMO_PASSWORD`, min 4 chars),
+logs a WARN at every startup, and shows a red **DEMO MODE** ribbon in the UI. When it is off, any login
+identifier without `@` is refused (so a leftover demo user cannot sign in), and the 12-char password rule stays
+for every real user. **Never enable demo mode on a shared/production host.**
+
+For the host dev loop the worker runs as your own user, so the work root just needs to exist and be writable by you.
 
 ## Contributing
 
