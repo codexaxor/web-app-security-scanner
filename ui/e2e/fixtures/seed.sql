@@ -94,6 +94,16 @@ select gen_random_uuid(), ig.workspace_id, ig.id, ig.repository_id, ig.type, ig.
 from issue_group ig
 where ig.workspace_id = '00000000-0000-0000-0000-000000000001' and ig.group_key like 'bulk|%';
 
+-- M8.6 item 9: give some OPEN bulk groups (active repo → focus scope) a level-2 category so the Feed category
+-- filter has focus-scope data to narrow. Value-only (no new rows, no status/count change), so every existing
+-- count oracle — including core-keycloak's "64 groups" — is unaffected. Two categories keyed off the
+-- round-robin type: sast bulk → "Injection" (13 groups), sca bulk → "Vulnerable dependency" (12). The other
+-- open groups keep a null level2_category, so a category filter returns exactly its own subset.
+update issue_group set level2_category = 'Injection'
+ where workspace_id = '00000000-0000-0000-0000-000000000001' and group_key like 'bulk|%' and type = 'sast';
+update issue_group set level2_category = 'Vulnerable dependency'
+ where workspace_id = '00000000-0000-0000-0000-000000000001' and group_key like 'bulk|%' and type = 'sca';
+
 -- A KEV + EPSS SCA finding (ib-api-v2): band Critical, attribution shown, KEV badge.
 insert into issue_group (id, workspace_id, repository_id, type, group_key, title, subtitle, status,
                          severity_score, fix_time_minutes, first_seen_at)
@@ -122,6 +132,33 @@ values ('50000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-0000000
         '40000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002', 'secret', 'secret',
         'fp-aws', 'aws-access-token', 'config/app.properties', 'DEADBEEFkeyedHMAChash', 'AKIA', 'kid1', 'open',
         90, now() - interval '2 days');
+
+-- M8.6 U8: a linkable secret finding on core-keycloak — a 40-hex commit + file path + line so the
+-- source-host deep links (D-084) render and their hrefs can be asserted in e2e. Connection host is
+-- gitlab.example.com; the file link must be /-/blob/<sha>/config/app.properties#L7 and the commit /-/commit/<sha>.
+-- created_at is set OLDER than core-keycloak's existing scan (30000…0001) so this one does NOT become the
+-- repo's "last scan" (which would hide that scan's warnings); the source link uses the SUB's last-seen scan.
+insert into scan (id, workspace_id, repository_id, trigger, commit_sha, branch, status, started_at, finished_at,
+                  created_at)
+values ('30000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000001', 'manual',
+        '1111111111111111111111111111111111111111', 'main', 'completed', now() - interval '5 hours',
+        now() - interval '295 minutes', now() - interval '5 hours');
+-- status 'solved' so it is counted in NO feed/focus/all/dashboard oracle (keeping core-keycloak's 64 bulk open
+-- groups); the panel still opens it by id and renders the source links for the link-href assertions.
+insert into issue_group (id, workspace_id, repository_id, type, group_key, title, status, severity_score,
+                         fix_time_minutes, first_seen_at, level2_category)
+values ('40000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000001', 'secret', 'secret|linktest', 'Linkable secret', 'solved', 80,
+        30, now() - interval '30 minutes', 'Cloud credential');
+insert into sub_issue (id, workspace_id, group_id, repository_id, type, scanner, fingerprint, rule_id, file_path,
+                       line, secret_hash, secret_preview, key_id, status, score, solved_at,
+                       first_seen_scan_id, last_seen_scan_id, created_at)
+values ('50000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-0000000000aa', '20000000-0000-0000-0000-000000000001', 'secret', 'secret',
+        'fp-linktest', 'aws-access-token', 'config/app.properties', 7, 'DEADBEEFhash', 'AKIA', 'kid-aa', 'solved',
+        80, now() - interval '29 minutes',
+        '30000000-0000-0000-0000-0000000000aa', '30000000-0000-0000-0000-0000000000aa', now());
 
 -- XSS probes in title/subtitle/file_path/advisory_summary and (below) an ignore reason.
 insert into issue_group (id, workspace_id, repository_id, type, group_key, title, subtitle, status,

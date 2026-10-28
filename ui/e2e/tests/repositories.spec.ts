@@ -43,6 +43,8 @@ test("shows the inactive line and an Inactive badge, and the scan button is disa
   await page.getByText("Show inactive").click();
   const legacy = await repoRow(page, "acme/legacy-batch");
   await expect(legacy.getByText("Inactive")).toBeVisible();
+  // Scan + Settings live in the row ⋮ menu now (M8.6); open it first.
+  await legacy.getByRole("button", { name: "Row actions" }).click();
   await expect(legacy.getByRole("button", { name: "Scan", exact: true })).toBeDisabled();
 });
 
@@ -54,6 +56,7 @@ test("Start Scan enqueues a scan for an active repository", async ({ page }) => 
 
   const before = await sqlCount(`select count(*) from scan where repository_id = '${WEB_PORTAL_ID}'`, []);
   const row = await repoRow(page, "acme/web-portal");
+  await row.getByRole("button", { name: "Row actions" }).click();
   await row.getByRole("button", { name: "Scan", exact: true }).click();
   await expect(row.getByRole("button", { name: /scanning|starting/i })).toBeVisible();
   await expect
@@ -81,6 +84,7 @@ test("polling drives the button back to idle once the scan reaches a terminal st
   await signIn(page);
   await page.getByRole("link", { name: "Repositories", exact: true }).click();
   const row = await repoRow(page, "acme/ib-api-v2");
+  await row.getByRole("button", { name: "Row actions" }).click();
   await row.getByRole("button", { name: "Scan", exact: true }).click();
   await expect(row.getByRole("button", { name: "Scanning…" })).toBeVisible();
   // After the mocked completion the button returns to idle.

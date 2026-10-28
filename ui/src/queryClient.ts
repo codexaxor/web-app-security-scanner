@@ -17,8 +17,12 @@ export const queryClient = new QueryClient({
 // --- Query keys (one source of truth) ---------------------------------------------------------------
 // Keys are arrays; a prefix match (the first element) is how invalidation targets a whole family.
 export const qk = {
-  repositories: (page: number, size: number) => ["repositories", page, size] as const,
+  repositories: (params: unknown) => ["repositories", params] as const,
   repositoriesAll: ["repositories"] as const,
+  repository: (id: string) => ["repository", id] as const,
+  repositoryAll: ["repository"] as const,
+  repositoryScans: (id: string, page: number) => ["repository-scans", id, page] as const,
+  repositoryScansAll: ["repository-scans"] as const,
   scanWarnings: (scanId: string, page: number) => ["scan-warnings", scanId, page] as const,
   feed: (params: unknown) => ["feed", params] as const,
   feedAll: ["feed"] as const,
@@ -37,6 +41,8 @@ export const qk = {
   dashboard: (includeInactive: boolean) => ["dashboard", includeInactive] as const,
   dashboardAll: ["dashboard"] as const,
   scansRecent: ["scans-recent"] as const,
+  scanDetail: (scanId: string) => ["scan-detail", scanId] as const,
+  issueCategories: (params: unknown) => ["issue-categories", params] as const,
   workspaceSettings: ["workspace-settings"] as const,
 };
 
@@ -50,17 +56,17 @@ export type MutationKind = "triage" | "settings" | "scan" | "workspaceSettings";
 export const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   // ignore / unignore / delete-rule: statuses and every count move, plus the open panel's header + history.
   triage: [qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll,
-    qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll],
+    qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll, qk.repositoryAll],
   // repo settings: sensitivity re-scores (scores/bands move), include-dev-deps/active change rollups + feed; a
   // scan-branch change (D-076) also moves the scans/recent list (branch column) and the repo row's branch label.
-  settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
+  settings: [qk.repositoriesAll, qk.repositoryAll, qk.repositoryScansAll, qk.feedAll, qk.feedSummaryAll,
+    qk.dashboardAll, qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   // start scan / status poll reaching terminal: counts, statuses and the recent-scans list all move.
-  scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
+  scan: [qk.repositoriesAll, qk.repositoryAll, qk.repositoryScansAll, qk.feedAll, qk.feedSummaryAll,
+    qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   // EPSS toggle: LOW_EPSS auto-ignore + scoring tiers move feed/ignored/dashboard/repo counts, panel + history.
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
-    qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll],
+    qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll, qk.repositoryAll],
 };
 
 export function invalidateFor(kind: MutationKind): Promise<void> {

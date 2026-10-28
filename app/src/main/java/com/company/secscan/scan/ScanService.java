@@ -144,9 +144,23 @@ public class ScanService {
     @Transactional(readOnly = true)
     public PagedResponse<ScanView> listForRepository(UUID repositoryId, int page, int size) {
         requireScannable(repositoryId, false);
-        return PagedResponse.fromPage(scans
-                .findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId, Pagination.of(page, size))
-                .map(ScanView::of));
+        var pageResult = scans.findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId, Pagination.of(page, size));
+        java.util.Map<UUID, Long> warnCounts = warningCounts(pageResult.getContent());
+        return PagedResponse.fromPage(pageResult.map(s ->
+                ScanView.of(s, warnCounts.getOrDefault(s.getId(), 0L))));
+    }
+
+    /** Warning counts for a page of scans in one query (no N+1); workspace-scoped. */
+    private java.util.Map<UUID, Long> warningCounts(List<Scan> pageScans) {
+        if (pageScans.isEmpty()) {
+            return java.util.Map.of();
+        }
+        List<UUID> ids = pageScans.stream().map(Scan::getId).toList();
+        java.util.Map<UUID, Long> out = new java.util.HashMap<>();
+        for (Object[] row : warnings.countByScanIds(WORKSPACE, ids)) {
+            out.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return out;
     }
 
     /** All scans in the workspace, newest-first, paginated (OD-14 item 2). Size capped at {@link Pagination#MAX_SIZE}. */

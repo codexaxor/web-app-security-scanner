@@ -29,12 +29,23 @@ public class IssueController {
             @RequestParam(required = false) UUID repositoryId,
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String category,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "focus") String view,
             @RequestParam(required = false) String band,
             @RequestParam(defaultValue = "false") boolean includeInactive,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listGroups(repositoryId, type, category, view, band, includeInactive, page, size);
+        return service.listGroups(repositoryId, type, category, search, view, band, includeInactive, page, size);
+    }
+
+    /** Distinct level-2 categories in the feed scope (the category-filter options). Small aggregation, like the
+     *  summary endpoint — not a paginated business list. */
+    @GetMapping("/issue-groups/categories")
+    public java.util.List<IssueService.CategoryCount> categories(
+            @RequestParam(required = false) UUID repositoryId,
+            @RequestParam(defaultValue = "focus") String view,
+            @RequestParam(defaultValue = "false") boolean includeInactive) {
+        return service.listCategories(repositoryId, view, includeInactive);
     }
 
     /** The Feed summary bar (OD-14 item 4). */

@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
+import com.company.secscan.issue.api.IssueGroupView;
 import com.company.secscan.issue.api.SubIssueView;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.Scan;
+import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scoring.ScoreLine;
 import com.company.secscan.support.AbstractGitLabIT;
 import com.company.secscan.workspace.Workspace;
@@ -35,6 +38,8 @@ class IssueApiIT extends AbstractGitLabIT {
     @Autowired
     GitlabConnectionRepository connections;
     @Autowired
+    ScanRepository scans;
+    @Autowired
     ObjectMapper objectMapper;
 
     private Repository seedRepository(long projectId, String path) {
@@ -47,6 +52,12 @@ class IssueApiIT extends AbstractGitLabIT {
 
     private IssueGroup seedGroup(UUID repoId, String type, String groupKey, String title) {
         return groups.save(new IssueGroup(WORKSPACE, repoId, type, groupKey, title, null));
+    }
+
+    private IssueGroup seedCategorizedGroup(UUID repoId, String groupKey, String title, String level2) {
+        IssueGroup g = new IssueGroup(WORKSPACE, repoId, "sast", groupKey, title, null);
+        g.setLevel2Category(level2);
+        return groups.save(g);
     }
 
     private SubIssue seedSecretSub(IssueGroup group, UUID repoId, String fingerprint) {
@@ -79,6 +90,65 @@ class IssueApiIT extends AbstractGitLabIT {
         // repositoryPath is populated on each row (OD-14 item 3).
         assertThat(service.listGroups(repoA.getId(), null, null, "focus", null, false, 0, 50).content().get(0)
                 .repositoryPath()).isEqualTo("svc/a");
+    }
+
+    @Test
+    void listGroupsSearchFiltersByTitleCaseInsensitively() {
+        Repository repo = seedRepository(410L, "svc/search");
+        seedGroup(repo.getId(), "sast", "sast|csrf", "Spring CSRF Disabled");
+        seedGroup(repo.getId(), "sast", "sast|xxe", "XML External Entity");
+        // M8.6 repo Issues-tab search (title/subtitle ILIKE), case-insensitive.
+        assertThat(service.listGroups(repo.getId(), null, null, "csrf", "focus", null, false, 0, 50).content())
+                .hasSize(1);
+        assertThat(service.listGroups(repo.getId(), null, null, "ENTITY", "focus", null, false, 0, 50).content())
+                .hasSize(1);
+        assertThat(service.listGroups(repo.getId(), null, null, "nomatch", "focus", null, false, 0, 50).content())
+                .isEmpty();
+    }
+
+    @Test
+    void listGroupsSearchTreatsLikeWildcardsAsLiterals() {   // N3: escape \ % _ + ESCAPE '\' in the JPQL LIKE
+        Repository repo = seedRepository(412L, "svc/wild");
+        seedGroup(repo.getId(), "sast", "sast|pct", "50% off coupon");
+        seedGroup(repo.getId(), "sast", "sast|und", "user_id leaked");
+        seedGroup(repo.getId(), "sast", "sast|plain", "clean title");
+        // "%" is a literal, not "match everything": only the title that contains a percent sign matches.
+        assertThat(service.listGroups(repo.getId(), null, null, "%", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("50% off coupon");
+        // "_" is a literal, not "match any single character".
+        assertThat(service.listGroups(repo.getId(), null, null, "_", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("user_id leaked");
+        // A term that embeds a percent still matches case-insensitively, anchored to the literal "%".
+        assertThat(service.listGroups(repo.getId(), null, null, "50% OFF", "focus", null, false, 0, 50).content())
+                .extracting(IssueGroupView::title).containsExactly("50% off coupon");
+    }
+
+    @Test
+    void listCategoriesReturnsDistinctLevel2OrderedByCount() {
+        Repository repo = seedRepository(411L, "svc/cats");
+        seedCategorizedGroup(repo.getId(), "sast|c1", "A", "SQL injection");
+        seedCategorizedGroup(repo.getId(), "sast|c2", "B", "SQL injection");
+        seedCategorizedGroup(repo.getId(), "sast|c3", "C", "Path traversal");
+        var cats = service.listCategories(repo.getId(), "focus", false);
+        assertThat(cats).extracting(IssueService.CategoryCount::category)
+                .containsExactly("SQL injection", "Path traversal"); // ordered by count desc
+        assertThat(cats.get(0).count()).isEqualTo(2);
+    }
+
+    @Test
+    void subIssueViewExposesSourceHostAndCommitForLinks() {
+        Repository repo = seedRepository(420L, "acme/linked"); // connection baseUrl "http://localhost"
+        Scan scan = scans.save(Scan.manual(WORKSPACE, repo.getId()));
+        scan.recordCommit("a".repeat(40));
+        scans.save(scan);
+        IssueGroup g = seedGroup(repo.getId(), "sast", "sast|rule", "Rule");
+        SubIssue s = new SubIssue(WORKSPACE, g.getId(), repo.getId(), "sast", "sast", "fp-link", scan.getId());
+        s.setFilePath("src/App.java");
+        subIssues.save(s);
+        SubIssueView view = service.listSubIssues(g.getId(), 0, 50).content().get(0);
+        // D-084: host = the connection's authority; commitSha = the last-seen scan's commit.
+        assertThat(view.host()).isEqualTo("localhost");
+        assertThat(view.commitSha()).isEqualTo("a".repeat(40));
     }
 
     @Test

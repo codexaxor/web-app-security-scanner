@@ -31,7 +31,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const [removal, setRemoval] = useState<ConnectionRemovalResult | null>(null);
 
   async function refresh() {
-    const [c, r] = await Promise.all([api.listConnections(0, 100), api.listRepositories(0, 500)]);
+    const [c, r] = await Promise.all([api.listConnections(0, 100), api.listRepositories({ size: 500 })]);
     setConnections(c.content);
     setRepos(r.content);
     onChanged(c.totalElements > 0);

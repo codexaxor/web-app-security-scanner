@@ -26,7 +26,7 @@ function duration(startedAt: string | null, finishedAt: string | null): string {
 export default function DashboardPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
   const scans = useQuery({ queryKey: qk.scansRecent, queryFn: () => api.listScansAll(0, 10) });
-  const repos = useQuery({ queryKey: qk.repositories(0, 100), queryFn: () => api.listRepositories(0, 100) });
+  const repos = useQuery({ queryKey: qk.repositories({ size: 100 }), queryFn: () => api.listRepositories({ size: 100 }) });
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
   const d = dash.data;

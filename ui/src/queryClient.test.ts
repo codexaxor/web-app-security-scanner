@@ -7,13 +7,13 @@ import { AFFECTED, qk, type MutationKind } from "./queryClient";
 // which SF-1 added (their omission was the "Medium 65" stale-header bug).
 const EXPECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   triage: [qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll,
-    qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll],
-  settings: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
-  scan: [qk.repositoriesAll, qk.feedAll, qk.feedSummaryAll, qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll,
-    qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
+    qk.ignoreRulesAll, qk.dashboardAll, qk.repositoriesAll, qk.repositoryAll],
+  settings: [qk.repositoriesAll, qk.repositoryAll, qk.repositoryScansAll, qk.feedAll, qk.feedSummaryAll,
+    qk.dashboardAll, qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
+  scan: [qk.repositoriesAll, qk.repositoryAll, qk.repositoryScansAll, qk.feedAll, qk.feedSummaryAll,
+    qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
-    qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll],
+    qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll, qk.repositoryAll],
 };
 
 const asSet = (keys: readonly (readonly unknown[])[]) => new Set(keys.map((k) => JSON.stringify(k)));

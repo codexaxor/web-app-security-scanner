@@ -38,7 +38,7 @@ describe("unauthorized handling in request() (SF-3)", () => {
     setUnauthorizedHandler(onUnauthorized);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
 
-    await expect(api.listRepositories(0, 1)).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(api.listRepositories({ size: 1 })).rejects.toBeInstanceOf(AuthRequiredError);
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
@@ -50,7 +50,7 @@ describe("unauthorized handling in request() (SF-3)", () => {
       vi.fn(async () => new Response("<html>502 Bad Gateway</html>", { status: 502 })),
     );
 
-    await expect(api.listRepositories(0, 1)).rejects.toMatchObject({ message: "Request failed (502)" });
+    await expect(api.listRepositories({ size: 1 })).rejects.toMatchObject({ message: "Request failed (502)" });
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 });

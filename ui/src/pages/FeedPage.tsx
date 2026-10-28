@@ -12,6 +12,7 @@ import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import RepoName from "../components/RepoName";
 import { Card, PageHeader, EmptyState, InfoTip, SeverityBar, Legend } from "../components/ui";
+import { TableSkeleton } from "../components/Skeleton";
 
 const SIZE = 50;
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
@@ -55,9 +56,10 @@ export default function FeedPage() {
   const band = bandCheck.ok ? bandCheck.value : undefined;
   const type = typeCheck.ok ? typeCheck.value : undefined;
   const includeInactive = params.get("includeInactive") === "true";
+  const category = params.get("category") || undefined;
   const page = Number(params.get("page") || "0");
 
-  const filters: FeedParams = { view, band, type, repositoryId, includeInactive };
+  const filters: FeedParams = { view, band, type, category, repositoryId, includeInactive };
 
   function setFilter(key: string, value: string | null) {
     const next = new URLSearchParams(params);
@@ -78,8 +80,13 @@ export default function FeedPage() {
     enabled: !invalid,
   });
   const repos = useQuery({
-    queryKey: qk.repositories(0, 100),
-    queryFn: () => api.listRepositories(0, 100),
+    queryKey: qk.repositories({ size: 100 }),
+    queryFn: () => api.listRepositories({ size: 100 }),
+    enabled: !invalid,
+  });
+  const categories = useQuery({
+    queryKey: qk.issueCategories({ view }),
+    queryFn: () => api.listIssueCategories(undefined, view),
     enabled: !invalid,
   });
 
@@ -181,6 +188,14 @@ export default function FeedPage() {
             </option>
           ))}
         </select>
+        <select aria-label="Category" value={category ?? ""} onChange={(e) => setFilter("category", e.target.value || null)}>
+          <option value="">All categories</option>
+          {categories.data?.map((c) => (
+            <option key={c.category} value={c.category}>
+              {c.category} ({c.count})
+            </option>
+          ))}
+        </select>
         <select
           aria-label="Repository"
           value={repositoryId ?? ""}
@@ -223,6 +238,9 @@ export default function FeedPage() {
                 <th>Status</th>
               </tr>
             </thead>
+            {feed.isLoading ? (
+              <TableSkeleton columns={7} />
+            ) : (
             <tbody>
               {rows.map((g) => {
                 const t = titleFor(g);
@@ -278,6 +296,7 @@ export default function FeedPage() {
                 );
               })}
             </tbody>
+            )}
           </table>
         </div>
       )}
@@ -299,7 +318,12 @@ export default function FeedPage() {
       </div>
 
       {groupId ? (
-        <SubIssuePanel groupId={groupId} onClose={() => navigate({ pathname: "/feed", search: params.toString() })} />
+        <SubIssuePanel
+          groupId={groupId}
+          siblingIds={rows.map((g) => g.id)}
+          onNavigate={(id) => navigate({ pathname: `/feed/${id}`, search: params.toString() })}
+          onClose={() => navigate({ pathname: "/feed", search: params.toString() })}
+        />
       ) : null}
     </section>
   );

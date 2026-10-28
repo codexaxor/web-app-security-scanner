@@ -94,6 +94,8 @@ export interface IssueGroupView {
   type: IssueType;
   title: string;
   subtitle: string | null;
+  level2Category: string | null;
+  owaspCategory: string | null;
   status: string;
   severityScore: number | null;
   fixTimeMinutes: number | null;
@@ -102,6 +104,8 @@ export interface IssueGroupView {
   ignoredCount: number;
   solvedCount: number;
   fixedVersions: string[];
+  primaryLocation: string | null;
+  locationCount: number;
 }
 
 export interface FeedSummaryView {
@@ -154,6 +158,11 @@ export interface SubIssueView {
   ruleReason: string | null;
   ruleCreatedBy: string | null;
   ruleGlobal: boolean;
+  level2Category: string | null;
+  owaspCategory: string | null;
+  advisorySummary: string | null;
+  host: string | null;
+  commitSha: string | null;
 }
 
 export interface TriageEventView {
@@ -177,6 +186,26 @@ export interface ScanView {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string | null;
+  warningCount: number;
+}
+
+export interface ScanTaskView {
+  scanner: string;
+  status: string;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export interface ScanDetailView {
+  scan: ScanView;
+  toolVersions: Record<string, string>;
+  tasks: ScanTaskView[];
+  findingCount: number;
+}
+
+export interface CategoryCount {
+  category: string;
+  count: number;
 }
 
 export interface BranchView {
@@ -252,9 +281,23 @@ export interface WorkspaceSettings {
 export interface FeedParams {
   repositoryId?: string;
   type?: IssueType;
+  category?: string;
+  search?: string;
   view?: View;
   band?: Band;
   includeInactive?: boolean;
+  page?: number;
+  size?: number;
+}
+
+export type RepoSort = "severity" | "name" | "lastscan";
+
+export interface RepoListParams {
+  search?: string;
+  includeInactive?: boolean;
+  hasOpenIssues?: boolean;
+  lastScanFailed?: boolean;
+  sort?: RepoSort;
   page?: number;
   size?: number;
 }
@@ -374,8 +417,11 @@ export const api = {
     ),
   selectRepositories: (connectionId: string, gitlabProjectIds: number[]) =>
     request<SelectResult>("POST", "/api/v1/repositories", { connectionId, gitlabProjectIds }),
-  listRepositories: (page: number, size: number) =>
-    request<Paged<RepositoryView>>("GET", `/api/v1/repositories?page=${page}&size=${size}`),
+  listRepositories: (p: RepoListParams = {}) =>
+    request<Paged<RepositoryView>>("GET", `/api/v1/repositories${repoQuery(p)}`),
+  getRepository: (id: string) => request<RepositoryView>("GET", `/api/v1/repositories/${id}`),
+  listRepositoryScans: (id: string, page: number, size: number) =>
+    request<Paged<ScanView>>("GET", `/api/v1/repositories/${id}/scans?page=${page}&size=${size}`),
   listRepositoryBranches: (repositoryId: string, search: string, page: number, size: number) =>
     request<Paged<BranchView>>(
       "GET",
@@ -387,7 +433,7 @@ export const api = {
     request<RepositoryView>("PATCH", `/api/v1/repositories/${id}`, patch),
   startScan: (repositoryId: string) =>
     request<ScanView>("POST", `/api/v1/repositories/${repositoryId}/scans`),
-  getScan: (scanId: string) => request<{ scan: ScanView }>("GET", `/api/v1/scans/${scanId}`),
+  getScan: (scanId: string) => request<ScanDetailView>("GET", `/api/v1/scans/${scanId}`),
   listScanWarnings: (scanId: string, page: number, size: number) =>
     request<Paged<ScanWarningView>>("GET", `/api/v1/scans/${scanId}/warnings?page=${page}&size=${size}`),
   listScansAll: (page: number, size: number) =>
@@ -397,6 +443,11 @@ export const api = {
     request<Paged<IssueGroupView>>("GET", `/api/v1/issue-groups${feedQuery(p)}`),
   feedSummary: (p: FeedParams) =>
     request<FeedSummaryView>("GET", `/api/v1/issue-groups/summary${feedQuery(p, true)}`),
+  listIssueCategories: (repositoryId: string | undefined, view: View) =>
+    request<CategoryCount[]>(
+      "GET",
+      `/api/v1/issue-groups/categories?view=${view}${repositoryId ? `&repositoryId=${repositoryId}` : ""}`,
+    ),
   getGroup: (groupId: string) => request<IssueGroupView>("GET", `/api/v1/issue-groups/${groupId}`),
   listSubIssues: (groupId: string, page: number, size: number) =>
     request<Paged<SubIssueView>>(
@@ -430,12 +481,28 @@ export const api = {
     request<WorkspaceSettings>("PUT", "/api/v1/workspace/settings", body),
 };
 
+// Builds the repositories-list query string from a validated params object. `search` is user text, so it is
+// URL-encoded by URLSearchParams; the sort value is a closed enum validated server-side.
+function repoQuery(p: RepoListParams): string {
+  const q = new URLSearchParams();
+  if (p.search) q.set("search", p.search);
+  if (p.includeInactive) q.set("includeInactive", "true");
+  if (p.hasOpenIssues) q.set("hasOpenIssues", "true");
+  if (p.lastScanFailed) q.set("lastScanFailed", "true");
+  if (p.sort) q.set("sort", p.sort);
+  q.set("page", String(p.page ?? 0));
+  q.set("size", String(p.size ?? 50));
+  return `?${q.toString()}`;
+}
+
 // Builds the feed/summary query string from a validated params object (never from free data). `summary` omits
 // band/pagination, which the summary endpoint ignores.
 function feedQuery(p: FeedParams, summary = false): string {
   const q = new URLSearchParams();
   if (p.repositoryId) q.set("repositoryId", p.repositoryId);
   if (p.type) q.set("type", p.type);
+  if (p.category) q.set("category", p.category);
+  if (p.search) q.set("search", p.search);
   q.set("view", p.view ?? "focus");
   if (p.includeInactive) q.set("includeInactive", "true");
   if (!summary) {

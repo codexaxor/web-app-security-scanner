@@ -51,6 +51,8 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
               and (:repositoryId is null or g.repositoryId = :repositoryId)
               and (:type is null or g.type = :type)
               and (:category is null or g.level2Category = :category)
+              and (:search is null or lower(g.title) like :search escape '\\'
+                   or lower(g.subtitle) like :search escape '\\')
               and g.status in :statuses
               and (:bandLo is null or (g.severityScore >= :bandLo and g.severityScore <= :bandHi))
               and (:includeInactive = true or r.active = true)
@@ -60,11 +62,32 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
                                 @Param("repositoryId") UUID repositoryId,
                                 @Param("type") String type,
                                 @Param("category") String category,
+                                @Param("search") String search,
                                 @Param("statuses") java.util.List<String> statuses,
                                 @Param("bandLo") Integer bandLo,
                                 @Param("bandHi") Integer bandHi,
                                 @Param("includeInactive") boolean includeInactive,
                                 Pageable pageable);
+
+    /**
+     * Distinct level-2 categories present in the feed (for the category filter), each with its group count, for
+     * the same view statuses / repository / activeness scope as the feed. Workspace-scoped; null categories are
+     * excluded. Returns rows [level2Category, count] ordered by count desc then name.
+     */
+    @Query("""
+            select g.level2Category, count(g) from IssueGroup g, Repository r
+            where g.workspaceId = :ws and r.id = g.repositoryId and r.workspaceId = :ws
+              and (:repositoryId is null or g.repositoryId = :repositoryId)
+              and g.status in :statuses
+              and (:includeInactive = true or r.active = true)
+              and g.level2Category is not null
+            group by g.level2Category
+            order by count(g) desc, g.level2Category asc
+            """)
+    java.util.List<Object[]> categoryCounts(@Param("ws") UUID ws,
+                                            @Param("repositoryId") UUID repositoryId,
+                                            @Param("statuses") java.util.List<String> statuses,
+                                            @Param("includeInactive") boolean includeInactive);
 
     /** Groups in a workspace whose level-2 category is not yet set — the OD-19/D-083 startup backfill input. */
     java.util.List<IssueGroup> findByWorkspaceIdAndLevel2CategoryIsNull(UUID workspaceId);

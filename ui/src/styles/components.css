@@ -1,20 +1,10 @@
 /* Component styles (S10c). Depends on tokens.css + base.css. One class per design-system component. */
 
-/* ---------- app shell ---------- */
+/* ---------- app shell (D-084/OD-25: left sidebar) ---------- */
 .app {
+  display: grid;
+  grid-template-columns: 232px 1fr;
   min-height: 100vh;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  padding: var(--sp-2) var(--sp-4);
-  min-height: 56px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 .brand {
   display: inline-flex;
@@ -28,55 +18,188 @@
 .brand-mark {
   width: 22px;
   height: 22px;
+  flex: none;
   border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--status-solved));
 }
-.nav {
-  display: flex;
-  gap: var(--sp-1);
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-wrap: wrap;
+
+/* keyboard: jump straight to main content, first tab stop */
+.skip-link {
+  position: absolute;
+  left: var(--sp-2);
+  top: -48px;
+  z-index: 60;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: top 0.12s ease;
 }
-.nav-link {
-  display: inline-flex;
+.skip-link:focus-visible {
+  top: var(--sp-2);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-3);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 40;
+}
+.sidebar-brand {
+  display: flex;
   align-items: center;
-  height: 34px;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  font-weight: 750;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidenav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 38px;
   padding: 0 var(--sp-3);
   border-radius: var(--radius);
   color: var(--muted);
   font-weight: 550;
   text-decoration: none;
+  white-space: nowrap;
 }
-.nav-link:hover {
+.sidenav-link:hover {
   color: var(--text);
   background: var(--surface-2);
   text-decoration: none;
 }
-.nav-link.active {
+.sidenav-link.active {
   color: var(--accent);
   background: var(--status-new-bg);
   font-weight: 650;
 }
-.topbar-user {
+.sidenav-icon {
+  font-size: 19px;
+  flex: none;
+}
+.sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.sidebar-user {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  justify-content: space-between;
+  gap: var(--sp-2);
   color: var(--muted);
   font-size: var(--fs-sm);
-  flex: none;
-  margin-left: auto;
+}
+.sidebar-user .muted {
+  min-width: 0;
+}
+.theme-control {
+  width: 100%;
 }
 .theme-control button {
+  flex: 1;
   height: 28px;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-1);
   font-size: var(--fs-xs);
   font-weight: 600;
 }
 .content {
   max-width: var(--content-max);
+  width: 100%;
   margin: 0 auto;
-  padding: var(--sp-6) var(--sp-4) var(--sp-8);
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
+}
+
+/* top app-bar + off-canvas drawer — only below the sidebar breakpoint */
+.appbar {
+  display: none;
+}
+.appbar-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.appbar-menu:hover {
+  background: var(--surface-2);
+}
+.scrim {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .appbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    min-height: 52px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 30;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 264px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.16s ease;
+    box-shadow: var(--shadow-2);
+  }
+  .app.nav-open .sidebar {
+    transform: none;
+  }
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    border: none;
+    padding: 0;
+    background: rgba(8, 12, 16, 0.5);
+    cursor: default;
+  }
+  .content {
+    padding: var(--sp-4) var(--sp-4) var(--sp-6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }
 
 /* sign-in */
@@ -238,12 +361,12 @@ a.stat-link:hover .stat-num {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
   box-shadow: var(--shadow-1);
 }
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .table th,
 .table td {
@@ -252,13 +375,30 @@ a.stat-link:hover .stat-num {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
+/* Sticky header (design pass, item 2) — the wrapper no longer clips, so the header sticks to the viewport as
+ * the page scrolls; corners are rounded on the edge cells instead of by overflow:hidden. */
 .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--surface-2);
   font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
   font-weight: 650;
+}
+.table thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+.table thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+.table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius-lg);
+}
+.table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius-lg);
 }
 .table tbody tr:last-child td {
   border-bottom: none;
@@ -361,6 +501,88 @@ a.stat-link:hover .stat-num {
 .sevmini-item.is-zero {
   color: var(--muted);
   opacity: 0.6;
+}
+
+/* ---------- severity count chips (design pass item 2; severity ONLY) ---------- */
+.sev-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.sev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.sev-chip-label {
+  letter-spacing: 0.01em;
+}
+.sev-chip-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+.sev-chip.sev-critical {
+  color: var(--sev-critical);
+  background: var(--sev-critical-bg);
+  border-color: var(--sev-critical);
+}
+.sev-chip.sev-high {
+  color: var(--sev-high);
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high);
+}
+.sev-chip.sev-medium {
+  color: var(--sev-medium);
+  background: var(--sev-medium-bg);
+  border-color: var(--sev-medium);
+}
+.sev-chip.sev-low {
+  color: var(--sev-low);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low);
+}
+/* zero counts read as muted/neutral — never a severity color */
+.sev-chip.is-zero {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+/* ---------- loading skeletons (design pass item 2) ---------- */
+.skeleton {
+  display: inline-block;
+  width: 100%;
+  height: 1em;
+  min-height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+  vertical-align: middle;
+}
+.skeleton-row td {
+  border-bottom: 1px solid var(--border);
+}
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }
 
 /* ---------- status chip ---------- */
@@ -1116,4 +1338,316 @@ button.health-item {
 .branch-name {
   flex: 1;
   overflow-wrap: anywhere;
+}
+
+/* ---------- M8.6: inline-svg icon base, search field, row menu, repo page ---------- */
+.icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+/* search input with a leading icon */
+.search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.search-field .search-icon {
+  position: absolute;
+  left: var(--sp-2);
+  font-size: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.search-field input[type="search"] {
+  height: 34px;
+  min-width: 220px;
+  padding: 0 var(--sp-2) 0 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+/* row / header overflow (⋮) menu */
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.rowmenu {
+  position: relative;
+  display: inline-block;
+}
+.rowmenu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rowmenu-trigger:hover,
+.rowmenu-trigger[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.rowmenu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 25;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  text-align: left;
+}
+.rowmenu-item,
+.rowmenu-item-wrap > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px var(--sp-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.rowmenu-item:hover,
+.rowmenu-item-wrap > button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.rowmenu-item-wrap > button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* repository page header */
+.breadcrumb {
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.repo-header-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.repo-lastscan {
+  margin-top: calc(-1 * var(--sp-2));
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- M8.6: repo page tabs, coverage banner, issue-table cells ---------- */
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  margin: var(--sp-4) 0;
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.coverage-banner {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+.coverage-banner .coverage-icon {
+  font-size: 18px;
+  color: var(--warn);
+  margin-top: 2px;
+}
+.coverage-banner ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.settings-card {
+  padding: var(--sp-4);
+}
+.type-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.category-tag {
+  font-size: var(--fs-xs);
+}
+.location-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 280px;
+}
+
+/* ---------- M8.6: issue side panel (gauge, sections, location grouping, nav) ---------- */
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.panel-firstseen {
+  font-size: var(--fs-xs);
+  margin-top: 2px;
+}
+.panel-nav {
+  gap: var(--sp-1);
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.icon-btn:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.category-chip {
+  font-weight: 600;
+}
+
+.gauge {
+  --gauge-color: var(--border-strong);
+  width: 60px;
+  height: 60px;
+  flex: none;
+  border-radius: 50%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  grid-auto-flow: row;
+  background: conic-gradient(var(--gauge-color) calc(var(--pct, 0) * 1%), var(--surface-3) 0);
+}
+.gauge::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.gauge-score {
+  position: relative;
+  z-index: 1;
+  font-weight: 750;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.gauge-band {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.gauge-critical {
+  --gauge-color: var(--sev-critical);
+}
+.gauge-high {
+  --gauge-color: var(--sev-high);
+}
+.gauge-medium {
+  --gauge-color: var(--sev-medium);
+}
+.gauge-low {
+  --gauge-color: var(--sev-low);
+}
+
+.panel-section {
+  margin-bottom: var(--sp-4);
+}
+.panel-h3 {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+}
+.panel-text {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.loc-group {
+  margin-top: var(--sp-4);
+}
+.loc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-bottom: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 650;
+  font-size: var(--fs-sm);
+}
+
+/* ---------- M8.6: source-host deep links (file / commit) ---------- */
+.source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+}
+.source-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

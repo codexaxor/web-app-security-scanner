@@ -34,9 +34,20 @@ public class RepositoryController {
 
     @GetMapping
     public PagedResponse<RepositoryView> list(
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "false") boolean includeInactive,
+            @RequestParam(defaultValue = "false") boolean hasOpenIssues,
+            @RequestParam(defaultValue = "false") boolean lastScanFailed,
+            @RequestParam(defaultValue = "severity") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listSelected(page, size);
+        return service.listSelected(search, includeInactive, hasOpenIssues, lastScanFailed, sort, page, size);
+    }
+
+    /** One repository with its rollups (the M8.6 repository page header). 404 if not in this workspace. */
+    @GetMapping("/{id}")
+    public RepositoryView get(@PathVariable UUID id) {
+        return service.getRepository(id);
     }
 
     /** Updates a repository's settings (sensitivity, include-dev-deps, active, scan branch). OD-15 / D-070 / D-076. */
