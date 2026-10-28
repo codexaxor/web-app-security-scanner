@@ -1280,6 +1280,23 @@ button.health-item {
   margin-top: var(--sp-3);
   color: var(--muted);
   font-size: var(--fs-sm);
+  flex-wrap: wrap;
+}
+.pager-range {
+  margin-right: auto; /* range on the left, controls on the right */
+}
+.pager-size {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.pager-nav {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
 }
 
 /* ---------- responsive ---------- */

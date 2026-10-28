@@ -10,6 +10,7 @@ import {
   type IssueGroupView,
 } from "../api";
 import { qk } from "../queryClient";
+import Pager, { PAGE_SIZES, DEFAULT_PAGE_SIZE } from "../components/Pager";
 import { fixTime, titleCase } from "../lib/format";
 import { isUuid, oneOf } from "../lib/validate";
 import { humanizeRuleId, typeLabel } from "../lib/labels";
@@ -22,7 +23,6 @@ import RepoName from "../components/RepoName";
 import { Card, PageHeader, EmptyState, InfoTip, SeverityBar, Legend } from "../components/ui";
 import { TableSkeleton } from "../components/Skeleton";
 
-const SIZE = 50;
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const BANDS: Band[] = ["critical", "high", "medium", "low"];
 const PROVIDERS: Provider[] = ["gitlab", "github"];
@@ -71,6 +71,9 @@ export default function FeedPage() {
   const includeInactive = params.get("includeInactive") === "true";
   const category = params.get("category") || undefined;
   const page = Number(params.get("page") || "0");
+  const size = PAGE_SIZES.includes(Number(params.get("size")) as (typeof PAGE_SIZES)[number])
+    ? Number(params.get("size"))
+    : DEFAULT_PAGE_SIZE;
 
   const filters: FeedParams = { view, band, type, provider, category, repositoryId, includeInactive };
 
@@ -78,13 +81,13 @@ export default function FeedPage() {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
     else next.delete(key);
-    if (key !== "page") next.delete("page"); // any filter change resets to page 0
+    if (key !== "page") next.delete("page"); // any filter change (incl. page size) resets to page 0
     setParams(next, { replace: false });
   }
 
   const feed = useQuery({
-    queryKey: qk.feed({ ...filters, page }),
-    queryFn: () => api.listFeed({ ...filters, page, size: SIZE }),
+    queryKey: qk.feed({ ...filters, page, size }),
+    queryFn: () => api.listFeed({ ...filters, page, size }),
     enabled: !invalid,
   });
   const summary = useQuery({
@@ -322,21 +325,14 @@ export default function FeedPage() {
         </div>
       )}
 
-      <div className="pager">
-        <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setFilter("page", String(page - 1))}>
-          Previous
-        </button>
-        <span data-testid="page-info">
-          Page {page + 1} of {feed.data?.totalPages ?? 1} · {feed.data?.totalElements ?? 0} groups
-        </span>
-        <button
-          className="btn btn-secondary btn-sm"
-          disabled={page + 1 >= (feed.data?.totalPages ?? 1)}
-          onClick={() => setFilter("page", String(page + 1))}
-        >
-          Next
-        </button>
-      </div>
+      <Pager
+        page={page}
+        size={size}
+        totalElements={feed.data?.totalElements ?? 0}
+        totalPages={feed.data?.totalPages ?? 1}
+        onPage={(p) => setFilter("page", p <= 0 ? null : String(p))}
+        onSize={(s) => setFilter("size", s === DEFAULT_PAGE_SIZE ? null : String(s))}
+      />
 
       {groupId ? (
         <SubIssuePanel

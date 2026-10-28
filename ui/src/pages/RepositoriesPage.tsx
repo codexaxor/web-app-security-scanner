@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
+import Pager, { useUrlPaging } from "../components/Pager";
 import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
 import { useScanCompletionToasts } from "../lib/useScanCompletion";
 import RelativeTime from "../components/RelativeTime";
@@ -18,7 +19,6 @@ import Icon from "../components/icons";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
 
-const SIZE = 50;
 const COLUMNS = 6;
 
 const SORTS: { value: RepoSort; label: string }[] = [
@@ -41,7 +41,7 @@ export default function RepositoriesPage() {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const provider = providerFromParam(sp.get("provider"));
-  const [page, setPage] = useState(0);
+  const { page, size, setPage, setSize } = useUrlPaging("page", "size");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RepoSort>("severity");
   const [showInactive, setShowInactive] = useState(false);
@@ -58,7 +58,7 @@ export default function RepositoriesPage() {
     provider: provider || undefined,
     sort,
     page,
-    size: SIZE,
+    size,
   };
 
   function resetAnd(fn: () => void) {
@@ -294,23 +294,14 @@ export default function RepositoriesPage() {
         </div>
       )}
 
-      {(repos.data?.totalPages ?? 1) > 1 ? (
-        <div className="pager">
-          <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            Previous
-          </button>
-          <span>
-            Page {page + 1} of {repos.data?.totalPages}
-          </span>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={page + 1 >= (repos.data?.totalPages ?? 1)}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </button>
-        </div>
-      ) : null}
+      <Pager
+        page={page}
+        size={size}
+        totalElements={repos.data?.totalElements ?? 0}
+        totalPages={repos.data?.totalPages ?? 1}
+        onPage={setPage}
+        onSize={setSize}
+      />
 
       {editing ? <RepoSettingsDialog repo={editing} onClose={() => setEditing(null)} /> : null}
       {warnings ? (

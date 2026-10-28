@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { qk } from "../queryClient";
 import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
+import Pager, { DEFAULT_PAGE_SIZE } from "../components/Pager";
 import { isUuid, oneOf } from "../lib/validate";
 import { fixTime } from "../lib/format";
 import { humanizeRuleId, typeLabel } from "../lib/labels";
@@ -27,7 +28,6 @@ import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip, PathText } from "../components/ui";
 
-const SIZE = 50;
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const TABS = ["issues", "scans", "settings"] as const;
 type Tab = (typeof TABS)[number];
@@ -190,6 +190,7 @@ function CoverageBanner({ scanId }: { scanId: string }) {
 /** Issues tab — repo-scoped issue table with search / type / category / Focus-All, server-side pagination, a
  *  row ⋮ (Open / Ignore group…), and the side panel (opened via ?issue, so a reload/share reopens it). */
 function RepoIssuesTab({ repoId }: { repoId: string }) {
+  const [size, setSize] = useState(DEFAULT_PAGE_SIZE);
   const [sp, setSp] = useSearchParams();
   const [type, setType] = useState<IssueType | "">("");
   const [category, setCategory] = useState("");
@@ -209,7 +210,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
     search: search.trim() || undefined,
     view,
     page,
-    size: SIZE,
+    size,
   };
 
   const feed = useQuery({ queryKey: qk.feed(filters), queryFn: () => api.listFeed(filters) });
@@ -402,21 +403,17 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
         </div>
       )}
 
-      <div className="pager">
-        <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-          Previous
-        </button>
-        <span data-testid="repo-issues-page-info">
-          Page {page + 1} of {feed.data?.totalPages ?? 1} · {feed.data?.totalElements ?? 0} issues
-        </span>
-        <button
-          className="btn btn-secondary btn-sm"
-          disabled={page + 1 >= (feed.data?.totalPages ?? 1)}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </button>
-      </div>
+      <Pager
+        page={page}
+        size={size}
+        totalElements={feed.data?.totalElements ?? 0}
+        totalPages={feed.data?.totalPages ?? 1}
+        onPage={setPage}
+        onSize={(s) => {
+          setSize(s);
+          setPage(0);
+        }}
+      />
 
       {openIssue && openIssueOk ? (
         <SubIssuePanel
@@ -434,10 +431,11 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
 /** Scans tab — the repository's scans with status, branch, short commit, duration and a warnings drawer. */
 function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }) {
   const [page, setPage] = useState(0);
+  const [size, setSize] = useState(DEFAULT_PAGE_SIZE);
   const [warnings, setWarnings] = useState<string | null>(null);
   const scans = useQuery({
-    queryKey: qk.repositoryScans(repoId, page),
-    queryFn: () => api.listRepositoryScans(repoId, page, SIZE),
+    queryKey: qk.repositoryScans(repoId, page, size),
+    queryFn: () => api.listRepositoryScans(repoId, page, size),
     // Live status (M8.8): poll the Scans tab while any scan is queued/running.
     refetchInterval: (q) =>
       scanRefetchInterval((q.state.data?.content ?? []).map((s) => s.status), documentHidden()),
@@ -496,21 +494,17 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
           </table>
         </div>
       )}
-      <div className="pager">
-        <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-          Previous
-        </button>
-        <span>
-          Page {page + 1} of {scans.data?.totalPages ?? 1}
-        </span>
-        <button
-          className="btn btn-secondary btn-sm"
-          disabled={page + 1 >= (scans.data?.totalPages ?? 1)}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </button>
-      </div>
+      <Pager
+        page={page}
+        size={size}
+        totalElements={scans.data?.totalElements ?? 0}
+        totalPages={scans.data?.totalPages ?? 1}
+        onPage={setPage}
+        onSize={(s) => {
+          setSize(s);
+          setPage(0);
+        }}
+      />
       {warnings ? (
         <WarningsDrawer scanId={warnings} repositoryPath={repoPath} onClose={() => setWarnings(null)} />
       ) : null}
