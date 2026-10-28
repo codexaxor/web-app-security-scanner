@@ -8,6 +8,7 @@ import {
   type View,
 } from "../api";
 import { qk } from "../queryClient";
+import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
 import { isUuid, oneOf } from "../lib/validate";
 import { fixTime } from "../lib/format";
 import { humanizeRuleId, typeLabel } from "../lib/labels";
@@ -56,6 +57,9 @@ export default function RepositoryPage() {
     queryKey: qk.repository(id ?? ""),
     queryFn: () => api.getRepository(id as string),
     enabled: valid,
+    // Live status (M8.8): poll the repo header while its own last scan is queued/running.
+    refetchInterval: (q) => scanRefetchInterval([q.state.data?.lastScan?.status], documentHidden()),
+    refetchIntervalInBackground: true,
   });
 
   const tabParam = sp.get("tab");
@@ -434,6 +438,10 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
   const scans = useQuery({
     queryKey: qk.repositoryScans(repoId, page),
     queryFn: () => api.listRepositoryScans(repoId, page, SIZE),
+    // Live status (M8.8): poll the Scans tab while any scan is queued/running.
+    refetchInterval: (q) =>
+      scanRefetchInterval((q.state.data?.content ?? []).map((s) => s.status), documentHidden()),
+    refetchIntervalInBackground: true,
   });
   const rows = scans.data?.content ?? [];
 
