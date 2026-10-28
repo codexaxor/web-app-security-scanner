@@ -32,6 +32,17 @@ public class ApiExceptionHandler {
                 .body(new ApiError(e.getError().name(), e.getMessage()));
     }
 
+    /**
+     * A token-credentialed connection whose stored ciphertext is blank/missing (M8.8 change 2): a clear,
+     * actionable 409 telling the user the connection needs a new token — never a leaked ciphertext or stack
+     * trace.
+     */
+    @ExceptionHandler(com.company.secscan.source.MissingCredentialException.class)
+    public ResponseEntity<ApiError> onMissingCredential(com.company.secscan.source.MissingCredentialException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("CONNECTION_TOKEN_MISSING", e.getMessage()));
+    }
+
     /** Provider-neutral source errors (GitHub/public adapters) → the same {error,message} body (M8.7). */
     @ExceptionHandler(com.company.secscan.source.ProviderException.class)
     public ResponseEntity<ApiError> onProvider(com.company.secscan.source.ProviderException e) {
