@@ -1,5 +1,14 @@
 # M8.x train state
 - Train plan approved: yes (2026-10-27) — with binding changes appended to M8x-train-brief.md "Approved plan changes (2026-10-27)"
+- Review round M8.5/M8.6/M8.7 (2026-10-28, SF/N): /review-pr fixes across the train —
+  m8.5 S-3 two-workspace New·7d IT (997b202) → merged forward; m8.6 N1 (evidence label) / N2 (⋮ Ignore… opens
+  the panel with the ignore dialog) / N3 (LIKE escapes \ % _ + ESCAPE '\') (1574229) → merged forward; m8.7
+  SF-1 (Select-repositories step + provider filter on GET /repositories & /issue-groups, UIs URL-addressable),
+  SF-2 (V22 corrected IN PLACE — safe, only ran on Testcontainers; providerlessNonGitlabInsertFails), SF-3
+  (run-scan.sh -c http.followRedirects=false), SF-4 (in-image clone tests), N-1/N-2/N-3, + 4 deferred-register
+  rows (200532b). All three branches pushed. m8.7-tip gates: G1 clean build app 441 / core 181 / 0 fail (incl.
+  scanner image rebuild + in-image clone + 53 branch vectors); G2 vitest 87 / guard 68 clean; G3 e2e 97 passed
+  ×2. Merge-forward conflicts: none.
 - Review round M8.5 (2026-10-28): /review-pr M8.5 findings fixed on feature/m8.5-correctness-taxonomy
   (fix(core)/fix(scanner)/fix(app)+docs; B-1..N-6, D-089) and MERGED FORWARD m8.5 → m8.6 → m8.7 (git merge
   --no-ff, no rebase). Only conflict: docs/DECISIONS.md D-089 number clash — the M8.7 source-host entry was
