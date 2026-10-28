@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
 import Pager, { useUrlPaging } from "../components/Pager";
-import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
+import { useScanPolling, anyActive } from "../lib/scanPolling";
 import { useScanCompletionToasts } from "../lib/useScanCompletion";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
@@ -77,14 +77,10 @@ export default function RepositoriesPage() {
     setSp(next, { replace: false });
   }
 
-  const repos = useQuery({
-    queryKey: qk.repositories(params),
-    queryFn: () => api.listRepositories(params),
-    // Live status (M8.8): poll every 3s while any listed scan is queued/running, stop otherwise, pause hidden.
-    refetchInterval: (q) =>
-      scanRefetchInterval((q.state.data?.content ?? []).map((r) => r.lastScan?.status), documentHidden()),
-    refetchIntervalInBackground: true,
-  });
+  const repos = useScanPolling(
+    { queryKey: qk.repositories(params), queryFn: () => api.listRepositories(params) },
+    (d) => anyActive((d?.content ?? []).map((r) => r.lastScan?.status)),
+  );
   // Stable "N active repositories" headline — the default (active-only, no filters) total, independent of the
   // current search/filter view.
   const active = useQuery({

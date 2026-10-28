@@ -75,33 +75,43 @@ class GitHubBranchSearchIT extends AbstractGitLabIT {
     }
 
     @Test
-    void theExactMatchFastPathIsASingleBranchCall() {
-        // Warm the repo cache with a no-search page call, then reset the request journal.
-        gh.stubBranchPage("octo/app", 1, branchesJson("feat", 1, 10), 1);
-        provider.listBranches(gh.baseUrl(), null, "123", null, 0, 50, "ws|conn");
-        gh.resetRequests();
+    void anExactNameIsMergedWithSubstringMatches() {   // nit 9.5: typing "dev" shows "dev" AND "develop"
+        gh.stubBranchPage("octo/app", 1,
+                "[{\"name\":\"dev\",\"protected\":false},{\"name\":\"develop\",\"protected\":false},"
+                        + "{\"name\":\"feature-x\",\"protected\":false}]", 1);
 
-        gh.stubBranch("octo/app", "main", 200);   // exact match exists
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "main", 0, 50, "ws|conn");
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "dev", 0, 50, "ws|conn");
 
-        assertThat(page.items()).extracting(SourceBranch::name).containsExactly("main");
-        // Exactly one GitHub call (the exact-branch GET); the repo metadata came from cache.
-        assertThat(gh.totalRequestCount()).isEqualTo(1);
+        assertThat(page.items()).extracting(SourceBranch::name).contains("dev", "develop");
+    }
+
+    @Test
+    void surfacesAnExactNameThatIsBeyondTheFetchCap() {   // nit 9.5: exact hit even when past the 1,000-branch cap
+        for (int p = 1; p <= 10; p++) {
+            gh.stubBranchPage("octo/app", p, branchesJson("feat", (p - 1) * 100 + 1, 100), 11);
+        }
+        gh.stubBranch("octo/app", "release-1.0", 200);   // exists, but not among the first 1,000 "feat-*"
+
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), null, "123", "release-1.0", 0, 50,
+                "ws|conn");
+
+        assertThat(page.items()).extracting(SourceBranch::name).contains("release-1.0");
+        assertThat(page.truncated()).isTrue();
     }
 
     @Test
     void aRepeatSearchWithinTheTtlMakesNoGitHubCalls() {
+        // "target" exists exactly in the cached list, so no supplementary exact lookup is needed on the repeat.
         gh.stubBranchPage("octo/app", 1, branchesJson("feat", 1, 100), 2);
-        gh.stubBranchPage("octo/app", 2, branchesJson("feat", 101, 20, "zzz-target"), 2);
-        gh.stubBranch("octo/app", "target", 404);
+        gh.stubBranchPage("octo/app", 2, branchesJson("target", 101, 20, "target"), 2);
 
         SourcePage<SourceBranch> first = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50, "ws|conn");
-        assertThat(first.items()).extracting(SourceBranch::name).contains("zzz-target");
+        assertThat(first.items()).extracting(SourceBranch::name).contains("target");
 
         gh.resetRequests();
         SourcePage<SourceBranch> second = provider.listBranches(gh.baseUrl(), null, "123", "target", 0, 50, "ws|conn");
 
-        assertThat(second.items()).extracting(SourceBranch::name).contains("zzz-target");
+        assertThat(second.items()).extracting(SourceBranch::name).contains("target");
         assertThat(gh.totalRequestCount()).isZero();   // served entirely from the 5-minute cache
     }
 

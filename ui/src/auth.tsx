@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { fetchSession, logout as apiLogout, setUnauthorizedHandler, type SessionInfo } from "./api";
+import { fetchSession, logout as apiLogout, resetSession, setUnauthorizedHandler, type SessionInfo } from "./api";
 import { queryClient } from "./queryClient";
+import { useToast } from "./toast";
 
 /**
  * Server-session auth (D-092, amending D-067(a)). On load we ask the server whether a session cookie is still
@@ -21,10 +22,12 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const toast = useToast();
   const [checking, setChecking] = useState(true);
   const [session, setSession] = useState<SessionInfo | null>(null);
 
   const clear = useCallback(() => {
+    resetSession(); // nit 9.6: drop the in-memory CSRF token on a 401 / sign-out
     setSession(null);
     queryClient.clear();
   }, []);
@@ -59,9 +62,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // nit 9.7: if logout does not return 204, keep the user signed in and show an error toast.
   const signOut = useCallback(() => {
-    void apiLogout().finally(clear);
-  }, [clear]);
+    void apiLogout()
+      .then(clear)
+      .catch(() => toast.error("Sign-out failed — you are still signed in. Try again."));
+  }, [clear, toast]);
 
   const value: AuthCtx = {
     checking,

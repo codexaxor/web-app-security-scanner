@@ -424,22 +424,30 @@ export async function fetchSession(): Promise<SessionInfo | null> {
   return info;
 }
 
-/** Ends the server session. Clears the in-memory CSRF token regardless of the outcome. */
+/** Drops the in-memory CSRF token (nit 9.6: called from the auth layer on a 401 / sign-out). */
+export function resetSession(): void {
+  csrfToken = null;
+}
+
+/**
+ * Ends the server session. Throws an {@link ApiError} if the server does not return 204 — the caller keeps the
+ * user signed in and surfaces the error (nit 9.7). On success the in-memory CSRF token is cleared.
+ */
 export async function logout(): Promise<void> {
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (csrfToken) {
-      headers["X-CSRF-TOKEN"] = csrfToken;
-    }
-    await fetch("/api/v1/auth/logout", {
-      method: "POST",
-      headers,
-      credentials: "same-origin",
-      body: "{}",
-    });
-  } finally {
-    csrfToken = null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (csrfToken) {
+    headers["X-CSRF-TOKEN"] = csrfToken;
   }
+  const res = await fetch("/api/v1/auth/logout", {
+    method: "POST",
+    headers,
+    credentials: "same-origin",
+    body: "{}",
+  });
+  if (res.status !== 204) {
+    throw new ApiError(`Sign-out failed (${res.status})`, null);
+  }
+  csrfToken = null;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {

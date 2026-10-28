@@ -90,10 +90,11 @@ test("S10d — Dashboard band count links to the matching filtered Feed", async 
     .toBe(n);
 });
 
-test("S10d — Connect shows token expiry with 'N days left' in amber under 14 days", async ({ page }) => {
+test("S10d — Connect shows a one-line token expiry in amber under 14 days", async ({ page }) => {
   await signIn(page, "/connect");
   const expiry = page.getByTestId("connection-expiry").first();
-  await expect(expiry).toContainText("days");
+  // nit 9.4: exact one-line pattern — "<date> · N days" (no wrapping "left").
+  await expect(expiry).toHaveText(/· \d+ days?$/);
   await expect(expiry).toHaveClass(/expiry-warn/);
 });
 

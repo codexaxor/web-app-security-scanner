@@ -125,18 +125,23 @@ public class GitHubProvider implements SourceProvider {
             return new SourcePage<>(items, raw.totalElements(), raw.totalPages(), false);
         }
 
-        // Search: serve from the cached full list if present; else try the exact-match fast path (1 call), then
-        // fall back to a capped full fetch (cached for the next search).
+        // Search: serve from the cached full list if present; else do a capped full fetch (cached for next time).
         if (entry.allBranches() == null) {
-            GitHubBranch exact = client.getBranch(baseUrl, token, repo.fullName(), search);
-            if (exact != null) {
-                return new SourcePage<>(List.of(toBranch(exact, repo)), 1, 1, false);
-            }
             FetchResult fetched = fetchAllBranches(baseUrl, token, repo.fullName());
             entry = new Entry(entry.at(), repo, fetched.branches(), fetched.truncated());
             cache.put(key, entry);
         }
-        return pageOf(filterAndMap(entry.allBranches(), search, repo), page, size, entry.truncated());
+        java.util.List<SourceBranch> matches = new ArrayList<>(filterAndMap(entry.allBranches(), search, repo));
+        // Nit 9.5: an exact-name hit is MERGED with the substring matches (so typing "dev" shows "dev" alongside
+        // "develop"), and is surfaced even when the exact branch is past the fetch cap. The extra exact lookup
+        // runs only when the substring results don't already include it.
+        if (matches.stream().noneMatch(b -> b.name().equals(search))) {
+            GitHubBranch exact = client.getBranch(baseUrl, token, repo.fullName(), search);
+            if (exact != null) {
+                matches.add(0, toBranch(exact, repo));
+            }
+        }
+        return pageOf(matches, page, size, entry.truncated());
     }
 
     private Entry freshEntry(String key, String baseUrl, String token, String providerRepoId) {

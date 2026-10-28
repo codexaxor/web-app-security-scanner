@@ -8,7 +8,7 @@ import {
   type View,
 } from "../api";
 import { qk } from "../queryClient";
-import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
+import { useScanPolling, anyActive } from "../lib/scanPolling";
 import Pager, { DEFAULT_PAGE_SIZE } from "../components/Pager";
 import { isUuid, oneOf } from "../lib/validate";
 import { fixTime } from "../lib/format";
@@ -53,14 +53,10 @@ export default function RepositoryPage() {
   const [sp, setSp] = useSearchParams();
   const valid = isUuid(id);
 
-  const repo = useQuery({
-    queryKey: qk.repository(id ?? ""),
-    queryFn: () => api.getRepository(id as string),
-    enabled: valid,
-    // Live status (M8.8): poll the repo header while its own last scan is queued/running.
-    refetchInterval: (q) => scanRefetchInterval([q.state.data?.lastScan?.status], documentHidden()),
-    refetchIntervalInBackground: true,
-  });
+  const repo = useScanPolling(
+    { queryKey: qk.repository(id ?? ""), queryFn: () => api.getRepository(id as string), enabled: valid },
+    (d) => anyActive([d?.lastScan?.status]),
+  );
 
   const tabParam = sp.get("tab");
   const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? "") ? (tabParam as Tab) : "issues";
@@ -433,14 +429,10 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(DEFAULT_PAGE_SIZE);
   const [warnings, setWarnings] = useState<string | null>(null);
-  const scans = useQuery({
-    queryKey: qk.repositoryScans(repoId, page, size),
-    queryFn: () => api.listRepositoryScans(repoId, page, size),
-    // Live status (M8.8): poll the Scans tab while any scan is queued/running.
-    refetchInterval: (q) =>
-      scanRefetchInterval((q.state.data?.content ?? []).map((s) => s.status), documentHidden()),
-    refetchIntervalInBackground: true,
-  });
+  const scans = useScanPolling(
+    { queryKey: qk.repositoryScans(repoId, page, size), queryFn: () => api.listRepositoryScans(repoId, page, size) },
+    (d) => anyActive((d?.content ?? []).map((s) => s.status)),
+  );
   const rows = scans.data?.content ?? [];
 
   return (

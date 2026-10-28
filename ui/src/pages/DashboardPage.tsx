@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
-import { scanRefetchInterval, documentHidden } from "../lib/scanPolling";
+import { useScanPolling, anyActive } from "../lib/scanPolling";
 import { titleCase } from "../lib/format";
 import { typeAcronym, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
@@ -26,14 +26,10 @@ function duration(startedAt: string | null, finishedAt: string | null): string {
 
 export default function DashboardPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
-  const scans = useQuery({
-    queryKey: qk.scansRecent,
-    queryFn: () => api.listScansAll(0, 10),
-    // Live status (M8.8): poll the recent scans while any is queued/running.
-    refetchInterval: (q) =>
-      scanRefetchInterval((q.state.data?.content ?? []).map((s) => s.status), documentHidden()),
-    refetchIntervalInBackground: true,
-  });
+  const scans = useScanPolling(
+    { queryKey: qk.scansRecent, queryFn: () => api.listScansAll(0, 10) },
+    (d) => anyActive((d?.content ?? []).map((s) => s.status)),
+  );
   const repos = useQuery({ queryKey: qk.repositories({ size: 100 }), queryFn: () => api.listRepositories({ size: 100 }) });
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
