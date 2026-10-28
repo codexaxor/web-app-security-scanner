@@ -31,8 +31,26 @@ public class Repository {
     @Column(name = "connection_id")
     private UUID connectionId;
 
-    @Column(name = "gitlab_project_id", nullable = false)
-    private long gitlabProjectId;
+    // Provider-neutral identity (D-080, V22): workspace + provider + host + provider_repo_id. provider is
+    // 'gitlab'|'github'; host is the connection's authority host[:port]; providerRepoId is the provider's stable
+    // numeric id as text (= gitlabProjectId for GitLab rows). On a legacy GitLab insert that leaves host null,
+    // the V22 trigger fills it from the connection; the upserter sets it explicitly for the select flow.
+    @Column(name = "provider", nullable = false, updatable = false)
+    private String provider = "gitlab";
+
+    // host is filled by the V22 BEFORE INSERT trigger from the connection (identity never changes after insert),
+    // so Hibernate never writes it (insertable/updatable false) and reads it back after insert (@Generated). This
+    // also means a whole-entity update never clobbers it with a stale in-memory null.
+    @Column(name = "host", nullable = false, insertable = false, updatable = false)
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
+    private String host;
+
+    @Column(name = "provider_repo_id", nullable = false, updatable = false)
+    private String providerRepoId;
+
+    // The GitLab project id (null for GitHub rows). Kept for GitLab display / API calls; no longer the identity.
+    @Column(name = "gitlab_project_id")
+    private Long gitlabProjectId;
 
     @Column(name = "path_with_namespace", nullable = false)
     private String pathWithNamespace;
@@ -80,11 +98,34 @@ public class Repository {
         // for JPA
     }
 
+    /**
+     * Legacy GitLab constructor (host filled by the V22 trigger from the connection). Kept so existing GitLab
+     * call sites are unchanged; provider/provider_repo_id are the GitLab identity derived from the project id.
+     */
     public Repository(UUID workspaceId, UUID connectionId, long gitlabProjectId, String pathWithNamespace,
                       String defaultBranch, List<String> languages) {
+        this(workspaceId, connectionId, "gitlab", gitlabProjectId, Long.toString(gitlabProjectId),
+                pathWithNamespace, defaultBranch, languages);
+    }
+
+    /**
+     * A GitHub repository: identity is GitHub's stable numeric repository id (as text); gitlab_project_id is null;
+     * fullName is the owner/name display path. host is filled by the V22 trigger from the connection.
+     */
+    public static Repository github(UUID workspaceId, UUID connectionId, long githubRepoId, String fullName,
+                                    String defaultBranch, List<String> languages) {
+        return new Repository(workspaceId, connectionId, "github", null, Long.toString(githubRepoId), fullName,
+                defaultBranch, languages);
+    }
+
+    private Repository(UUID workspaceId, UUID connectionId, String provider, Long gitlabProjectId,
+                       String providerRepoId, String pathWithNamespace, String defaultBranch,
+                       List<String> languages) {
         this.workspaceId = workspaceId;
         this.connectionId = connectionId;
+        this.provider = provider;
         this.gitlabProjectId = gitlabProjectId;
+        this.providerRepoId = providerRepoId;
         this.pathWithNamespace = pathWithNamespace;
         this.defaultBranch = defaultBranch;
         this.languages = languages == null ? new ArrayList<>() : new ArrayList<>(languages);
@@ -213,8 +254,21 @@ public class Repository {
         return connectionId;
     }
 
-    public long getGitlabProjectId() {
+    /** The GitLab project id, or null for a GitHub repository. */
+    public Long getGitlabProjectId() {
         return gitlabProjectId;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public String getProviderRepoId() {
+        return providerRepoId;
     }
 
     public String getPathWithNamespace() {

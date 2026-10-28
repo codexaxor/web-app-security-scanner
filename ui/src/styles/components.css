@@ -1651,3 +1651,29 @@ button.health-item {
   align-items: center;
   gap: 4px;
 }
+
+/* Provider badge (M8.7): an inline monogram chip keyed by data-provider; no icon library (D-066). */
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.25rem;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  vertical-align: middle;
+}
+.provider-badge[data-provider="github"] {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.provider-badge[data-provider="gitlab"] {
+  border-color: var(--border-strong);
+  color: var(--text);
+}

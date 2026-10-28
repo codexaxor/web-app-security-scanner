@@ -14,6 +14,25 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-090 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
+(Renumbered from D-089 at the m8.6→m8.7 train merge: D-089 was already taken by the M8.5 review-fix decision,
+which merges to develop first; this M8.7 decision, merging last, takes the next free number.)
+Context: M8.7 ships the provider-neutral connection/identity model (V22), so a workspace may hold GitLab
+(self-managed + gitlab.com), GitHub and public repositories. D-085 had forbidden adding a second GitLab host
+until M8.7 shipped (identity was the bare GitLab project id); V22 makes identity = workspace + provider + host +
+provider's id, so that restriction is no longer needed.
+Decision:
+ - The outbound-host allowlist (SSRF guard, D-018; `GitLabHostPolicy`) now allows the built-in SaaS hosts
+   `github.com`, `api.github.com` and `gitlab.com` BY DEFAULT. They can be switched off with
+   `SECSCAN_SOURCE_ALLOW_BUILTIN_SAAS=false` for an egress-locked deployment (D-033).
+ - Self-managed hosts remain deny-by-default and are opted in via `SECSCAN_GITLAB_ALLOWED_HOSTS` (unchanged).
+ - D-085's "do not add a second GitLab host (incl. gitlab.com)" restriction is RETIRED now that M8.7 ships;
+   a workspace may connect any number of allowed hosts across providers. https-only and never-follow-redirects
+   are unchanged; TLS is always verified.
+Consequences: gitlab.com and github.com work out of the box; an operator can still lock egress to self-managed
+hosts only. `GitLabHostPolicy` keeps its name for now (it is the shared source-host allowlist); a rename is
+cosmetic and deferred.
+
 ## D-089 M8.5 review fixes — same-branch orphan close + language scope (2026-10-27, accepted)
 Context: the /review-pr M8.5 round (D-086 train) found that the OD-19 ignored-orphan handling only fired on a
 branch switch, so a finding that genuinely disappears on the SAME branch (e.g. a SAST snippet shift) left a
@@ -1499,6 +1518,28 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.x train `/review-pr` deferred register (recorded 2026-10-28, for a later milestone):
+  - **Feed category-filter options ignore sibling filters (M8.6 N4):** `GET /issue-groups/categories` computes its
+    distinct level-2 categories + counts honouring only `repositoryId` + `view` + `includeInactive` — NOT the
+    currently-applied type/band/provider/search filters. So the category dropdown can offer a category whose
+    count, once combined with the other active filters, is zero. Accepted as-is (the dropdown is a convenience,
+    not an oracle; the list itself always reflects every filter). Revisit if users find empty-result categories
+    confusing — thread the sibling filters into `categoryCounts` then.
+  - **Repository "unresolved dependencies" count capped at 200 (M8.6 N5):** the repository rollup/coverage figure
+    for unresolved dependencies is clamped at 200 to bound the aggregate; a repository with more than 200 shows
+    "200" (effectively "200+"). Accepted for display; revisit by rendering it as "200+" or lifting the cap if a
+    real repository legitimately exceeds it.
+  - **Remove the `repository_fill_identity` trigger once all inserts are explicit (SF-2):** V22 added a
+    BEFORE INSERT trigger as a compatibility shim so legacy GitLab insert paths needed no change (it defaults
+    `provider`='gitlab' and fills `provider_repo_id` from `gitlab_project_id` only when that is non-null, and
+    `host` from the connection). Once every insert path sets provider/host/provider_repo_id explicitly (the
+    GitHub/public paths already do), drop the trigger + its function in a new migration so identity is never
+    implicitly derived. Until then the NOT NULL identity columns + the SF-2 `providerlessNonGitlabInsertFails`
+    guard keep a bad insert from being stored.
+  - **Relative-time E2E date-boundary flake (M8.x train):** a relative-time assertion (e.g. "9 hours ago" /
+    "3 days ago") can flip when the e2e run crosses a day/boundary between seeding and assertion (observed as a
+    one-off on a 3rd consecutive run; a re-run was clean). Accepted as a known flake; harden later by freezing the
+    clock in the e2e or asserting a tolerant range rather than an exact phrase.
 - Post-M8.1 deferred register moves (recorded 2026-10-26, D-080/D-081):
   - **Sajal's UI polish list (2026-10-25 walkthrough feedback) → M8.6 (D-081 (2)):** carried with the compact
     side-panel locations row above.

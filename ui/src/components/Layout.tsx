@@ -39,7 +39,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/repositories", label: "Repositories", icon: "repositories" },
   { to: "/ignored", label: "Ignored", icon: "ignored" },
   { to: "/settings", label: "Settings", icon: "settings" },
-  { to: "/connect", label: "Connect", icon: "connect" },
+  { to: "/connect", label: "Sources", icon: "connect" },
 ];
 
 /**

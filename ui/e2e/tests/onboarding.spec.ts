@@ -8,10 +8,10 @@ test("signs in and shows the app shell with navigation", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Repositories", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 
-  // The M1 Connect GitLab onboarding screen is still reachable and renders. The sidebar nav item is
-  // "Connect" (M8.6 shell); the page heading stays "Connect GitLab".
-  await page.getByRole("link", { name: "Connect", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Connect GitLab" })).toBeVisible();
+  // The Sources onboarding screen is still reachable and renders. The sidebar nav item and page heading are
+  // "Sources" (M8.7); it lists connections and the add-source forms.
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
 });
 
 test("rejects a wrong password at the gate", async ({ page }) => {

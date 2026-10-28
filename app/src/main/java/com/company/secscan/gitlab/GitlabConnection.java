@@ -28,11 +28,40 @@ public class GitlabConnection {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    public static final String PROVIDER_GITLAB = "gitlab";
+    public static final String PROVIDER_GITHUB = "github";
+    public static final String CREDENTIAL_TOKEN = "token";
+    public static final String CREDENTIAL_NONE = "none";
+    public static final String TARGET_OWNER = "owner";
+    public static final String TARGET_REPO = "repo";
+
     @Column(name = "workspace_id", nullable = false)
     private UUID workspaceId;
 
     @Column(name = "base_url", nullable = false)
     private String baseUrl;
+
+    // Provider-neutral fields (V22). provider is 'gitlab'|'github'; credentialKind 'token'|'none' (public);
+    // host is the authority of base_url, GENERATED in the DB (read-only here). owner/repoFullName/providerRepoId
+    // carry GitHub owner and single-repo identity (null for GitLab group/project rows).
+    @Column(name = "provider", nullable = false)
+    private String provider = PROVIDER_GITLAB;
+
+    @Column(name = "credential_kind", nullable = false)
+    private String credentialKind = CREDENTIAL_TOKEN;
+
+    @Column(name = "host", insertable = false, updatable = false)
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
+    private String host;
+
+    @Column(name = "owner_login")
+    private String ownerLogin;
+
+    @Column(name = "repo_full_name")
+    private String repoFullName;
+
+    @Column(name = "provider_repo_id")
+    private String providerRepoId;
 
     @Column(name = "target_type", nullable = false)
     private String targetType;
@@ -49,7 +78,10 @@ public class GitlabConnection {
     @Column(name = "project_full_path")
     private String projectFullPath;
 
-    @Column(name = "token_ciphertext", nullable = false)
+    // Nullable since V22 (N-2): a public (credential_kind 'none') connection carries no token. The DB enforces
+    // the token-vs-credential-kind pairing via ck_gitlab_connection_token; this mapping must not re-impose
+    // NOT NULL, or persisting a public connection would fail Hibernate's own non-null check before the insert.
+    @Column(name = "token_ciphertext")
     private String tokenCiphertext;
 
     @Column(name = "token_scopes")
@@ -101,6 +133,36 @@ public class GitlabConnection {
                 tokenScopes, tokenExpiresAt);
         c.projectFullPath = projectFullPath;
         c.gitlabProjectId = gitlabProjectId;
+        c.providerRepoId = Long.toString(gitlabProjectId);
+        return c;
+    }
+
+    /** A GitHub owner (user/org) connection: all repositories the fine-grained PAT can see under that owner. */
+    public static GitlabConnection forGitHubOwner(UUID workspaceId, String baseUrl, String ownerLogin,
+                                                  String tokenCiphertext, String tokenScopes,
+                                                  LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_OWNER, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.provider = PROVIDER_GITHUB;
+        c.ownerLogin = ownerLogin;
+        return c;
+    }
+
+    /**
+     * A single-repository connection: a GitHub repo (token) or a public repo on any provider (credentialKind
+     * {@code none}, no token). providerRepoId is the provider's stable numeric id (as text); repoFullName the
+     * owner/name display path.
+     */
+    public static GitlabConnection forSingleRepo(UUID workspaceId, String baseUrl, String provider,
+                                                 String credentialKind, String providerRepoId, String repoFullName,
+                                                 String tokenCiphertext, String tokenScopes,
+                                                 LocalDate tokenExpiresAt) {
+        GitlabConnection c = new GitlabConnection(workspaceId, baseUrl, TARGET_REPO, tokenCiphertext,
+                tokenScopes, tokenExpiresAt);
+        c.provider = provider;
+        c.credentialKind = credentialKind;
+        c.providerRepoId = providerRepoId;
+        c.repoFullName = repoFullName;
         return c;
     }
 
@@ -141,6 +203,31 @@ public class GitlabConnection {
 
     public String getBaseUrl() {
         return baseUrl;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public String getCredentialKind() {
+        return credentialKind;
+    }
+
+    /** Authority host[:port] of base_url (generated in the DB; null on a just-built, not-yet-persisted entity). */
+    public String getHost() {
+        return host;
+    }
+
+    public String getOwnerLogin() {
+        return ownerLogin;
+    }
+
+    public String getRepoFullName() {
+        return repoFullName;
+    }
+
+    public String getProviderRepoId() {
+        return providerRepoId;
     }
 
     public String getTargetType() {

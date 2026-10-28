@@ -65,7 +65,7 @@ public class IssueService {
     @Transactional(readOnly = true)
     public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String view,
                                                     String band, boolean includeInactive, int page, int size) {
-        return listGroups(repositoryId, type, category, null, view, band, includeInactive, page, size);
+        return listGroups(repositoryId, type, category, null, null, view, band, includeInactive, page, size);
     }
 
     /** As above, plus an optional free-text {@code search} on the group title/subtitle (M8.6 repo Issues tab). */
@@ -73,9 +73,18 @@ public class IssueService {
     public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String search,
                                                     String view, String band, boolean includeInactive, int page,
                                                     int size) {
+        return listGroups(repositoryId, type, category, search, null, view, band, includeInactive, page, size);
+    }
+
+    /** As above, plus the SF-1 provider filter (gitlab|github; validated whitelist, workspace-scoped). */
+    @Transactional(readOnly = true)
+    public PagedResponse<IssueGroupView> listGroups(UUID repositoryId, String type, String category, String search,
+                                                    String provider, String view, String band,
+                                                    boolean includeInactive, int page, int size) {
         int[] range = bandRange(band);
         var pageResult = groups.searchFeed(WORKSPACE, repositoryId, blankToNull(type), blankToNull(category),
-                likeOrNull(search), statusesFor(view), range == null ? null : range[0],
+                validProviderOrNull(provider), likeOrNull(search), statusesFor(view),
+                range == null ? null : range[0],
                 range == null ? null : range[1], includeInactive, Pagination.of(page, size));
         Map<UUID, Repository> repos = repoById();
         Map<UUID, long[]> counts = findingCounts(pageResult.getContent());
@@ -207,16 +216,21 @@ public class IssueService {
         Map<UUID, IgnoreRule> rules = rulesFor(pageResult.getContent());
         // D-084: host (from the repo's connection) + per-finding commit (from its last-seen scan) are the only
         // inputs, with the stored project path, the UI uses to build a file/commit deep link. Both may be null.
-        String host = sourceHostOf(grp.getRepositoryId());
+        // N-1: load the group's repository ONCE and derive both host and provider from it (was two loads).
+        Repository repo = repositories.findByIdAndWorkspaceId(grp.getRepositoryId(), WORKSPACE).orElse(null);
+        String host = sourceHostOf(repo);
+        // provider selects the source-link URL shape (GitLab `/-/` vs GitHub) — M8.7 approval 16.
+        String provider = repo == null ? null : repo.getProvider();
         Map<UUID, String> commitByScan = commitShas(pageResult.getContent());
         return PagedResponse.fromPage(pageResult.map(s ->
                 SubIssueView.of(s, s.getIgnoredByRuleId() == null ? null : rules.get(s.getIgnoredByRuleId()),
-                        host, s.getLastSeenScanId() == null ? null : commitByScan.get(s.getLastSeenScanId()))));
+                        host, s.getLastSeenScanId() == null ? null : commitByScan.get(s.getLastSeenScanId()),
+                        provider)));
     }
 
-    /** The source-host authority (host[:port]) of a repository's connection, or null if detached/unparseable. */
-    private String sourceHostOf(UUID repositoryId) {
-        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE).orElse(null);
+    /** The source-host authority (host[:port]) of an already-loaded repository's connection, or null if the
+     *  repository is absent/detached or its base URL is unparseable (N-1: the caller loads the repository once). */
+    private String sourceHostOf(Repository repo) {
         if (repo == null || repo.getConnectionId() == null) {
             return null;
         }
@@ -326,5 +340,20 @@ public class IssueService {
 
     private static String blankToNull(String s) {
         return StringUtils.hasText(s) ? s : null;
+    }
+
+    /**
+     * SF-1: a blank provider → no filter; otherwise it must be one of the validated whitelist {@code gitlab} or
+     * {@code github} (case-insensitive). Anything else is a 400 — never passed through to the query unchecked.
+     */
+    static String validProviderOrNull(String provider) {
+        if (!StringUtils.hasText(provider)) {
+            return null;
+        }
+        String p = provider.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!p.equals("gitlab") && !p.equals("github")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown provider. Use gitlab or github.");
+        }
+        return p;
     }
 }

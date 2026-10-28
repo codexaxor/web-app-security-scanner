@@ -1,6 +1,14 @@
 import { useSearchParams, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api, type FeedParams, type IssueType, type Band, type View, type IssueGroupView } from "../api";
+import {
+  api,
+  type FeedParams,
+  type IssueType,
+  type Band,
+  type Provider,
+  type View,
+  type IssueGroupView,
+} from "../api";
 import { qk } from "../queryClient";
 import { fixTime, titleCase } from "../lib/format";
 import { isUuid, oneOf } from "../lib/validate";
@@ -17,6 +25,8 @@ import { TableSkeleton } from "../components/Skeleton";
 const SIZE = 50;
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const BANDS: Band[] = ["critical", "high", "medium", "low"];
+const PROVIDERS: Provider[] = ["gitlab", "github"];
+const PROVIDER_LABEL: Record<Provider, string> = { gitlab: "GitLab", github: "GitHub" };
 
 function withinSevenDays(iso: string): boolean {
   return Date.now() - new Date(iso).getTime() < 7 * 86400 * 1000;
@@ -47,19 +57,22 @@ export default function FeedPage() {
   const viewCheck = oneOf<View>(params.get("view"), ["focus", "all"]);
   const bandCheck = oneOf<Band>(params.get("band"), BANDS);
   const typeCheck = oneOf<IssueType>(params.get("type"), TYPES);
+  const providerCheck = oneOf<Provider>(params.get("provider"), PROVIDERS);
   const repositoryId = params.get("repositoryId") || undefined;
   const repoOk = !repositoryId || isUuid(repositoryId);
   const groupOk = !groupId || isUuid(groupId);
-  const invalid = !viewCheck.ok || !bandCheck.ok || !typeCheck.ok || !repoOk || !groupOk;
+  const invalid =
+    !viewCheck.ok || !bandCheck.ok || !typeCheck.ok || !providerCheck.ok || !repoOk || !groupOk;
 
   const view: View = (viewCheck.ok ? viewCheck.value : undefined) ?? "focus";
   const band = bandCheck.ok ? bandCheck.value : undefined;
   const type = typeCheck.ok ? typeCheck.value : undefined;
+  const provider = providerCheck.ok ? providerCheck.value : undefined;
   const includeInactive = params.get("includeInactive") === "true";
   const category = params.get("category") || undefined;
   const page = Number(params.get("page") || "0");
 
-  const filters: FeedParams = { view, band, type, category, repositoryId, includeInactive };
+  const filters: FeedParams = { view, band, type, provider, category, repositoryId, includeInactive };
 
   function setFilter(key: string, value: string | null) {
     const next = new URLSearchParams(params);
@@ -185,6 +198,14 @@ export default function FeedPage() {
           {BANDS.map((b) => (
             <option key={b} value={b}>
               {titleCase(b)}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Provider" value={provider ?? ""} onChange={(e) => setFilter("provider", e.target.value || null)}>
+          <option value="">All sources</option>
+          {PROVIDERS.map((p) => (
+            <option key={p} value={p}>
+              {PROVIDER_LABEL[p]}
             </option>
           ))}
         </select>

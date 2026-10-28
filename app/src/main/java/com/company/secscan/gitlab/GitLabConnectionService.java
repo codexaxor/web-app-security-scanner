@@ -83,9 +83,14 @@ public class GitLabConnectionService {
         } catch (GitLabException e) {
             return ConnectionTestResult.failure(e.getError().name(), e.getMessage());
         }
+        // Dedup within this host (V22): the same numeric id on gitlab.com and a self-managed host are two
+        // different connections, so scope the "already connected" check by provider + host.
+        String host = com.company.secscan.source.SourceHosts.authorityOf(baseUrl);
         Optional<GitlabConnection> duplicate = r.isGroup()
-                ? connections.findByWorkspaceIdAndGitlabGroupId(WORKSPACE, r.id())
-                : connections.findByWorkspaceIdAndGitlabProjectId(WORKSPACE, r.id());
+                ? connections.findByWorkspaceIdAndProviderAndHostAndGitlabGroupId(
+                        WORKSPACE, GitlabConnection.PROVIDER_GITLAB, host, r.id())
+                : connections.findByWorkspaceIdAndProviderAndHostAndGitlabProjectId(
+                        WORKSPACE, GitlabConnection.PROVIDER_GITLAB, host, r.id());
         if (duplicate.isPresent()) {
             return alreadyConnected(r);
         }
@@ -198,11 +203,19 @@ public class GitLabConnectionService {
 
     // --- reassignment target selection (D-020) ---
 
-    private Optional<GitlabConnection> pickReassignTarget(Repository repo, List<GitlabConnection> others) {
-        // 1. A project-mode connection targeting the same project id (most recently verified wins a tie).
+    private Optional<GitlabConnection> pickReassignTarget(Repository repo, List<GitlabConnection> allOthers) {
+        // A connection can only reach a repository on its OWN host (V22 identity includes host): a connection on
+        // another host, even with the same numeric id, is a different repository. Restrict candidates to the
+        // repo's host before applying the D-020 preference order.
+        List<GitlabConnection> others = allOthers.stream()
+                .filter(c -> repo.getHost() != null && repo.getHost().equals(c.getHost()))
+                .toList();
+        // 1. A single-repo connection targeting the same repository id (most recently verified wins a tie).
+        //    Match by provider_repo_id (the identity component) so it works for GitLab and GitHub alike.
         Optional<GitlabConnection> sameProject = others.stream()
                 .filter(GitlabConnection::isProject)
-                .filter(c -> c.getGitlabProjectId() != null && c.getGitlabProjectId() == repo.getGitlabProjectId())
+                .filter(c -> c.getProviderRepoId() != null
+                        && c.getProviderRepoId().equals(repo.getProviderRepoId()))
                 .max(byVerified());
         if (sameProject.isPresent()) {
             return sameProject;

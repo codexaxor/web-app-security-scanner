@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api, type RepositoryView, type RepoSort } from "../api";
+import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
+import ProviderBadge from "../components/ProviderBadge";
 import SeverityChips from "../components/SeverityChips";
 import ScanButton from "../components/ScanButton";
 import RowMenu from "../components/RowMenu";
@@ -24,8 +25,20 @@ const SORTS: { value: RepoSort; label: string }[] = [
   { value: "lastscan", label: "Last scan" },
 ];
 
+const PROVIDERS: { value: Provider; label: string }[] = [
+  { value: "gitlab", label: "GitLab" },
+  { value: "github", label: "GitHub" },
+];
+
+/** A URL ?provider must be one of the validated values, else no filter (mirrors the server whitelist, SF-1). */
+function providerFromParam(v: string | null): Provider | "" {
+  return v === "gitlab" || v === "github" ? v : "";
+}
+
 export default function RepositoriesPage() {
   const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const provider = providerFromParam(sp.get("provider"));
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RepoSort>("severity");
@@ -40,6 +53,7 @@ export default function RepositoriesPage() {
     includeInactive: showInactive,
     hasOpenIssues,
     lastScanFailed,
+    provider: provider || undefined,
     sort,
     page,
     size: SIZE,
@@ -48,6 +62,15 @@ export default function RepositoriesPage() {
   function resetAnd(fn: () => void) {
     setPage(0);
     fn();
+  }
+
+  // SF-1: the provider filter is URL-addressable (?provider=gitlab|github) so a filtered list is shareable.
+  function setProvider(v: string) {
+    const next = new URLSearchParams(sp);
+    if (v) next.set("provider", v);
+    else next.delete("provider");
+    setSp(next, { replace: false });
+    setPage(0);
   }
 
   const repos = useQuery({
@@ -110,6 +133,14 @@ export default function RepositoriesPage() {
           {SORTS.map((s) => (
             <option key={s.value} value={s.value}>
               Sort: {s.label}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <option value="">All sources</option>
+          {PROVIDERS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
             </option>
           ))}
         </select>
@@ -182,6 +213,7 @@ export default function RepositoriesPage() {
                   >
                     <td>
                       <div className="row">
+                        <ProviderBadge provider={r.provider} />
                         <RepoName path={r.pathWithNamespace} showPath />
                         {r.effectiveBranch ? (
                           <span className="muted branch-label">· {r.effectiveBranch}</span>
@@ -213,7 +245,7 @@ export default function RepositoriesPage() {
                     <td>
                       <SeverityChips counts={r.openBySeverity} hideWhenEmpty />
                     </td>
-                    <td className="cell-num" data-testid={`ignored-${r.gitlabProjectId}`}>
+                    <td className="cell-num" data-testid={`ignored-${r.providerRepoId}`}>
                       {r.ignoredCount}
                     </td>
                     <td>

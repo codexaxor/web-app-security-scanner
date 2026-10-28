@@ -32,6 +32,24 @@ public class ApiExceptionHandler {
                 .body(new ApiError(e.getError().name(), e.getMessage()));
     }
 
+    /** Provider-neutral source errors (GitHub/public adapters) → the same {error,message} body (M8.7). */
+    @ExceptionHandler(com.company.secscan.source.ProviderException.class)
+    public ResponseEntity<ApiError> onProvider(com.company.secscan.source.ProviderException e) {
+        return ResponseEntity.status(statusFor(e.error()))
+                .body(new ApiError(e.error().name(), e.getMessage()));
+    }
+
+    private static HttpStatus statusFor(com.company.secscan.source.ProviderError error) {
+        return switch (error) {
+            case INVALID_CREDENTIAL -> HttpStatus.UNAUTHORIZED;
+            case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+            case HOST_NOT_ALLOWED -> HttpStatus.BAD_REQUEST;
+            case UNAVAILABLE, UNREACHABLE, UNEXPECTED, UNEXPECTED_REDIRECT -> HttpStatus.BAD_GATEWAY;
+        };
+    }
+
     /**
      * Normalizes a {@link ResponseStatusException} (thrown across the triage/scan/repository services for 400/
      * 404/409) into the same small {@code {error, message}} body the UI reads (OD-14/change 9). The body carries

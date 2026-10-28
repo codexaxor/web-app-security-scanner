@@ -30,18 +30,23 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
                            UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
                            boolean ruleGlobal, String level2Category, String owaspCategory,
-                           String advisorySummary, String host, String commitSha) {
+                           String advisorySummary, String host, String commitSha, String provider) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
 
     /** Without a holding rule (auto-ignore causes carry no rule; the reason code is {@code ignoreReason}). */
     public static SubIssueView of(SubIssue s) {
-        return of(s, null, null, null);
+        return of(s, null, null, null, null);
     }
 
     public static SubIssueView of(SubIssue s, IgnoreRule rule) {
-        return of(s, rule, null, null);
+        return of(s, rule, null, null, null);
+    }
+
+    /** Back-compat overload (no provider → the UI defaults the source-link shape to GitLab). */
+    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha) {
+        return of(s, rule, host, commitSha, null);
     }
 
     /**
@@ -54,7 +59,7 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
      * which the UI builds a file/commit deep link. Both may be null (e.g. a detached repo), in which case no link
      * is rendered.
      */
-    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha) {
+    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha, String provider) {
         Integer score = s.getScore();
         String cwePhrase = CweDictionary.getInstance().phrase(s.getCwe(), s.getAdvisorySummary());
         String epssAttribution = s.getEpss() != null ? EPSS_ATTRIBUTION : null;
@@ -75,6 +80,6 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getCreatedBy(),
                 // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
                 rule != null && rule.getRepositoryId() == null,
-                cat.level2(), cat.owasp(), s.getAdvisorySummary(), host, commitSha);
+                cat.level2(), cat.owasp(), s.getAdvisorySummary(), host, commitSha, provider);
     }
 }

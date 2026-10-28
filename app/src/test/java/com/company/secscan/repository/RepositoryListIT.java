@@ -47,7 +47,7 @@ class RepositoryListIT extends AbstractGitLabIT {
 
     private PagedResponse<RepositoryView> list(String search, boolean inactive, boolean openOnly, boolean failed,
                                                String sort, int page, int size) {
-        return service.listSelected(search, inactive, openOnly, failed, sort, page, size);
+        return service.listSelected(search, inactive, openOnly, failed, null, sort, page, size);
     }
 
     @Test

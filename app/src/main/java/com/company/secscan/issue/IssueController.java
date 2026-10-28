@@ -30,12 +30,14 @@ public class IssueController {
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String provider,
             @RequestParam(defaultValue = "focus") String view,
             @RequestParam(required = false) String band,
             @RequestParam(defaultValue = "false") boolean includeInactive,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listGroups(repositoryId, type, category, search, view, band, includeInactive, page, size);
+        return service.listGroups(repositoryId, type, category, search, provider, view, band, includeInactive,
+                page, size);
     }
 
     /** Distinct level-2 categories in the feed scope (the category-filter options). Small aggregation, like the

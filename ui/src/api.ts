@@ -21,14 +21,28 @@ export interface ConnectionTestResult {
 
 export interface ConnectionView {
   id: string;
-  targetType: TargetType;
+  provider: string;
+  host: string | null;
+  credentialKind: string;
+  targetType: string;
   baseUrl: string;
   gitlabGroupId: number | null;
   groupFullPath: string | null;
   gitlabProjectId: number | null;
   projectFullPath: string | null;
+  ownerLogin: string | null;
+  repoFullName: string | null;
   tokenScopes: string[];
   tokenExpiresAt: string | null;
+}
+
+export interface SourceRepoView {
+  providerRepoId: string;
+  fullName: string;
+  defaultBranch: string | null;
+  visibility: string | null;
+  empty: boolean;
+  notSelectableReason: string | null;
 }
 
 export interface ConnectionRemovalResult {
@@ -62,7 +76,10 @@ export interface LastScan {
 
 export interface RepositoryView {
   id: string;
-  gitlabProjectId: number;
+  gitlabProjectId: number | null;
+  provider: string;
+  host: string | null;
+  providerRepoId: string;
   pathWithNamespace: string;
   defaultBranch: string | null;
   scanBranch: string | null;
@@ -163,6 +180,7 @@ export interface SubIssueView {
   advisorySummary: string | null;
   host: string | null;
   commitSha: string | null;
+  provider: string | null;
 }
 
 export interface TriageEventView {
@@ -278,11 +296,14 @@ export interface WorkspaceSettings {
   epssAutoIgnoreEnabled: boolean;
 }
 
+export type Provider = "gitlab" | "github";
+
 export interface FeedParams {
   repositoryId?: string;
   type?: IssueType;
   category?: string;
   search?: string;
+  provider?: Provider;
   view?: View;
   band?: Band;
   includeInactive?: boolean;
@@ -297,6 +318,7 @@ export interface RepoListParams {
   includeInactive?: boolean;
   hasOpenIssues?: boolean;
   lastScanFailed?: boolean;
+  provider?: Provider;
   sort?: RepoSort;
   page?: number;
   size?: number;
@@ -410,6 +432,21 @@ export const api = {
     request<Paged<ConnectionView>>("GET", `/api/v1/gitlab/connections?page=${page}&size=${size}`),
   deleteConnection: (id: string) =>
     request<ConnectionRemovalResult>("DELETE", `/api/v1/gitlab/connections/${id}`),
+
+  // --- M8.7 Sources (GitHub + public) ---
+  addGitHubOwner: (ownerLogin: string, token: string) =>
+    request<ConnectionView>("POST", "/api/v1/sources/github/owner", { ownerLogin, token }),
+  addGitHubRepo: (fullName: string, token: string) =>
+    request<ConnectionView>("POST", "/api/v1/sources/github/repo", { fullName, token }),
+  addPublicRepo: (url: string) =>
+    request<ConnectionView>("POST", "/api/v1/sources/public", { url }),
+  listSourceRepositories: (connectionId: string, search: string, page: number, size: number) =>
+    request<Paged<SourceRepoView>>(
+      "GET",
+      `/api/v1/sources/connections/${connectionId}/repositories?search=${encodeURIComponent(search)}&page=${page}&size=${size}`,
+    ),
+  selectSourceRepositories: (connectionId: string, providerRepoIds: string[]) =>
+    request<RepositoryView[]>("POST", `/api/v1/sources/connections/${connectionId}/select`, { providerRepoIds }),
   listProjects: (connectionId: string, page: number, size: number) =>
     request<Paged<ProjectView>>(
       "GET",
@@ -489,6 +526,7 @@ function repoQuery(p: RepoListParams): string {
   if (p.includeInactive) q.set("includeInactive", "true");
   if (p.hasOpenIssues) q.set("hasOpenIssues", "true");
   if (p.lastScanFailed) q.set("lastScanFailed", "true");
+  if (p.provider) q.set("provider", p.provider);
   if (p.sort) q.set("sort", p.sort);
   q.set("page", String(p.page ?? 0));
   q.set("size", String(p.size ?? 50));
@@ -503,6 +541,7 @@ function feedQuery(p: FeedParams, summary = false): string {
   if (p.type) q.set("type", p.type);
   if (p.category) q.set("category", p.category);
   if (p.search) q.set("search", p.search);
+  if (p.provider) q.set("provider", p.provider);
   q.set("view", p.view ?? "focus");
   if (p.includeInactive) q.set("includeInactive", "true");
   if (!summary) {

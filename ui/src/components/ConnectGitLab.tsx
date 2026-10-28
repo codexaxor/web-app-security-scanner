@@ -10,7 +10,26 @@ import {
 import Button from "./Button";
 import ConfirmDialog from "./ConfirmDialog";
 import RotateTokenDialog from "./RotateTokenDialog";
+import SelectSourceRepositories from "./SelectSourceRepositories";
 import { Card, EmptyState } from "./ui";
+import ProviderBadge from "./ProviderBadge";
+import { providerMeta, targetLabel } from "../lib/providerMeta";
+
+/** The human target of a connection, across providers. */
+function connectionTarget(c: ConnectionView): string {
+  switch (c.targetType) {
+    case "group":
+      return c.groupFullPath ?? "";
+    case "project":
+      return c.projectFullPath ?? "";
+    case "owner":
+      return c.ownerLogin ?? "";
+    case "repo":
+      return c.repoFullName ?? "";
+    default:
+      return "";
+  }
+}
 
 /**
  * Connect screen: lists the workspace's GitLab connections (group or single project) and lets the user add a
@@ -29,6 +48,32 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   const [confirm, setConfirm] = useState<ConnectionView | null>(null);
   const [rotating, setRotating] = useState<ConnectionView | null>(null);
   const [removal, setRemoval] = useState<ConnectionRemovalResult | null>(null);
+  // M8.7 add-source forms (GitHub + public).
+  const [ghMode, setGhMode] = useState<"owner" | "repo">("owner");
+  const [ghValue, setGhValue] = useState("");
+  const [ghToken, setGhToken] = useState("");
+  const [pubUrl, setPubUrl] = useState("");
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceOk, setSourceOk] = useState<string | null>(null);
+  // SF-1: after adding a non-GitLab source, offer the "Select repositories" step for that connection.
+  const [selecting, setSelecting] = useState<ConnectionView | null>(null);
+
+  async function addSource(run: () => Promise<ConnectionView>, reset: () => void) {
+    setBusy(true);
+    setSourceError(null);
+    setSourceOk(null);
+    try {
+      const c = await run();
+      reset();
+      setSourceOk(`Added ${providerMeta(c.provider).label} ${targetLabel(c.targetType).toLowerCase()}. Now select its repositories.`);
+      setSelecting(c);
+      await refresh();
+    } catch (err) {
+      setSourceError(err instanceof Error ? err.message : "Failed to add source");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function refresh() {
     const [c, r] = await Promise.all([api.listConnections(0, 100), api.listRepositories({ size: 500 })]);
@@ -85,14 +130,16 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   return (
     <div className="stack-4 onboarding">
       <div>
-        <h2 className="section-head">GitLab connections</h2>
+        <h2 className="section-head">Connected sources</h2>
         {connections.length === 0 ? (
-          <EmptyState title="No connections yet">Add a group or a single project below.</EmptyState>
+          <EmptyState title="No sources yet">Add a GitLab group/project, a GitHub owner/repository, or a public repository below.</EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
+                  <th>Provider</th>
+                  <th>Host</th>
                   <th>Type</th>
                   <th>Target</th>
                   <th>Token expiry</th>
@@ -105,12 +152,16 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
                   return (
                     <tr key={c.id} data-testid="connection-row">
                       <td>
-                        <span className="type-badge">{c.targetType}</span>
+                        <ProviderBadge provider={c.provider} />
                       </td>
-                      <td>{c.targetType === "group" ? c.groupFullPath : c.projectFullPath}</td>
+                      <td className="muted">{c.host}</td>
+                      <td>
+                        <span className="type-badge">{targetLabel(c.targetType)}</span>
+                      </td>
+                      <td>{connectionTarget(c)}</td>
                       <td>
                         <span className={exp.cls} data-testid="connection-expiry">
-                          {exp.text}
+                          {c.credentialKind === "none" ? "public" : exp.text}
                         </span>
                       </td>
                       <td style={{ textAlign: "right" }}>
@@ -138,7 +189,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
 
       <Card>
         <form className="form">
-          <h3>Add a connection</h3>
+          <h3>Add a GitLab connection</h3>
           <div className="row" role="radiogroup" aria-label="Target type">
             <label className="check">
               <input
@@ -197,6 +248,97 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
           </div>
         </form>
       </Card>
+
+      <Card>
+        <form className="form" data-testid="add-github-form" onSubmit={(e) => e.preventDefault()}>
+          <h3>Add GitHub</h3>
+          <div className="row" role="radiogroup" aria-label="GitHub target type">
+            <label className="check">
+              <input type="radio" name="ghMode" checked={ghMode === "owner"} onChange={() => setGhMode("owner")} />
+              Owner (user/org)
+            </label>
+            <label className="check">
+              <input type="radio" name="ghMode" checked={ghMode === "repo"} onChange={() => setGhMode("repo")} />
+              Single repository
+            </label>
+          </div>
+          <div className="field">
+            <label htmlFor="gh-value">{ghMode === "owner" ? "Owner login (user or org)" : "owner/name"}</label>
+            <input
+              id="gh-value"
+              value={ghValue}
+              onChange={(e) => setGhValue(e.target.value)}
+              placeholder={ghMode === "owner" ? "e.g. octocat" : "e.g. octocat/Hello-World"}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="gh-token">Fine-grained PAT (read-only Contents + Metadata)</label>
+            <input id="gh-token" value={ghToken} onChange={(e) => setGhToken(e.target.value)} type="password" autoComplete="off" />
+            <span className="help">Entered only here; stored encrypted; never shown again (D-014).</span>
+          </div>
+          <div className="row">
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={busy || !ghValue || !ghToken}
+              onClick={() =>
+                addSource(
+                  () =>
+                    ghMode === "owner"
+                      ? api.addGitHubOwner(ghValue, ghToken)
+                      : api.addGitHubRepo(ghValue, ghToken),
+                  () => {
+                    setGhValue("");
+                    setGhToken("");
+                  },
+                )
+              }
+            >
+              Add GitHub source
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      <Card>
+        <form className="form" data-testid="add-public-form" onSubmit={(e) => e.preventDefault()}>
+          <h3>Add a public repository</h3>
+          <div className="field">
+            <label htmlFor="pub-url">Repository URL (https)</label>
+            <input
+              id="pub-url"
+              value={pubUrl}
+              onChange={(e) => setPubUrl(e.target.value)}
+              placeholder="e.g. https://github.com/octocat/Hello-World"
+            />
+            <span className="help">Cloned anonymously over https. The host must be allowed.</span>
+          </div>
+          <div className="row">
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={busy || !pubUrl}
+              onClick={() => addSource(() => api.addPublicRepo(pubUrl), () => setPubUrl(""))}
+            >
+              Add public repository
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      {sourceOk && <p className="ok-text" data-testid="source-ok">{sourceOk}</p>}
+      {sourceError && <p className="field-error" data-testid="source-error">{sourceError}</p>}
+
+      {selecting ? (
+        <Card>
+          <SelectSourceRepositories connection={selecting} onSelected={() => refresh()} />
+          <div className="row">
+            <Button variant="secondary" size="sm" onClick={() => setSelecting(null)}>
+              Done
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       {error && <p className="field-error">{error}</p>}
 

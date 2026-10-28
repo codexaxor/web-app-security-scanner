@@ -57,6 +57,7 @@ public class RepositoryService {
     private final RepositoryUpserter upserter;
     private final TokenCipherHolder cipher;
     private final RepositorySummaryService summaries;
+    private final com.company.secscan.source.ProviderRegistry providers;
     // api-only bean (@Profile("api")); injected via a provider so the worker, which also creates this service,
     // starts without it. patch() runs only from the api controller, where the provider resolves.
     private final org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore;
@@ -66,6 +67,7 @@ public class RepositoryService {
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
                              RepositoryUpserter upserter, TokenCipherHolder cipher,
                              RepositorySummaryService summaries,
+                             com.company.secscan.source.ProviderRegistry providers,
                              org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore,
                              PlatformTransactionManager txManager) {
         this.client = client;
@@ -75,8 +77,64 @@ public class RepositoryService {
         this.upserter = upserter;
         this.cipher = cipher;
         this.summaries = summaries;
+        this.providers = providers;
         this.reScore = reScore;
         this.txTemplate = new TransactionTemplate(txManager);
+    }
+
+    /** A provider-neutral descriptor of the connection's target, for the adapters (M8.7). */
+    private static com.company.secscan.source.SourceConnectionRef refOf(GitlabConnection c) {
+        return new com.company.secscan.source.SourceConnectionRef(c.getProvider(), c.getBaseUrl(), c.getHost(),
+                c.getTargetType(), c.targetId(), c.targetPath(), c.getOwnerLogin(), c.getProviderRepoId(),
+                c.getRepoFullName());
+    }
+
+    /** The decrypted token, or null for a public (credential_kind none) connection. */
+    private String tokenFor(GitlabConnection conn) {
+        return GitlabConnection.CREDENTIAL_NONE.equals(conn.getCredentialKind())
+                ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+    }
+
+    /**
+     * Provider-neutral listing of a connection's selectable repositories (GitHub owner / single repo / public),
+     * server-side paginated/searched via the provider adapter. Workspace-scoped (the connection is).
+     */
+    public PagedResponse<com.company.secscan.source.SourceRepo> listSourceRepositories(
+            UUID connectionId, String search, int page, int size) {
+        GitlabConnection conn = requireConnection(connectionId);
+        com.company.secscan.source.SourcePage<com.company.secscan.source.SourceRepo> p =
+                providers.require(conn.getProvider()).listRepositories(refOf(conn), tokenFor(conn), search, page, size);
+        return new PagedResponse<>(p.items(), page, size, p.totalElements(), p.totalPages());
+    }
+
+    /**
+     * Provider-neutral selection (GitHub / public): resolves each repository by the provider's id and upserts a
+     * {@link Repository} with provider-neutral identity. GitLab keeps its own {@link #select} path.
+     */
+    public List<RepositoryView> selectSource(UUID connectionId, List<String> providerRepoIds) {
+        GitlabConnection conn = requireConnection(connectionId);
+        String provider = conn.getProvider();
+        String host = conn.getHost();
+        String token = tokenFor(conn);
+        com.company.secscan.source.SourceProvider adapter = providers.require(provider);
+        List<RepositoryView> result = new ArrayList<>();
+        for (String id : new java.util.LinkedHashSet<>(providerRepoIds)) {
+            com.company.secscan.source.SourceRepo r = adapter.getRepository(conn.getBaseUrl(), token, id);
+            if (!r.selectable()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        r.fullName() + ": " + r.notSelectableReason());
+            }
+            Repository repo;
+            try {
+                repo = upserter.upsertSource(conn.getId(), provider, host, id, r.fullName(), r.defaultBranch(),
+                        List.of());
+            } catch (DataIntegrityViolationException race) {
+                repo = upserter.reattachSource(conn.getId(), provider, host, id, r.fullName(), r.defaultBranch(),
+                        List.of());
+            }
+            result.add(RepositoryView.of(repo, conn));
+        }
+        return result;
     }
 
     /**
@@ -93,14 +151,17 @@ public class RepositoryService {
                 .sorted(Comparator.comparing(GitLabProject::pathWithNamespace))
                 .toList();
 
-        Map<Long, Repository> selected = repositories.findByWorkspaceId(WORKSPACE).stream()
-                .collect(Collectors.toMap(Repository::getGitlabProjectId, Function.identity()));
+        // Scope "already selected" to THIS connection's host: the same numeric project id on another host is a
+        // different repository (D-080/V22), so key by provider_repo_id within the connection's host.
+        Map<String, Repository> selected = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .filter(r -> conn.getHost() != null && conn.getHost().equals(r.getHost()))
+                .collect(Collectors.toMap(Repository::getProviderRepoId, Function.identity()));
 
         // Compute the requested page first, then fetch languages only for that page (bounds the extra calls).
         PagedResponse<GitLabProject> pageOfProjects = PagedResponse.fromList(visible, page, size);
         List<ProjectView> views = new ArrayList<>();
         for (GitLabProject p : pageOfProjects.content()) {
-            Repository existing = selected.get(p.id());
+            Repository existing = selected.get(Long.toString(p.id()));
             views.add(new ProjectView(
                     p.id(),
                     p.pathWithNamespace(),
@@ -130,8 +191,10 @@ public class RepositoryService {
 
         // State of each existing repository BEFORE this call (B1/SF-3 honest counts): present+active →
         // "already selected"; present+inactive/detached → "reactivated"; absent → "added".
-        Map<Long, Boolean> activeBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
-                .collect(Collectors.toMap(Repository::getGitlabProjectId, Repository::isActive));
+        // Scope to this connection's host so a same-id repo on another host is not confused with this one.
+        Map<String, Boolean> activeBefore = repositories.findByWorkspaceId(WORKSPACE).stream()
+                .filter(r -> conn.getHost() != null && conn.getHost().equals(r.getHost()))
+                .collect(Collectors.toMap(Repository::getProviderRepoId, Repository::isActive));
 
         Set<Long> ids = Set.copyOf(gitlabProjectIds);
         // Validate the whole batch before writing anything, so a bad id selects nothing.
@@ -158,9 +221,9 @@ public class RepositoryService {
         for (Long id : ids) {
             GitLabProject p = byId.get(id);
             List<String> languages = safeLanguages(conn, token, id);
-            Repository repo = upsertWithRaceRecovery(conn.getId(), id, p, languages);
+            Repository repo = upsertWithRaceRecovery(conn.getId(), conn.getHost(), id, p, languages);
             result.add(RepositoryView.of(repo, ownerOf(repo)));
-            Boolean wasActive = activeBefore.get(id);
+            Boolean wasActive = activeBefore.get(Long.toString(id));
             if (wasActive == null) {
                 added++;
             } else if (wasActive) {
@@ -178,12 +241,14 @@ public class RepositoryService {
      * {@code DataIntegrityViolationException} from the insert; rather than a 500, we reattach/refresh the row the
      * winner inserted — first-wins ownership is preserved.
      */
-    private Repository upsertWithRaceRecovery(UUID connectionId, long projectId, GitLabProject p,
+    private Repository upsertWithRaceRecovery(UUID connectionId, String host, long projectId, GitLabProject p,
                                               List<String> languages) {
         try {
-            return upserter.upsert(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+            return upserter.upsert(connectionId, host, projectId, p.pathWithNamespace(), p.defaultBranch(),
+                    languages);
         } catch (DataIntegrityViolationException race) {
-            return upserter.reattach(connectionId, projectId, p.pathWithNamespace(), p.defaultBranch(), languages);
+            return upserter.reattach(connectionId, host, projectId, p.pathWithNamespace(), p.defaultBranch(),
+                    languages);
         }
     }
 
@@ -204,10 +269,12 @@ public class RepositoryService {
      */
     @Transactional(readOnly = true)
     public PagedResponse<RepositoryView> listSelected(String search, boolean includeInactive, boolean hasOpenIssues,
-                                                      boolean lastScanFailed, String sort, int page, int size) {
+                                                      boolean lastScanFailed, String provider, String sort,
+                                                      int page, int size) {
         if (search != null && search.length() > SEARCH_MAX) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
         }
+        String providerFilter = validProviderOrNull(provider);   // SF-1: validated whitelist (gitlab|github)
         int pageIndex = Math.max(0, page);
         int perPage = Math.min(Math.max(1, size), 200);
         String q = search == null ? null : search.trim().toLowerCase(java.util.Locale.ROOT);
@@ -222,6 +289,7 @@ public class RepositoryService {
                 .filter(v -> includeInactive || v.active())
                 .filter(v -> q == null || q.isEmpty()
                         || v.pathWithNamespace().toLowerCase(java.util.Locale.ROOT).contains(q))
+                .filter(v -> providerFilter == null || providerFilter.equals(v.provider()))
                 .filter(v -> !hasOpenIssues || openTotal(v) > 0)
                 .filter(v -> !lastScanFailed || isFailedScan(v.lastScan()))
                 .sorted(repoComparator(sort))
@@ -277,6 +345,21 @@ public class RepositoryService {
     }
 
     private static final int SEARCH_MAX = 100;
+
+    /**
+     * SF-1: a blank provider → no filter; otherwise it must be one of the validated whitelist {@code gitlab} or
+     * {@code github} (case-insensitive). Anything else is a 400 — the value is never trusted unchecked.
+     */
+    private static String validProviderOrNull(String provider) {
+        if (provider == null || provider.isBlank()) {
+            return null;
+        }
+        String p = provider.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!p.equals("gitlab") && !p.equals("github")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown provider. Use gitlab or github.");
+        }
+        return p;
+    }
 
     /**
      * One page of a repository's GitLab branches for the "Branch to scan" picker (D-076). {@code search} (≤ 100

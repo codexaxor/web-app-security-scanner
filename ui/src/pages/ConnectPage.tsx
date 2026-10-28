@@ -5,7 +5,10 @@ import { PageHeader } from "../components/ui";
 export default function ConnectPage() {
   return (
     <section>
-      <PageHeader title="Connect GitLab" subtitle="Connect a GitLab group or a single project to scan." />
+      <PageHeader
+        title="Sources"
+        subtitle="Connect GitLab, GitHub, or a public repository to scan — all in one feed."
+      />
       <ConnectGitLab onChanged={() => {}} />
     </section>
   );
