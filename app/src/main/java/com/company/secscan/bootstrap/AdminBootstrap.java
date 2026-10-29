@@ -21,6 +21,7 @@ import java.util.Locale;
  */
 @Component
 @Profile("api")
+@org.springframework.core.annotation.Order(1) // SF-4: the real admin is created BEFORE the demo user
 public class AdminBootstrap implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);
@@ -45,7 +46,9 @@ public class AdminBootstrap implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (users.count() > 0) {
+        // SF-4: gate on a REAL (email) user, not on any user — a demo-only DB (username has no '@') still gets a
+        // real admin created, so turning demo mode off always leaves a working email login.
+        if (users.existsByEmailContaining("@")) {
             return;
         }
         if (!StringUtils.hasText(bootstrapEmail) || !StringUtils.hasText(bootstrapPassword)) {

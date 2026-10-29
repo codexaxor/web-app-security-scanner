@@ -68,7 +68,7 @@ class GitLabProviderIT extends AbstractGitLabIT {
                 "[{\"name\":\"main\",\"default\":true,\"protected\":true,"
                         + "\"commit\":{\"committed_date\":\"2026-01-01T00:00:00Z\"}}]",
                 1, 1);
-        SourcePage<SourceBranch> page = provider.listBranches(gitlab.baseUrl(), TOKEN, "102", null, 0, 50);
+        SourcePage<SourceBranch> page = provider.listBranches(gitlab.baseUrl(), TOKEN, "102", null, 0, 50, "ws|conn");
         assertThat(page.totalElements()).isEqualTo(1);
         assertThat(page.items()).singleElement()
                 .satisfies(b -> {

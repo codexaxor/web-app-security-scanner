@@ -35,6 +35,11 @@ services:
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${E2E_ADMIN_PASSWORD}
       # Empty on purpose: no GitLab egress is allowed from the e2e api.
       SECSCAN_GITLAB_ALLOWED_HOSTS: ""
+      # D-092: the e2e browser reaches the UI at http://ui:80 (not localhost → NOT a secure context), so the
+      # session cookie must drop Secure or the browser would discard it and no session would persist. This is
+      # the ONLY place SECSCAN_SESSION_COOKIE_SECURE is false; it defaults true everywhere else and must never
+      # be false on a shared/production host.
+      SECSCAN_SESSION_COOKIE_SECURE: "false"
       # Deterministic seed: no scheduled KEV/EPSS/EOL sync or re-score sweep that would clobber the seeded
       # intel tables (e.g. replacing epss_score from the live feed). Triage/toggle paths still run on demand.
       SECSCAN_INTEL_SCHEDULED_SYNC_ENABLED: "false"

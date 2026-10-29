@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, type RepositoryView, type RepositorySettingsPatch } from "../api";
 import { invalidateFor } from "../queryClient";
-import ErrorBanner from "./ErrorBanner";
+import InlineError from "./InlineError";
 import Button from "./Button";
 import BranchPicker from "./BranchPicker";
 
@@ -56,7 +56,7 @@ export default function RepoSettingsForm({
 
   return (
     <>
-      {save.error ? <ErrorBanner error={save.error} /> : null}
+      {save.error ? <InlineError error={save.error} variant="field" /> : null}
       <div className="form">
         <BranchPicker
           repoId={repo.id}

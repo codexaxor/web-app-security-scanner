@@ -5,20 +5,32 @@ import { test, expect, signIn } from "../fixtures/test-base";
 // is GitLab, so provider badges assert data-provider="gitlab"; adding a live GitHub/public source is the
 // end-of-train manual walkthrough (D-086).
 
-test("the Sources page lists provider-tagged connections and offers add-forms", async ({ page }) => {
+test("the Sources page is a provider-first wizard and lists provider-tagged connections", async ({ page }) => {
   await signIn(page, "/connect");
   await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
 
-  // Each connection card carries a provider badge; the seeded connection is GitLab.
+  // Each connection row carries a provider badge; the seeded connection is GitLab.
   const badge = page.getByTestId("connection-row").first().locator(".provider-badge");
   await expect(badge).toHaveAttribute("data-provider", "gitlab");
   await expect(badge).toHaveAttribute("aria-label", "GitLab");
 
-  // The GitHub and public-repository add-forms are present.
-  await expect(page.getByTestId("add-github-form")).toBeVisible();
-  await expect(page.getByTestId("add-public-form")).toBeVisible();
-  await expect(page.getByLabel("Fine-grained PAT (read-only Contents + Metadata)")).toBeVisible();
-  await expect(page.getByLabel("Repository URL (https)")).toBeVisible();
+  // The provider-first wizard: provider → (GitLab host) → private/public, one input, a per-path help box.
+  const form = page.getByTestId("add-source-form");
+  await expect(form.getByRole("button", { name: "GitLab", exact: true })).toBeVisible();
+  await expect(form.getByRole("button", { name: "GitHub", exact: true })).toBeVisible();
+  await expect(form.getByRole("button", { name: "Private (token)" })).toBeVisible();
+  await expect(form.getByRole("button", { name: "Public (no token)" })).toBeVisible();
+  await expect(page.getByTestId("help-box")).toBeVisible();
+
+  // GitLab path shows the self-managed/gitlab.com step and a path input; detection shows before submit.
+  await expect(form.getByRole("button", { name: "Self-managed" })).toBeVisible();
+  await page.getByLabel("Group/project path or URL").fill("acme/platform/core-keycloak");
+  await expect(page.getByTestId("detected")).toContainText("core-keycloak");
+
+  // Switching to GitHub shows the GitHub fine-grained token help and the owner/repo input.
+  await form.getByRole("button", { name: "GitHub", exact: true }).click();
+  await expect(page.getByTestId("help-box")).toContainText("Contents: Read");
+  await expect(page.getByLabel("Owner, owner/repo, or URL")).toBeVisible();
 });
 
 test("the Repositories list shows a provider badge per row", async ({ page }) => {
@@ -108,9 +120,14 @@ test("adding a GitHub owner opens the Select-repositories step (mocked, multi-se
   );
 
   await signIn(page, "/connect");
-  await page.getByLabel("Owner login (user or org)").fill("octo");
-  await page.getByLabel("Fine-grained PAT (read-only Contents + Metadata)").fill("ghp_fake_not_real");
-  await page.getByRole("button", { name: "Add GitHub source" }).click();
+  const form = page.getByTestId("add-source-form");
+  await form.getByRole("button", { name: "GitHub", exact: true }).click();
+  await page.getByLabel("Owner, owner/repo, or URL").fill("octo");
+  await page.getByLabel("Access token").fill("ghp_fake_not_real");
+  await form.getByRole("button", { name: "Add source" }).click();
+
+  // The one toast system shows the success (M8.8 item 6).
+  await expect(page.getByRole("status").getByText(/Added GitHub source/)).toBeVisible();
 
   const select = page.getByTestId("select-source");
   await expect(select).toBeVisible();
@@ -118,6 +135,22 @@ test("adding a GitHub owner opens the Select-repositories step (mocked, multi-se
   await select.getByRole("checkbox", { name: "Select octo/alpha" }).check();
   await select.getByTestId("add-source-repos").click();
   await expect(page.getByTestId("source-repos-added")).toBeVisible();
+});
+
+test("a failed add shows an inline field error, not a bottom banner", async ({ page }) => {
+  await page.route("**/api/v1/sources/public", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "HOST_NOT_ALLOWED", message: "That host is not allowed." }),
+    }),
+  );
+  await signIn(page, "/connect");
+  const form = page.getByTestId("add-source-form");
+  await form.getByRole("button", { name: "Public (no token)" }).click();
+  await page.getByLabel("Repository URL (https)").fill("https://example.com/owner/repo");
+  await form.getByRole("button", { name: "Add source" }).click();
+  await expect(page.getByTestId("source-error")).toContainText("That host is not allowed.");
 });
 
 test("adding a public repository preselects its single repository (mocked, one click)", async ({ page }) => {
@@ -141,8 +174,10 @@ test("adding a public repository preselects its single repository (mocked, one c
   );
 
   await signIn(page, "/connect");
+  const form = page.getByTestId("add-source-form");
+  await form.getByRole("button", { name: "Public (no token)" }).click();
   await page.getByLabel("Repository URL (https)").fill("https://github.com/octo/widget");
-  await page.getByRole("button", { name: "Add public repository" }).click();
+  await form.getByRole("button", { name: "Add source" }).click();
 
   const select = page.getByTestId("select-source");
   await expect(select).toBeVisible();

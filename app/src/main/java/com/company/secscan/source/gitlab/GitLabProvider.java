@@ -82,7 +82,8 @@ public class GitLabProvider implements SourceProvider {
 
     @Override
     public SourcePage<SourceBranch> listBranches(String baseUrl, String token, String providerRepoId,
-                                                 String search, int page, int size) {
+                                                 String search, int page, int size, String cacheScope) {
+        // GitLab searches server-side and does not cache, so cacheScope is unused here.
         // GitLab paging is 1-based; the contract is 0-based.
         GitLabClient.Paged<GitLabBranch> paged = map(() ->
                 client.listBranches(baseUrl, token, Long.parseLong(providerRepoId), search, page + 1, size));

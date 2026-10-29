@@ -3,12 +3,13 @@ import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
+import { useScanPolling, anyActive } from "../lib/scanPolling";
 import { titleCase } from "../lib/format";
 import { typeAcronym, typeLabel } from "../lib/labels";
 import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
 import type { BandName } from "../lib/format";
 
@@ -25,7 +26,10 @@ function duration(startedAt: string | null, finishedAt: string | null): string {
 
 export default function DashboardPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
-  const scans = useQuery({ queryKey: qk.scansRecent, queryFn: () => api.listScansAll(0, 10) });
+  const scans = useScanPolling(
+    { queryKey: qk.scansRecent, queryFn: () => api.listScansAll(0, 10) },
+    (d) => anyActive((d?.content ?? []).map((s) => s.status)),
+  );
   const repos = useQuery({ queryKey: qk.repositories({ size: 100 }), queryFn: () => api.listRepositories({ size: 100 }) });
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
@@ -42,7 +46,7 @@ export default function DashboardPage() {
   return (
     <section>
       <PageHeader title="Dashboard" subtitle="Posture across your connected repositories." />
-      {dash.error ? <ErrorBanner error={dash.error} /> : null}
+      {dash.error ? <InlineError error={dash.error} /> : null}
 
       <div className="cards">
         <BandCard title="Issue groups" total={d?.totalGroups} bands={d?.groupBands} prefix="group" link={bandLink} />

@@ -130,6 +130,12 @@ public class GitLabConnectionService {
         GitlabConnection existing = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
                 .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
                         "No such connection in this workspace."));
+        // M8.8 item 7: a public connection has no stored token — rotating one is meaningless and is refused.
+        if (GitlabConnection.CREDENTIAL_NONE.equals(existing.getCredentialKind())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "A public repository has no token to rotate.");
+        }
         Long existingTargetId = existing.targetId();
         String existingTargetType = existing.getTargetType();
 

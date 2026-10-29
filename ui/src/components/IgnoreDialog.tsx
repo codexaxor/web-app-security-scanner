@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, type SubIssueView } from "../api";
 import { invalidateFor } from "../queryClient";
-import ErrorBanner from "./ErrorBanner";
+import InlineError from "./InlineError";
 import Dialog from "./Dialog";
 import Button from "./Button";
 
@@ -115,7 +115,7 @@ export default function IgnoreDialog({
   return (
     <Dialog title="Ignore finding" onClose={onClose} variant="center">
       <h2>Ignore finding</h2>
-      {submit.error ? <ErrorBanner error={submit.error} /> : null}
+      {submit.error ? <InlineError error={submit.error} variant="field" /> : null}
       <div className="form">
         <div className="field">
           <label htmlFor="ignore-scope">Scope</label>

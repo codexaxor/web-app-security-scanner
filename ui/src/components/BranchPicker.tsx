@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import Button from "./Button";
+import RelativeTime from "./RelativeTime";
 
 /**
  * A searchable "Branch to scan" combobox (D-076, A3). The first option is "Default branch (<name>)" which follows
@@ -75,9 +76,19 @@ export default function BranchPicker({
             <span className="branch-name">{b.name}</span>
             {b.isDefault ? <span className="chip chip-solved">default</span> : null}
             {b.isProtected ? <span className="chip chip-ignored">protected</span> : null}
+            {/* Last-commit time only when the provider gave one (GitHub gives none) — never "Invalid date"/a dash.
+                aria-hidden so the option's accessible name stays the branch name (+ chips), not the timestamp. */}
+            {b.lastCommitAt ? (
+              <span className="muted branch-commit" aria-hidden="true">
+                <RelativeTime iso={b.lastCommitAt} />
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
+      {q.data?.searchTruncated ? (
+        <p className="muted">Showing matches from the first 1,000 branches. Refine your search to narrow it.</p>
+      ) : null}
       {q.data && q.data.totalPages > 1 ? (
         <div className="row">
           <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>

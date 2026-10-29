@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
-import ErrorBanner from "./ErrorBanner";
+import InlineError from "./InlineError";
 import Dialog from "./Dialog";
 import RepoName from "./RepoName";
 
@@ -36,7 +36,7 @@ export default function WarningsDrawer({
         </div>
       </div>
       <div className="panel-body stack">
-        {q.error ? <ErrorBanner error={q.error} /> : null}
+        {q.error ? <InlineError error={q.error} /> : null}
         {q.isLoading ? <p className="muted">Loading…</p> : null}
         {q.data && q.data.content.length === 0 ? <p className="muted">No warnings for this scan.</p> : null}
         {q.data?.content.map((w) => (

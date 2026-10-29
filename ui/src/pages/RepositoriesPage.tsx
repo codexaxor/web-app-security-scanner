@@ -3,20 +3,21 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
+import Pager, { useUrlPaging } from "../components/Pager";
+import { useScanPolling, anyActive } from "../lib/scanPolling";
+import { useScanCompletionToasts } from "../lib/useScanCompletion";
 import RelativeTime from "../components/RelativeTime";
-import RepoName from "../components/RepoName";
 import ProviderBadge from "../components/ProviderBadge";
 import SeverityChips from "../components/SeverityChips";
 import ScanButton from "../components/ScanButton";
 import RowMenu from "../components/RowMenu";
 import RepoSettingsDialog from "../components/RepoSettingsDialog";
 import WarningsDrawer from "../components/WarningsDrawer";
-import ErrorBanner from "../components/ErrorBanner";
+import InlineError from "../components/InlineError";
 import Icon from "../components/icons";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
 
-const SIZE = 50;
 const COLUMNS = 6;
 
 const SORTS: { value: RepoSort; label: string }[] = [
@@ -39,7 +40,7 @@ export default function RepositoriesPage() {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const provider = providerFromParam(sp.get("provider"));
-  const [page, setPage] = useState(0);
+  const { page, size, setPage, setSize } = useUrlPaging("page", "size");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RepoSort>("severity");
   const [showInactive, setShowInactive] = useState(false);
@@ -56,7 +57,7 @@ export default function RepositoriesPage() {
     provider: provider || undefined,
     sort,
     page,
-    size: SIZE,
+    size,
   };
 
   function resetAnd(fn: () => void) {
@@ -65,18 +66,20 @@ export default function RepositoriesPage() {
   }
 
   // SF-1: the provider filter is URL-addressable (?provider=gitlab|github) so a filtered list is shareable.
+  // Reset the page in the SAME search-params update (not via useUrlPaging.setPage) — two separate useSearchParams
+  // setters in one tick race, and the last write would otherwise drop ?provider.
   function setProvider(v: string) {
     const next = new URLSearchParams(sp);
     if (v) next.set("provider", v);
     else next.delete("provider");
+    next.delete("page"); // filter change → back to page 1
     setSp(next, { replace: false });
-    setPage(0);
   }
 
-  const repos = useQuery({
-    queryKey: qk.repositories(params),
-    queryFn: () => api.listRepositories(params),
-  });
+  const repos = useScanPolling(
+    { queryKey: qk.repositories(params), queryFn: () => api.listRepositories(params) },
+    (d) => anyActive((d?.content ?? []).map((r) => r.lastScan?.status)),
+  );
   // Stable "N active repositories" headline — the default (active-only, no filters) total, independent of the
   // current search/filter view.
   const active = useQuery({
@@ -86,6 +89,7 @@ export default function RepositoriesPage() {
   const dash = useQuery({ queryKey: qk.dashboard(false), queryFn: () => api.dashboardSummary(false) });
 
   const rows = repos.data?.content ?? [];
+  useScanCompletionToasts(rows);
   const inactive = dash.data?.inactive;
   const activeCount = active.data?.totalElements;
 
@@ -101,7 +105,7 @@ export default function RepositoriesPage() {
         actions={
           <>
             <Link className="btn btn-secondary" to="/connect">
-              Connect GitLab
+              Add source
             </Link>
             <Link className="btn btn-primary" to="/select">
               Select repositories
@@ -170,13 +174,13 @@ export default function RepositoriesPage() {
         </label>
       </div>
 
-      {repos.error ? <ErrorBanner error={repos.error} /> : null}
+      {repos.error ? <InlineError error={repos.error} /> : null}
 
       {rows.length === 0 && !repos.isLoading ? (
         <EmptyState title="No repositories match">
           {search || hasOpenIssues || lastScanFailed
             ? "Clear a filter or search to see more repositories."
-            : "Connect GitLab and select repositories to start scanning."}
+            : "Add a source and select repositories to start scanning."}
         </EmptyState>
       ) : (
         <div className="table-wrap">
@@ -212,13 +216,22 @@ export default function RepositoriesPage() {
                     }}
                   >
                     <td>
-                      <div className="row">
-                        <ProviderBadge provider={r.provider} />
-                        <RepoName path={r.pathWithNamespace} showPath />
-                        {r.effectiveBranch ? (
-                          <span className="muted branch-label">· {r.effectiveBranch}</span>
-                        ) : null}
-                        {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+                      {/* L1: line 1 = badge + name + "· branch" on ONE non-wrapping line (name truncates); the
+                          full group/project path is line 2, truncated, with the full path in a title tooltip. */}
+                      <div className="repo-cell">
+                        <div className="repo-line">
+                          <ProviderBadge provider={r.provider} />
+                          <span className="repo-name" title={r.pathWithNamespace}>
+                            {r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
+                          </span>
+                          {r.effectiveBranch ? (
+                            <span className="muted branch-label">· {r.effectiveBranch}</span>
+                          ) : null}
+                          {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+                        </div>
+                        <div className="repo-path" title={r.pathWithNamespace}>
+                          {r.pathWithNamespace}
+                        </div>
                       </div>
                       {r.branchMissing ? (
                         <span className="expiry-warn">branch missing — choose another</span>
@@ -287,23 +300,14 @@ export default function RepositoriesPage() {
         </div>
       )}
 
-      {(repos.data?.totalPages ?? 1) > 1 ? (
-        <div className="pager">
-          <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            Previous
-          </button>
-          <span>
-            Page {page + 1} of {repos.data?.totalPages}
-          </span>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={page + 1 >= (repos.data?.totalPages ?? 1)}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </button>
-        </div>
-      ) : null}
+      <Pager
+        page={page}
+        size={size}
+        totalElements={repos.data?.totalElements ?? 0}
+        totalPages={repos.data?.totalPages ?? 1}
+        onPage={setPage}
+        onSize={setSize}
+      />
 
       {editing ? <RepoSettingsDialog repo={editing} onClose={() => setEditing(null)} /> : null}
       {warnings ? (

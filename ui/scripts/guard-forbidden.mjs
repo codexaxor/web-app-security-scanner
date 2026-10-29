@@ -29,6 +29,10 @@ const FORBIDDEN = [
   [/document\s*\.\s*cookie/, "document.cookie — no cookies (OD-13a)"],
   [/\beval\s*\(/, "eval( — no dynamic code execution (OD-13d)"],
   [/\bnew\s+Function\s*\(/, "new Function( — no dynamic code execution (OD-13d)"],
+  // M8.8/D-092: the SPA authenticates with the server session cookie only — it must never build an
+  // Authorization: Basic header (a Basic string literal) or base64-encode credentials for one.
+  [/['"`]\s*Basic\s/, "\"Basic \" — the SPA must not construct an Authorization: Basic header (D-092)"],
+  [/\bbtoa\s*\(/, "btoa( — no client-side base64 credential encoding for Basic auth (D-092)"],
 ];
 
 function walk(dir) {

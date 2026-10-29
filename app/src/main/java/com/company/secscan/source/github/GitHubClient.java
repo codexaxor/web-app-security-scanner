@@ -109,6 +109,23 @@ public class GitHubClient {
         }, "GitHub repository not found.");
     }
 
+    /**
+     * The branch by exact name (GET branch), or {@code null} on 404 — the exact-match fast path for the branch
+     * picker search (M8.8 S5b). A rate limit or other error propagates as {@link ProviderException}.
+     */
+    public GitHubBranch getBranch(String baseUrl, String token, String fullName, String branch) {
+        URI uri = URI.create(apiBase(baseUrl) + "/repos/" + fullNamePath(fullName) + "/branches/" + enc(branch));
+        try {
+            return client(baseUrl, token).get().uri(uri).retrieve().body(GitHubBranch.class);
+        } catch (RestClientException e) {
+            ProviderException mapped = com.company.secscan.source.HttpErrors.map(e, "branch not found");
+            if (mapped.error() == ProviderError.NOT_FOUND) {
+                return null;
+            }
+            throw mapped;
+        }
+    }
+
     /** True if the branch exists (GET branch → 200); 404 → false. Authoritative existence check. */
     public boolean branchExists(String baseUrl, String token, String fullName, String branch) {
         URI uri = URI.create(apiBase(baseUrl) + "/repos/" + fullNamePath(fullName) + "/branches/" + enc(branch));

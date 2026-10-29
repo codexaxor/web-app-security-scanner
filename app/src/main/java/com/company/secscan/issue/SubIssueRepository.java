@@ -95,6 +95,10 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
     /** Paginated view by status — the Ignored view loads the {@code ignored} ones. */
     Page<SubIssue> findByWorkspaceIdAndStatus(UUID workspaceId, String status, Pageable pageable);
 
+    /** Paginated Ignored view filtered by reason code (M8.8: the "ignored by this rule" / LOW_EPSS link). */
+    Page<SubIssue> findByWorkspaceIdAndStatusAndIgnoreReason(UUID workspaceId, String status, String ignoreReason,
+                                                            Pageable pageable);
+
     /** The sub-issues currently held ignored by one rule — unignore when the rule is removed (D-058). */
     List<SubIssue> findByWorkspaceIdAndIgnoredByRuleId(UUID workspaceId, UUID ignoredByRuleId);
 

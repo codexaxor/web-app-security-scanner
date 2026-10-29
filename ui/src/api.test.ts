@@ -1,27 +1,80 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AuthRequiredError,
-  api,
-  clearCredentials,
-  hasCredentials,
-  setCredentials,
-  setUnauthorizedHandler,
-} from "./api";
+import { AuthRequiredError, api, fetchSession, login, setUnauthorizedHandler } from "./api";
 
-// A minimal smoke test proving the vitest toolchain runs and the in-memory credential store behaves
-// (OD-13a: credentials live only in memory). Screen-level behaviour is covered by Playwright e2e.
-describe("in-memory credentials", () => {
-  beforeEach(() => clearCredentials());
+// D-092: the SPA authenticates with a server session cookie + an in-memory CSRF token — never an Authorization
+// header. These prove: login stores the CSRF token and sends no Authorization; unsafe requests echo the token
+// in X-CSRF-TOKEN while GETs do not; and all requests go out with credentials: "same-origin" (the cookie).
+describe("session + CSRF auth (D-092)", () => {
+  beforeEach(() => {
+    // reset the in-memory CSRF token by signing out of any prior test session
+    vi.restoreAllMocks();
+  });
+  afterEach(() => vi.restoreAllMocks());
 
-  it("starts empty", () => {
-    expect(hasCredentials()).toBe(false);
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  type Captured = { url: string; method?: string; headers: Record<string, string>; credentials?: string };
+
+  function capturing(calls: Captured[], body: unknown, status = 200) {
+    return vi.fn(async (url: string, init: { method?: string; headers?: Record<string, string>; credentials?: string }) => {
+      calls.push({ url, method: init?.method, headers: init?.headers ?? {}, credentials: init?.credentials });
+      return jsonResponse(body, status); // fresh Response per call (a body can only be read once)
+    });
+  }
+
+  it("login posts JSON, sends no Authorization header, and returns the session info", async () => {
+    const calls: Captured[] = [];
+    vi.stubGlobal(
+      "fetch",
+      capturing(calls, { username: "admin@example.com", demoMode: false, csrfToken: "tok-1" }),
+    );
+
+    const info = await login("admin@example.com", "pw");
+
+    expect(info).toMatchObject({ username: "admin@example.com", demoMode: false });
+    expect(calls[0].url).toBe("/api/v1/auth/login");
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].credentials).toBe("same-origin");
+    expect(calls[0].headers.Authorization).toBeUndefined();
   });
 
-  it("holds a credential after setCredentials and drops it on clear", () => {
-    setCredentials("admin@example.com", "pw");
-    expect(hasCredentials()).toBe(true);
-    clearCredentials();
-    expect(hasCredentials()).toBe(false);
+  it("sends the CSRF token on unsafe requests but not on GETs, and never an Authorization header", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ username: "a", demoMode: false, csrfToken: "tok-9" })));
+    await login("a", "b"); // stores tok-9 in memory
+
+    const calls: Captured[] = [];
+    vi.stubGlobal(
+      "fetch",
+      capturing(calls, { content: [], page: 0, size: 1, totalElements: 0, totalPages: 0 }),
+    );
+
+    await api.listRepositories({ size: 1 }); // GET
+    await api.startScan("00000000-0000-0000-0000-000000000000"); // POST
+
+    const get = calls[0];
+    const post = calls[1];
+    expect(get.method).toBe("GET");
+    expect(get.headers["X-CSRF-TOKEN"]).toBeUndefined();
+    expect(post.method).toBe("POST");
+    expect(post.headers["X-CSRF-TOKEN"]).toBe("tok-9");
+    expect(get.credentials).toBe("same-origin");
+    expect(get.headers.Authorization).toBeUndefined();
+    expect(post.headers.Authorization).toBeUndefined();
+  });
+
+  it("fetchSession returns null on a 401 (not signed in)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
+    expect(await fetchSession()).toBeNull();
+  });
+
+  it("login throws AuthRequiredError on a 401 without clearing global state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
+    await expect(login("x", "y")).rejects.toBeInstanceOf(AuthRequiredError);
   });
 });
 

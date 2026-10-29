@@ -654,12 +654,39 @@ a.stat-link:hover .stat-num {
 }
 .repo-path {
   display: block;
-  max-width: 320px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+
+/* L1: the Repositories name cell — line 1 (badge + name + "· branch") never wraps (the name truncates), the
+   full path is line 2 (truncated, full path in a title tooltip). Identical at 1280 and 1440. */
+.repo-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+}
+.repo-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.repo-line .provider-badge,
+.repo-line .branch-label,
+.repo-line .chip {
+  flex: none; /* only the name shrinks/truncates */
+}
+.repo-line .repo-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
 }
 
 /* KEV / attribution small markers */
@@ -1263,12 +1290,16 @@ button.health-item {
 .mono-sub {
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  word-break: break-all;
+  /* L2: rule ids never break mid-word — one line, truncated with … (full id in the title tooltip). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 /* advisory / description subtitles stay in the body font (never monospace) */
 .subtitle-text {
   font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word; /* L2: wrap at word boundaries, never mid-word */
 }
 
 /* ---------- pager ---------- */
@@ -1280,6 +1311,23 @@ button.health-item {
   margin-top: var(--sp-3);
   color: var(--muted);
   font-size: var(--fs-sm);
+  flex-wrap: wrap;
+}
+.pager-range {
+  margin-right: auto; /* range on the left, controls on the right */
+}
+.pager-size {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.pager-nav {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
 }
 
 /* ---------- responsive ---------- */
@@ -1517,10 +1565,27 @@ button.health-item {
   font-size: var(--fs-xs);
 }
 .location-cell {
-  display: inline-flex;
-  align-items: baseline;
+  /* L2: location on its own line (truncated from the START), "+N more" chip below it. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  max-width: 280px;
+  min-width: 0;
+  max-width: 100%;
+}
+.location-path {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Truncate from the START so the file name stays visible ("…/terraform/networking.tf"). */
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.more-chip {
+  font-size: var(--fs-xs);
 }
 
 /* ---------- M8.6: issue side panel (gauge, sections, location grouping, nav) ---------- */
@@ -1676,4 +1741,181 @@ button.health-item {
 .provider-badge[data-provider="gitlab"] {
   border-color: var(--border-strong);
   color: var(--text);
+}
+
+/* M8.8 D-091: a persistent red banner across the top when the server runs in demo mode. Solid danger red with
+   white text for AA contrast in both themes; spans the full width above the app shell. */
+.demo-ribbon {
+  grid-column: 1 / -1;
+  background: var(--danger);
+  color: var(--danger-contrast);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: 6px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+/* ---------- M8.8 item 6: inline errors + toast system ---------- */
+.inline-error {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-4);
+}
+
+/* One fixed, polite aria-live region, bottom-right, above everything. */
+.toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-2, 0 6px 20px rgba(0, 0, 0, 0.18));
+  animation: toast-in 160ms ease-out;
+}
+.toast-message {
+  flex: 1;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.toast-success {
+  border-color: var(--sev-low, #3a7d44);
+  border-left: 4px solid var(--sev-low, #3a7d44);
+}
+.toast-info {
+  border-left: 4px solid var(--accent, #3b6ea5);
+}
+.toast-error {
+  border-color: var(--error-border);
+  border-left: 4px solid var(--danger);
+}
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, inherit);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* ---------- M8.8 item 7: Sources wizard ---------- */
+.help-box {
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  display: grid;
+  gap: var(--sp-2);
+}
+.help-box strong {
+  color: var(--text);
+}
+.help-box p {
+  margin: 0;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.rowmenu-item.danger {
+  color: var(--danger);
+}
+
+/* M8.8 item 9: the Ignored reason-filter chip (from the Workspace settings LOW_EPSS link). */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2, var(--surface));
+  font-size: var(--fs-sm);
+}
+
+/* M8.8 item 10: busy buttons show a spinner (reduced-motion → a static ring). */
+.btn.is-busy {
+  position: relative;
+  color: transparent !important;
+}
+.btn.is-busy::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid currentcolor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  color: var(--primary-contrast, #fff);
+  animation: btn-spin 0.6s linear infinite;
+}
+.btn-secondary.is-busy::after,
+.btn-ghost.is-busy::after {
+  color: var(--text);
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.is-busy::after {
+    animation: none;
+    border-top-color: currentcolor;
+    opacity: 0.5;
+  }
+}
+
+/* L5: Sources wizard — form + help box; the help box moves to a right-hand column at ≥1280, stacked below
+   on narrower screens. */
+.source-wizard {
+  display: grid;
+  gap: var(--sp-4);
+}
+@media (min-width: 1280px) {
+  .source-wizard {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+  }
 }

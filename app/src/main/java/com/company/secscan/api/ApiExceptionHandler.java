@@ -17,6 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler.class);
+
     public record ApiError(String error, String message) {
     }
 
@@ -30,6 +32,17 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> onGitLab(GitLabException e) {
         return ResponseEntity.status(statusFor(e.getError()))
                 .body(new ApiError(e.getError().name(), e.getMessage()));
+    }
+
+    /**
+     * A token-credentialed connection whose stored ciphertext is blank/missing (M8.8 change 2): a clear,
+     * actionable 409 telling the user the connection needs a new token — never a leaked ciphertext or stack
+     * trace.
+     */
+    @ExceptionHandler(com.company.secscan.source.MissingCredentialException.class)
+    public ResponseEntity<ApiError> onMissingCredential(com.company.secscan.source.MissingCredentialException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("CONNECTION_TOKEN_MISSING", e.getMessage()));
     }
 
     /** Provider-neutral source errors (GitHub/public adapters) → the same {error,message} body (M8.7). */
@@ -93,6 +106,37 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> onTypeMismatch(MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest()
                 .body(new ApiError("BAD_PARAMETER", "Invalid value for parameter '" + e.getName() + "'."));
+    }
+
+    /**
+     * The last-resort handler (M8.8 item 2): any exception not matched by a more specific handler above.
+     *
+     * <p>Spring MVC's own framework exceptions (the unknown-route
+     * {@link org.springframework.web.servlet.resource.NoResourceFoundException} → 404, an unsupported method →
+     * 405, an unsupported/unacceptable media type → 415/406, a missing parameter → 400, …) implement
+     * {@link org.springframework.web.ErrorResponse} but do NOT share a single throwable supertype
+     * ({@code NoResourceFoundException} extends {@code ServletException}; {@code ResponseStatusException} extends
+     * {@code ErrorResponseException}). So we preserve the intended status of ANY {@code ErrorResponse} with a
+     * generic, non-leaking message (the status reason phrase — never the request path or exception detail),
+     * rather than let it fall through to a 500.
+     *
+     * <p>Everything else is a genuinely unexpected failure: it is logged server-side (with its stack trace) but
+     * the client only ever sees {@code {"error":"INTERNAL","message":"Unexpected error."}} — no class name, no
+     * message, no stack trace. Because Spring resolves the most specific {@code @ExceptionHandler} first, this
+     * never shadows the typed handlers above, and Spring Security's 401/403 are produced in the filter chain
+     * before any {@code @ControllerAdvice} runs.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiError> onUnexpected(Exception e) {
+        if (e instanceof org.springframework.web.ErrorResponse er) {
+            HttpStatusCode code = er.getStatusCode();
+            String error = (code instanceof HttpStatus hs) ? hs.name() : "ERROR";
+            String message = (code instanceof HttpStatus hs) ? hs.getReasonPhrase() + "." : "Request failed.";
+            return ResponseEntity.status(code).body(new ApiError(error, message));
+        }
+        log.error("Unhandled exception while serving a request", e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiError("INTERNAL", "Unexpected error."));
     }
 
     private static HttpStatus statusFor(GitLabError error) {

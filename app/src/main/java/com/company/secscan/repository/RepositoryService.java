@@ -1,7 +1,6 @@
 package com.company.secscan.repository;
 
 import com.company.secscan.api.PagedResponse;
-import com.company.secscan.config.TokenCipherHolder;
 import com.company.secscan.gitlab.GitLabClient;
 import com.company.secscan.gitlab.GitLabError;
 import com.company.secscan.gitlab.GitLabException;
@@ -55,9 +54,9 @@ public class RepositoryService {
     private final RepositoryRepository repositories;
     private final RepositoryConnectionGuard guard;
     private final RepositoryUpserter upserter;
-    private final TokenCipherHolder cipher;
     private final RepositorySummaryService summaries;
     private final com.company.secscan.source.ProviderRegistry providers;
+    private final com.company.secscan.source.SourceCredentials credentials;
     // api-only bean (@Profile("api")); injected via a provider so the worker, which also creates this service,
     // starts without it. patch() runs only from the api controller, where the provider resolves.
     private final org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore;
@@ -65,9 +64,10 @@ public class RepositoryService {
 
     public RepositoryService(GitLabClient client, GitlabConnectionRepository connections,
                              RepositoryRepository repositories, RepositoryConnectionGuard guard,
-                             RepositoryUpserter upserter, TokenCipherHolder cipher,
+                             RepositoryUpserter upserter,
                              RepositorySummaryService summaries,
                              com.company.secscan.source.ProviderRegistry providers,
+                             com.company.secscan.source.SourceCredentials credentials,
                              org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore,
                              PlatformTransactionManager txManager) {
         this.client = client;
@@ -75,9 +75,9 @@ public class RepositoryService {
         this.repositories = repositories;
         this.guard = guard;
         this.upserter = upserter;
-        this.cipher = cipher;
         this.summaries = summaries;
         this.providers = providers;
+        this.credentials = credentials;
         this.reScore = reScore;
         this.txTemplate = new TransactionTemplate(txManager);
     }
@@ -89,10 +89,9 @@ public class RepositoryService {
                 c.getRepoFullName());
     }
 
-    /** The decrypted token, or null for a public (credential_kind none) connection. */
+    /** The decrypted token, or null for a public (credential_kind none) connection — via the shared resolver. */
     private String tokenFor(GitlabConnection conn) {
-        return GitlabConnection.CREDENTIAL_NONE.equals(conn.getCredentialKind())
-                ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+        return credentials.tokenFor(conn);
     }
 
     /**
@@ -144,7 +143,7 @@ public class RepositoryService {
      */
     public PagedResponse<ProjectView> listProjects(UUID connectionId, int page, int size) {
         GitlabConnection conn = requireConnection(connectionId);
-        String token = cipher.require().decrypt(conn.getTokenCiphertext());
+        String token = tokenFor(conn);
 
         List<GitLabProject> visible = exposedProjects(conn, token).stream()
                 .filter(p -> !p.archived() && !p.markedForDeletion())
@@ -185,7 +184,7 @@ public class RepositoryService {
      */
     public SelectResult select(UUID connectionId, List<Long> gitlabProjectIds) {
         GitlabConnection conn = requireConnection(connectionId);
-        String token = cipher.require().decrypt(conn.getTokenCiphertext());
+        String token = tokenFor(conn);
         Map<Long, GitLabProject> byId = exposedProjects(conn, token).stream()
                 .collect(Collectors.toMap(GitLabProject::id, Function.identity()));
 
@@ -367,7 +366,8 @@ public class RepositoryService {
      * empty page for a repository with no live GitLab connection (e.g. a local {@code file:} connection). 404 if
      * the repository is not in this workspace.
      */
-    public PagedResponse<BranchView> listBranches(UUID repositoryId, String search, int page, int size) {
+    public com.company.secscan.repository.api.BranchPage listBranches(UUID repositoryId, String search, int page,
+                                                                      int size) {
         Repository repo = requireRepo(repositoryId);
         if (search != null && search.length() > SEARCH_MAX) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "search must be at most 100 characters.");
@@ -376,13 +376,19 @@ public class RepositoryService {
         int perPage = Math.min(Math.max(1, size), 100);
         GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
         if (conn == null || isLocal(conn)) {
-            return new PagedResponse<>(List.of(), pageIndex, perPage, 0, 0);
+            return com.company.secscan.repository.api.BranchPage.empty(pageIndex, perPage);
         }
-        String token = cipher.require().decrypt(conn.getTokenCiphertext());
-        GitLabClient.Paged<com.company.secscan.gitlab.dto.GitLabBranch> paged = client.listBranches(
-                conn.getBaseUrl(), token, repo.getGitlabProjectId(), search, pageIndex + 1, perPage);
+        // Provider-neutral (M8.8): go through the adapter, not the GitLab client, so a public GitHub/GitLab
+        // connection (credential_kind none, token null) lists branches without decrypting a blank ciphertext.
+        String token = tokenFor(conn);
+        // SF-1: cache scope = workspace + connection, so the GitHub branch cache never crosses tenants/credentials.
+        String cacheScope = WORKSPACE + "|" + conn.getId();
+        com.company.secscan.source.SourcePage<com.company.secscan.source.SourceBranch> paged =
+                providers.require(conn.getProvider()).listBranches(
+                        conn.getBaseUrl(), token, repo.getProviderRepoId(), search, pageIndex, perPage, cacheScope);
         List<BranchView> views = paged.items().stream().map(BranchView::of).toList();
-        return new PagedResponse<>(views, pageIndex, perPage, paged.totalElements(), paged.totalPages());
+        return new com.company.secscan.repository.api.BranchPage(views, pageIndex, perPage,
+                paged.totalElements(), paged.totalPages(), paged.truncated());
     }
 
     /**
@@ -451,9 +457,15 @@ public class RepositoryService {
         }
         GitlabConnection conn = repo.getConnectionId() == null ? null : ownerOf(repo);
         if (conn != null && !isLocal(conn)) {
-            // Authoritative existence check OUTSIDE any transaction (SF-2). GitLab 404 → BRANCH_NOT_FOUND (→ 400).
-            String token = cipher.require().decrypt(conn.getTokenCiphertext());
-            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+            // Authoritative existence check OUTSIDE any transaction (SF-2), provider-neutral via the adapter
+            // (M8.8): a missing branch → BRANCH_NOT_FOUND (→ 400); a transient provider error propagates. Works
+            // for a public connection (token null) without decrypting a blank ciphertext.
+            String token = tokenFor(conn);
+            boolean exists = providers.require(conn.getProvider())
+                    .branchExists(conn.getBaseUrl(), token, repo.getProviderRepoId(), branch);
+            if (!exists) {
+                throw new GitLabException(GitLabError.BRANCH_NOT_FOUND, "Branch not found in the repository.");
+            }
         }
         return BranchOp.set(branch);
     }

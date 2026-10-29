@@ -1,4 +1,4 @@
-import { test, expect, signIn, adminEmail, adminPassword } from "../fixtures/test-base";
+import { test, expect, signIn } from "../fixtures/test-base";
 
 // M8.6 item 9: the list → repo page → panel flow. Uses the seeded core-keycloak repo and the linkable secret
 // finding (40-hex commit + file path + line) added to the fixture for the source-link assertions.
@@ -45,12 +45,9 @@ test("an issue panel opens, navigates next/prev, and a reload keeps it open", as
   await panel.getByRole("button", { name: "Previous issue" }).click();
   await expect(page).toHaveURL(firstUrl);
 
-  // D-067: a reload drops the in-memory credentials and shows the sign-in gate in place; the URL (incl.
-  // ?issue) is preserved, so re-signing-in restores the route and reopens the panel.
+  // D-092 (amends D-067(a)): a reload keeps the server session, so no re-sign-in is needed; the URL (incl. the
+  // open group id) is preserved, so the panel reopens on its own.
   await page.reload();
-  await page.getByLabel("Email").fill(adminEmail());
-  await page.getByLabel("Password").fill(adminPassword());
-  await page.getByRole("button", { name: /continue|sign in/i }).click();
   await expect(page.getByRole("dialog", { name: "Issue details" })).toBeVisible();
 });
 

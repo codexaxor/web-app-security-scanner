@@ -35,6 +35,7 @@ class GitHubProviderIT extends AbstractGitLabIT {
 
     @BeforeEach
     void setUp() {
+        provider.clearCache();
         gh = new GitHubWireMock();
     }
 
@@ -45,6 +46,23 @@ class GitHubProviderIT extends AbstractGitLabIT {
 
     private SourceConnectionRef ownerRef(String owner) {
         return new SourceConnectionRef("github", gh.baseUrl(), "localhost", "owner", null, owner, owner, null, null);
+    }
+
+    @Test
+    void anAnonymousRateLimitOnThePublicBranchPickerIsTransientRateLimited() {   // M8.8 item 2
+        // A public repository (token == null) hitting GitHub's unauthenticated rate limit: the branch picker
+        // resolves the repo first, so a 403-with-exhausted-rate-limit there must map to the existing transient
+        // RATE_LIMITED error — never a "repo gone" NOT_FOUND — and carry no Authorization header.
+        gh.stubRepoByIdStatus(123, 403, "x-ratelimit-remaining", "0", "x-ratelimit-reset", "9999999999");
+        assertThatThrownBy(() -> provider.listBranches(gh.baseUrl(), null, "123", null, 0, 100, "ws|conn"))
+                .isInstanceOf(ProviderException.class)
+                .satisfies(e -> {
+                    ProviderException pe = (ProviderException) e;
+                    assertThat(pe.error()).isEqualTo(ProviderError.RATE_LIMITED);
+                    assertThat(pe.isTransient()).isTrue();
+                });
+        gh.server().verify(getRequestedFor(urlEqualTo("/repositories/123"))
+                .withHeader("Authorization", com.github.tomakehurst.wiremock.client.WireMock.absent()));
     }
 
     @Test
@@ -103,7 +121,7 @@ class GitHubProviderIT extends AbstractGitLabIT {
         gh.stubRepoById(123, REPO_JSON);
         gh.stubBranches("octo/app",
                 "[{\"name\":\"main\",\"protected\":true},{\"name\":\"dev\",\"protected\":false}]");
-        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), TOKEN, "123", null, 0, 100);
+        SourcePage<SourceBranch> page = provider.listBranches(gh.baseUrl(), TOKEN, "123", null, 0, 100, "ws|conn");
         assertThat(page.items()).anySatisfy(b -> {
             assertThat(b.name()).isEqualTo("main");
             assertThat(b.isDefault()).isTrue();

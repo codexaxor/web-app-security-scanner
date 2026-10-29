@@ -63,9 +63,11 @@ test("server-side pagination for a repo with more than 50 groups", async ({ page
   expect(api.totalElements).toBe(64);
   expect(api.content.length).toBe(50); // server caps the page, never the client
 
-  await expect(page.getByTestId("page-info")).toContainText("64 groups");
+  // Pager "of N" is EXACTLY the API totalElements (== the SQL count); the range bounds are exact too.
+  await expect(page.getByTestId("pager-range")).toHaveText(/^1.50 of 64$/);
   await expect(page.getByTestId("feed-row")).toHaveCount(50);
   await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^51.64 of 64$/);
   await expect(page.getByTestId("feed-row")).toHaveCount(14);
 });
 

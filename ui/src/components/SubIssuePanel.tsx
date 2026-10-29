@@ -8,7 +8,8 @@ import { issueFix, issueSummary } from "../lib/issueText";
 import { secretFixGuidance } from "../lib/secretGuidance";
 import { sourceCommitLink, sourceFileLink } from "../lib/sourceLink";
 import RelativeTime from "./RelativeTime";
-import ErrorBanner from "./ErrorBanner";
+import InlineError from "./InlineError";
+import { useToast, errorMessage } from "../toast";
 import IgnoreDialog from "./IgnoreDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import Dialog from "./Dialog";
@@ -172,8 +173,8 @@ export default function SubIssuePanel({
       </div>
 
       <div className="panel-body">
-        {group.error ? <ErrorBanner error={group.error} /> : null}
-        {q.error ? <ErrorBanner error={q.error} /> : null}
+        {group.error ? <InlineError error={group.error} /> : null}
+        {q.error ? <InlineError error={q.error} /> : null}
 
         {summary ? (
           <section className="panel-section">
@@ -270,13 +271,16 @@ function LocationCard({
   const [showHistory, setShowHistory] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [confirmUnignore, setConfirmUnignore] = useState(false);
+  const toast = useToast();
 
   const unignore = useMutation({
     mutationFn: () => api.deleteIgnoreRule(sub.ignoreRuleId as string),
     onSuccess: () => {
       setConfirmUnignore(false);
+      toast.success("Finding unignored.");
       return invalidateFor("triage");
     },
+    onError: (e) => toast.error(errorMessage(e, "Could not unignore the finding.")),
   });
 
   const link = advisoryLink(sub.vulnId);
@@ -409,7 +413,6 @@ function LocationCard({
                   {sub.ruleReason ? ` · "${sub.ruleReason}"` : ""}
                   {sub.ruleCreatedBy ? ` · by ${sub.ruleCreatedBy}` : ""}
                 </p>
-                {unignore.error ? <ErrorBanner error={unignore.error} /> : null}
                 <Button
                   variant="secondary"
                   size="sm"

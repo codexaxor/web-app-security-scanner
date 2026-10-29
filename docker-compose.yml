@@ -36,6 +36,12 @@ services:
       SECSCAN_BOOTSTRAP_ADMIN_EMAIL: ${SECSCAN_BOOTSTRAP_ADMIN_EMAIL:-}
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${SECSCAN_BOOTSTRAP_ADMIN_PASSWORD:-}
       SECSCAN_GITLAB_ALLOWED_HOSTS: ${SECSCAN_GITLAB_ALLOWED_HOSTS:-}
+      # D-092 session cookie: Secure by default; never false on a shared/production host (SF-6).
+      SECSCAN_SESSION_COOKIE_SECURE: ${SECSCAN_SESSION_COOKIE_SECURE:-true}
+      # D-091 demo mode (SF-6): OFF by default; never enable on a shared/production host.
+      SECSCAN_DEMO_MODE: ${SECSCAN_DEMO_MODE:-false}
+      SECSCAN_DEMO_USERNAME: ${SECSCAN_DEMO_USERNAME:-admin}
+      SECSCAN_DEMO_PASSWORD: ${SECSCAN_DEMO_PASSWORD:-}
     ports:
       # Loopback only (local dev); do not expose the API to the network.
       - "127.0.0.1:8080:8080"

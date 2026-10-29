@@ -1,6 +1,6 @@
 package com.company.secscan.scan.worker;
 
-import com.company.secscan.config.TokenCipherHolder;
+import com.company.secscan.source.SourceCredentials;
 import com.company.secscan.gitlab.GitLabClient;
 import com.company.secscan.gitlab.GitLabError;
 import com.company.secscan.gitlab.GitLabException;
@@ -56,7 +56,7 @@ public class ScanJobProcessor {
     private final ScanJobRepository jobs;
     private final RepositoryRepository repositories;
     private final GitlabConnectionRepository connections;
-    private final TokenCipherHolder cipher;
+    private final SourceCredentials credentials;
     private final GitLabClient client;
     private final RepositoryConnectionGuard guard;
     private final ScannerLauncher launcher;
@@ -67,7 +67,7 @@ public class ScanJobProcessor {
     private final com.company.secscan.source.ProviderRegistry providers;
 
     public ScanJobProcessor(ScanRepository scans, ScanJobRepository jobs, RepositoryRepository repositories,
-                            GitlabConnectionRepository connections, TokenCipherHolder cipher, GitLabClient client,
+                            GitlabConnectionRepository connections, SourceCredentials credentials, GitLabClient client,
                             RepositoryConnectionGuard guard, ScannerLauncher launcher, ScannerOutputParser parser,
                             ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy,
                             com.company.secscan.source.ProviderRegistry providers) {
@@ -75,7 +75,7 @@ public class ScanJobProcessor {
         this.jobs = jobs;
         this.repositories = repositories;
         this.connections = connections;
-        this.cipher = cipher;
+        this.credentials = credentials;
         this.client = client;
         this.guard = guard;
         this.launcher = launcher;
@@ -130,9 +130,17 @@ public class ScanJobProcessor {
             }
         }
 
-        // No token for a local fixture clone or a public (credential_kind none) connection — those clone anonymously.
-        String token = (isLocal(conn) || GitlabConnection.CREDENTIAL_NONE.equals(conn.getCredentialKind()))
-                ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+        // No token for a local fixture clone; a public (credential_kind none) connection resolves to null
+        // (anonymous) via the shared helper. A token-kind connection with a blank/missing ciphertext is a broken
+        // connection — fail the scan permanently (SF-5b), reconcile nothing, do not retry.
+        String token;
+        try {
+            token = isLocal(conn) ? null : credentials.tokenFor(conn);
+        } catch (com.company.secscan.source.MissingCredentialException e) {
+            state.failPermanently(workspaceId, jobId, scan.getId(), "CONNECTION_TOKEN_MISSING",
+                    "Connection needs a new token.");
+            return;
+        }
 
         ScanWorkspace ws;
         try {

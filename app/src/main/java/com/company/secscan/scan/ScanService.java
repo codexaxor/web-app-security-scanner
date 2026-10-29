@@ -2,8 +2,6 @@ package com.company.secscan.scan;
 
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.api.Pagination;
-import com.company.secscan.config.TokenCipherHolder;
-import com.company.secscan.gitlab.GitLabClient;
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.repository.Repository;
@@ -43,22 +41,24 @@ public class ScanService {
     private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final ScanEnqueuer enqueuer;
-    private final GitLabClient gitlab;
     private final GitlabConnectionRepository connections;
-    private final TokenCipherHolder cipher;
+    private final com.company.secscan.source.ProviderRegistry providers;
+    private final com.company.secscan.source.SourceCredentials credentials;
 
     public ScanService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                        ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer,
-                       GitLabClient gitlab, GitlabConnectionRepository connections, TokenCipherHolder cipher) {
+                       GitlabConnectionRepository connections,
+                       com.company.secscan.source.ProviderRegistry providers,
+                       com.company.secscan.source.SourceCredentials credentials) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
         this.warnings = warnings;
         this.repositories = repositories;
         this.enqueuer = enqueuer;
-        this.gitlab = gitlab;
         this.connections = connections;
-        this.cipher = cipher;
+        this.providers = providers;
+        this.credentials = credentials;
     }
 
     /**
@@ -96,8 +96,12 @@ public class ScanService {
             return new BranchResolution(repo.getDefaultBranch(), false);
         }
         try {
-            String token = cipher.require().decrypt(conn.getTokenCiphertext());
-            String current = gitlab.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId()).defaultBranch();
+            // Provider-neutral (M8.8): resolve the credential through the shared helper (null = anonymous for a
+            // public connection) and read the default branch via the adapter, so a public GitHub/GitLab repo
+            // refreshes its default at enqueue without decrypting a blank ciphertext.
+            String token = credentials.tokenFor(conn);
+            String current = providers.require(conn.getProvider())
+                    .getRepository(conn.getBaseUrl(), token, repo.getProviderRepoId()).defaultBranch();
             // N-2: a GitLab default we cannot validate is not trusted — keep the stored value and warn.
             if (current != null && !BranchName.isValid(current)) {
                 log.warn("Repository {} GitLab default branch is not a valid ref name; keeping the stored default.",

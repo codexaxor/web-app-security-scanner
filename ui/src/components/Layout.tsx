@@ -38,7 +38,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/feed", label: "Feed", icon: "feed" },
   { to: "/repositories", label: "Repositories", icon: "repositories" },
   { to: "/ignored", label: "Ignored", icon: "ignored" },
-  { to: "/settings", label: "Settings", icon: "settings" },
+  { to: "/settings", label: "Workspace settings", icon: "settings" },
   { to: "/connect", label: "Sources", icon: "connect" },
 ];
 
@@ -50,7 +50,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
  * by the menu button (Esc or the scrim closes it, navigating closes it); the shell stays keyboard navigable.
  */
 export default function Layout() {
-  const { signedIn, signOut } = useAuth();
+  const { checking, signedIn, username, demoMode, signOut } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
 
@@ -64,6 +64,11 @@ export default function Layout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
+
+  // While resuming a session on load, render nothing (not the sign-in gate) to avoid a sign-in flash on refresh.
+  if (checking) {
+    return <main className="shell-centered" aria-busy="true" />;
+  }
 
   if (!signedIn) {
     return (
@@ -82,6 +87,11 @@ export default function Layout() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      {demoMode ? (
+        <div className="demo-ribbon" role="status">
+          DEMO MODE — do not use real credentials or private repositories
+        </div>
+      ) : null}
       <header className="appbar">
         <button
           type="button"
@@ -128,8 +138,8 @@ export default function Layout() {
         <div className="sidebar-footer">
           <ThemeControl />
           <div className="sidebar-user">
-            <span className="muted truncate" title="admin">
-              admin
+            <span className="muted truncate" title={username ?? undefined}>
+              {username ?? ""}
             </span>
             <Button variant="ghost" size="sm" onClick={signOut}>
               Sign out
