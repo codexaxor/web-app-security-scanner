@@ -41,11 +41,13 @@ export default function RepositoriesPage() {
   const [sp, setSp] = useSearchParams();
   const provider = providerFromParam(sp.get("provider"));
   const { page, size, setPage, setSize } = useUrlPaging("page", "size");
-  const [search, setSearch] = useState("");
+  // M8.11 review SF-2/SF-3: search and "Last scan failed" are URL-addressable (?search=…, ?lastScanFailed=true)
+  // like ?provider, so the Dashboard "Need attention" card and the ⌘K palette "View all" link land filtered.
+  const search = sp.get("search") ?? "";
+  const lastScanFailed = sp.get("lastScanFailed") === "true";
   const [sort, setSort] = useState<RepoSort>("severity");
   const [showInactive, setShowInactive] = useState(false);
   const [hasOpenIssues, setHasOpenIssues] = useState(false);
-  const [lastScanFailed, setLastScanFailed] = useState(false);
   const [editing, setEditing] = useState<RepositoryView | null>(null);
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
@@ -63,6 +65,21 @@ export default function RepositoriesPage() {
   function resetAnd(fn: () => void) {
     setPage(0);
     fn();
+  }
+
+  // Set/clear one URL filter and reset the page in the SAME search-params update (see setProvider below).
+  // Search edits replace the history entry (no entry per keystroke); checkbox filters push one.
+  function setUrlFilter(key: string, value: string | null, replace: boolean) {
+    setSp(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        next.delete("page");
+        return next;
+      },
+      { replace },
+    );
   }
 
   // SF-1: the provider filter is URL-addressable (?provider=gitlab|github) so a filtered list is shareable.
@@ -120,7 +137,7 @@ export default function RepositoriesPage() {
               aria-label="Search repositories"
               placeholder="Search name or path"
               value={search}
-              onChange={(e) => resetAnd(() => setSearch(e.target.value))}
+              onChange={(e) => setUrlFilter("search", e.target.value || null, true)}
             />
           </div>
           <select
@@ -162,7 +179,7 @@ export default function RepositoriesPage() {
             <input
               type="checkbox"
               checked={lastScanFailed}
-              onChange={(e) => resetAnd(() => setLastScanFailed(e.target.checked))}
+              onChange={(e) => setUrlFilter("lastScanFailed", e.target.checked ? "true" : null, false)}
             />
             Last scan failed
           </label>
