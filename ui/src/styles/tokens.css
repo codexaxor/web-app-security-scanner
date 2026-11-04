@@ -116,18 +116,18 @@
 /* Dark theme: auto (unless an explicit light override) and an explicit [data-theme="dark"]. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1317;
-    --surface: #1a2027;
-    --surface-2: #212932;
-    --surface-3: #2a333d;
-    --border: #333d47;
-    --border-strong: #46525e;
+    --bg: #0b1020;
+    --surface: #121a2e;
+    --surface-2: #18223a;
+    --surface-3: #1f2b45;
+    --border: #2a3652;
+    --border-strong: #3a4968;
     --text: #e9eef3;        /* 13.8:1 on --surface */
-    --text-2: #c2ccd6;
-    --muted: #93a0ac;       /* 5.0:1 on --surface */
+    --text-2: #c2ccda;
+    --muted: #94a3bb;       /* 5.0:1 on --surface */
     --accent: #7f9cf5;      /* 6.4:1 on --surface */
     --accent-hover: #93abf7;
-    --accent-contrast: #0e1217;
+    --accent-contrast: #0b1020;
     --focus: #8fb0ff;
 
     --sev-critical: #f28b82;
@@ -142,9 +142,9 @@
     --status-new: #7f9cf5;
     --status-new-bg: #1e2740;
     --status-todo: #93a0ac;
-    --status-todo-bg: #262f39;
+    --status-todo-bg: #1d2740;
     --status-ignored: #8a96a2;
-    --status-ignored-bg: #262f39;
+    --status-ignored-bg: #1d2740;
     --status-solved: #86d08a;
     --status-solved-bg: #16301a;
 
@@ -164,18 +164,18 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0f1317;
-  --surface: #1a2027;
-  --surface-2: #212932;
-  --surface-3: #2a333d;
-  --border: #333d47;
-  --border-strong: #46525e;
+  --bg: #0b1020;
+  --surface: #121a2e;
+  --surface-2: #18223a;
+  --surface-3: #1f2b45;
+  --border: #2a3652;
+  --border-strong: #3a4968;
   --text: #e9eef3;
-  --text-2: #c2ccd6;
-  --muted: #93a0ac;
+  --text-2: #c2ccda;
+  --muted: #94a3bb;
   --accent: #7f9cf5;
   --accent-hover: #93abf7;
-  --accent-contrast: #0e1217;
+  --accent-contrast: #0b1020;
   --focus: #8fb0ff;
   --sev-critical: #f28b82;
   --sev-high: #f0a35e;
@@ -188,9 +188,9 @@
   --status-new: #7f9cf5;
   --status-new-bg: #1e2740;
   --status-todo: #93a0ac;
-  --status-todo-bg: #262f39;
+  --status-todo-bg: #1d2740;
   --status-ignored: #8a96a2;
-  --status-ignored-bg: #262f39;
+  --status-ignored-bg: #1d2740;
   --status-solved: #86d08a;
   --status-solved-bg: #16301a;
   --danger: #f28b82;
