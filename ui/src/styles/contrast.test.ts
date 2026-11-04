@@ -68,6 +68,33 @@ const STRONG_PAIRS: [string, string][] = [
   ["--sev-medium", "--surface"],
 ];
 
+// Shell/brand chrome (M8.11): the navy sidebar + top bar are CONSTANT across light/dark (defined once in
+// :root, never overridden by the dark blocks), so their contrast is checked once against :root. shell-text /
+// shell-muted are normal text on navy (>= 4.5:1); the active-item text and the accent indicator are strong
+// (>= 3:1).
+const SHELL_TEXT_PAIRS: [string, string][] = [
+  ["--shell-text", "--shell-bg"],
+  ["--shell-muted", "--shell-bg"],
+];
+const SHELL_STRONG_PAIRS: [string, string][] = [
+  ["--shell-active-text", "--shell-active-bg"],
+  ["--shell-accent", "--shell-bg"],
+];
+
+describe("WCAG AA contrast — shell (navy, constant across themes)", () => {
+  const t = tokenBlock(":root {");
+  it.each(SHELL_TEXT_PAIRS)("normal text %s on %s is >= 4.5:1", (fg, bg) => {
+    expect(t[fg], fg).toBeTruthy();
+    expect(t[bg], bg).toBeTruthy();
+    expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(4.5);
+  });
+  it.each(SHELL_STRONG_PAIRS)("strong text %s on %s is >= 3:1", (fg, bg) => {
+    expect(t[fg], fg).toBeTruthy();
+    expect(t[bg], bg).toBeTruthy();
+    expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(3);
+  });
+});
+
 for (const [theme, selector] of [
   ["light", ":root {"],
   ["dark", ':root[data-theme="dark"] {'],

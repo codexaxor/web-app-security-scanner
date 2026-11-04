@@ -1800,11 +1800,11 @@ button.health-item {
   line-height: 1.4;
 }
 .toast-success {
-  border-color: var(--sev-low, #3a7d44);
-  border-left: 4px solid var(--sev-low, #3a7d44);
+  border-color: var(--sev-low);
+  border-left: 4px solid var(--sev-low);
 }
 .toast-info {
-  border-left: 4px solid var(--accent, #3b6ea5);
+  border-left: 4px solid var(--accent);
 }
 .toast-error {
   border-color: var(--error-border);
@@ -1813,7 +1813,7 @@ button.health-item {
 .toast-close {
   border: none;
   background: transparent;
-  color: var(--text-muted, inherit);
+  color: var(--muted);
   font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
@@ -1887,7 +1887,7 @@ button.health-item {
   border: 2px solid currentcolor;
   border-top-color: transparent;
   border-radius: 50%;
-  color: var(--primary-contrast, #fff);
+  color: var(--accent-contrast);
   animation: btn-spin 0.6s linear infinite;
 }
 .btn-secondary.is-busy::after,

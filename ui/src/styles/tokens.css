@@ -25,6 +25,20 @@
   --accent-contrast: #ffffff;
   --focus: #2f6feb;       /* focus ring */
 
+  /* brand + shell (M8.11) — the navy chrome (sidebar + top bar), CONSTANT across light/dark so the shell
+   * is brand chrome while the content area flips theme. Defined once in :root and inherited into the dark
+   * blocks (they override only surface tokens, never --shell-*). Text pairs meet WCAG AA on navy
+   * (verified in contrast.test.ts). These navy roles are the ONLY place --brand-navy is used. */
+  --brand-navy: #0b1530;
+  --shell-bg: #0b1530;          /* sidebar / top-bar background */
+  --shell-surface: #16213f;     /* raised chrome (hover, menus on the navy) */
+  --shell-text: #e9eef7;        /* 14.9:1 on --shell-bg */
+  --shell-muted: #9fb0cc;       /* 8.0:1 on --shell-bg — group labels, secondary */
+  --shell-border: #24314f;      /* dividers on navy */
+  --shell-active-bg: #1b2c52;   /* active nav item background */
+  --shell-active-text: #ffffff; /* active nav item text */
+  --shell-accent: #5b8def;      /* active indicator / focus on navy — 5.5:1 on --shell-bg */
+
   /* severity bands — severity ONLY (AA text on --surface) */
   --sev-critical: #b3261e;
   --sev-high: #b45309;
@@ -86,6 +100,15 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --content-max: 1200px;
+
+  /* motion (M8.11) — all transitions <= 200 ms; disabled under prefers-reduced-motion (base.css). */
+  --transition: 180ms ease;
+  --transition-fast: 120ms ease;
+
+  /* layering (M8.11) — single source of truth for overlay stacking. */
+  --z-drawer: 40;
+  --z-palette: 60;
+  --z-toast: 80;
 }
 
 /* Dark theme: auto (unless an explicit light override) and an explicit [data-theme="dark"]. */
