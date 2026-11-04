@@ -357,19 +357,7 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                   const t = titleFor(g);
                   const more = g.locationCount > 1 ? g.locationCount - 1 : 0;
                   return (
-                    <tr
-                      key={g.id}
-                      className="row-click"
-                      tabIndex={0}
-                      data-testid="repo-issue-row"
-                      onClick={() => openPanel(g.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openPanel(g.id);
-                        }
-                      }}
-                    >
+                    <tr key={g.id} className="row-click" data-testid="repo-issue-row">
                       <td>
                         <div className="type-cell">
                           <span className="type-icon" style={{ color: `var(--type-${g.type})` }} aria-hidden="true">
@@ -381,7 +369,16 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                       </td>
                       <td>
                         <div className="stack-tight">
-                          <strong>{t.title}</strong>
+                          {/* S11.9: a real button opens the panel — Enter/Space work natively; its stretched
+                              ::after makes the whole row clickable. The row menu stays above the overlay. */}
+                          <button
+                            type="button"
+                            className="row-link-btn"
+                            onClick={() => openPanel(g.id)}
+                            aria-label={`Open ${t.title}`}
+                          >
+                            <strong>{t.title}</strong>
+                          </button>
                           {t.subtitle ? (
                             <div
                               className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}

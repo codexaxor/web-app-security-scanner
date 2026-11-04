@@ -605,18 +605,31 @@ a.stat-link:hover .stat-num {
 .row-link:hover {
   text-decoration: none;
 }
-.row-link::after {
+/* A real <button> that opens an in-page panel (not navigation), stretched over the row like .row-link (S11.9). */
+.row-link-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-link::after,
+.row-link-btn::after {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 0;
 }
-.row-link:focus-visible {
+.row-link:focus-visible,
+.row-link-btn:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
-.table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link) {
+.table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link):not(.row-link-btn) {
   position: relative;
   z-index: 1;
 }

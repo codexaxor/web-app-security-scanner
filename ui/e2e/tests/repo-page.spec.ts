@@ -80,6 +80,22 @@ test("the secret panel renders source links with the exact expected hrefs", asyn
   );
 });
 
+test("S11.9 — a repo Issues row opens the panel via the keyboard (Enter and Space)", async ({ page }) => {
+  await signIn(page, `/repositories/${CORE_ID}?tab=issues`);
+  const openBtn = page.getByTestId("repo-issue-row").first().getByRole("button", { name: /^Open / });
+  const dialog = page.getByRole("dialog", { name: "Issue details" });
+
+  await openBtn.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  await openBtn.focus();
+  await page.keyboard.press(" ");
+  await expect(dialog).toBeVisible();
+});
+
 test.describe("dark mode", () => {
   test("the repository page renders in dark mode", async ({ page }) => {
     // D-099: the UI no longer follows prefers-color-scheme; set the theme explicitly.
