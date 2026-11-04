@@ -5,6 +5,7 @@ import { useTheme, type Theme } from "../theme";
 import SignInGate from "./SignInGate";
 import Button from "./Button";
 import BrandMark from "./BrandMark";
+import CommandPalette from "./CommandPalette";
 import Icon, { type IconName } from "./icons";
 
 const THEME_OPTS: [Theme, string][] = [
@@ -188,6 +189,7 @@ export default function Layout() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      <CommandPalette />
       {demoMode ? (
         <div className="demo-ribbon" role="status">
           DEMO MODE — do not use real credentials or private repositories

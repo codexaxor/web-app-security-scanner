@@ -25,6 +25,7 @@ import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import Icon from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
+import Breadcrumbs from "../components/Breadcrumbs";
 import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
 import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
@@ -84,9 +85,12 @@ export default function RepositoryPage() {
   const r = repo.data;
   return (
     <section>
-      <div className="breadcrumb">
-        <Link to="/repositories">← Repositories</Link>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: "Repositories", to: "/repositories" },
+          { label: r ? (r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace) : "Repository" },
+        ]}
+      />
       {repo.error ? <InlineError error={repo.error} /> : null}
       {r ? (
         <>

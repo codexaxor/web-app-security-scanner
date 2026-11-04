@@ -1604,6 +1604,137 @@ button.health-item {
   margin-bottom: var(--sp-3);
   font-size: var(--fs-sm);
 }
+.breadcrumbs {
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.breadcrumbs a {
+  color: var(--muted);
+}
+.breadcrumbs a:hover {
+  color: var(--accent);
+}
+.breadcrumbs [aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.breadcrumb-sep {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ---------- ⌘K command palette ---------- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh var(--sp-4) var(--sp-4);
+  background: rgba(8, 12, 24, 0.5);
+}
+.palette {
+  width: 100%;
+  max-width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.palette-search-icon {
+  font-size: 18px;
+  color: var(--muted);
+  flex: none;
+}
+.palette-input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md);
+  outline: none;
+}
+.palette-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.palette-list {
+  margin: 0;
+  padding: var(--sp-2);
+  list-style: none;
+  overflow-y: auto;
+}
+.palette-empty {
+  padding: var(--sp-4);
+  text-align: center;
+  color: var(--muted);
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.palette-item.active {
+  background: var(--status-new-bg);
+  color: var(--accent);
+}
+.palette-item-icon {
+  font-size: 18px;
+  flex: none;
+  color: var(--muted);
+}
+.palette-item.active .palette-item-icon {
+  color: var(--accent);
+}
+.palette-item-label {
+  font-weight: 600;
+  flex: none;
+  max-width: 45%;
+}
+.palette-item-sub {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-left: auto;
+}
 .repo-header-sub {
   display: inline-flex;
   align-items: center;
