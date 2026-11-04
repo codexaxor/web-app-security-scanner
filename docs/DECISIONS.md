@@ -14,6 +14,79 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-098 M8.10 tenancy mechanics: pre-tenant signup_request, login status, rate limits, client IP (2026-11-05, accepted)
+Context: D-093 needs pending sign-ups that have no workspace yet, a login that reveals account state only to the
+password holder, brute-force limits (pulled forward from M10, see D-092) and a trustworthy client IP behind nginx.
+Decision:
+ - **`signup_request` is its own pre-tenant table** (V23): id, email (lowercase), password_hash (bcrypt, cleared
+   once decided), requested_workspace_name, status `pending|approved|rejected`, created_at, decided_at,
+   decided_by → app_user, workspace_id (set only on approval, for traceability). Why its own table: a pending
+   sign-up is not yet a tenant member, so putting it in `app_user` would force `app_user.workspace_id` nullable and
+   weaken domain rule 1 for every user query; keeping it apart leaves `app_user.workspace_id NOT NULL` and makes the
+   only workspace-agnostic access a small, operator/login-only table. It is added to the CLAUDE.md rule-1
+   exception list. `app_user` only gains `status` (`active|disabled`, default active), `is_operator`,
+   `status_changed_at`, `status_changed_by`; at most one operator (partial unique index).
+ - **Approve** = one DB transaction: create the workspace, create the active `app_user` (hash moved from the
+   request), mark the request approved. **Reject** clears the hash; a rejected email may sign up again. Email is
+   unique across `app_user` ∪ pending `signup_request`: an advisory xact lock per lowercased email in the sign-up
+   and approve transactions + `uq_app_user_email_lower` + a partial unique index on pending requests.
+ - **Login** (JSON session and HTTP Basic share one AuthenticationManager): wrong password → 401 as today; the
+   correct password for a pending request → 403 `ACCOUNT_PENDING`; the correct password for a disabled user → 403
+   `ACCOUNT_INACTIVE` (Basic: generic 401). Status is checked after the password. A per-request check reloads the
+   principal's status by id, so disabling ends live sessions on the next request.
+ - **Rate limits** (in-memory sliding window, bounded maps, single api instance, no new dependency): login
+   failures per (account, IP) 5 / 15 min, per IP 20 / 15 min, per account 50 / 15 min → 429 + Retry-After;
+   sign-up per IP 5 / 15 min. Covers JSON login and Basic.
+ - **Client IP**: `SECSCAN_TRUSTED_PROXIES` (CIDR list, default loopback only; compose sets its network).
+   `X-Forwarded-For` is honoured only when the direct peer is trusted; `ui/nginx.conf` overwrites it with
+   `$remote_addr` (M8.10 owns that file).
+Consequences: new workspace-agnostic accesses, all documented in CLAUDE.md rule 1: signup_request queries
+(sign-up, login pending check, operator list/approve/reject), the per-request user status reload by id, the
+operator's user list, the fair-use claim subquery. Multi-instance api needs a shared limiter (with ShedLock, M9).
+A per-account limit lets a third party slow a known account's logins (accepted: 50/15 min is high; per-pair 5).
+
+## D-097 Fair use per workspace (2026-11-05, accepted)
+Context: self sign-up (D-093) lets anyone create a workspace; one tenant must not monopolise the worker or grow
+without bound.
+Decision: per workspace at most **1 running scan** — further scans wait in the queue (never rejected); the claimer
+serialises claims with a transaction advisory lock and claims at most the oldest queued job of a workspace that
+has no running job. At most **25 active repositories** per workspace (every workspace incl. Default; configurable
+`secscan.fair-use.*`); adding or reactivating past the limit → **409 `REPOSITORY_LIMIT_REACHED`**, a batch that
+would exceed it is refused whole; existing repositories above the limit are kept.
+Consequences: a tenant with many queued scans does not delay others; Default (today's data) is subject to the
+same limits.
+
+## D-096 External tenants: preconditions before the first one goes live (2026-11-05, accepted)
+Context: D-093 allows anyone to sign up, so external (non-company) tenants are possible by design.
+Decision: external tenants are allowed by design. **Before the first EXTERNAL tenant goes live:** (1) Opengrep
+rule-pack licence re-check (SPEC "SAST rule licensing"), (2) scanner egress restriction, (3) written acceptance of
+the Docker-socket risk (D-026). Self-managed source hosts stay on the operator allowlist — the SSRF guard (D-018,
+D-090) is unchanged; tenants cannot add hosts.
+Consequences: M8.10 ships the mechanism; going live externally is a separate, gated operator step.
+
+## D-095 UI theme: light default + dark toggle (2026-11-05, accepted; record only)
+Context: the M8.11 UI redesign.
+Decision: light theme by default with a dark-mode toggle. Built by M8.11, not M8.10.
+Consequences: none for M8.10; its new pages use the shared tokens once M8.11 merges.
+
+## D-094 Two admin levels: platform operator and workspace owner (resolves OD-9) (2026-11-05, accepted)
+Context: OD-9 left `/api/v1/admin/**` callable by any authenticated user; self sign-up (D-093) makes that unsafe.
+Decision: the **platform operator** (the existing bootstrap admin; `app_user.is_operator`, at most one) approves,
+rejects, disables and re-enables sign-ups/users and is the **ONLY** one allowed on `/api/v1/admin/**` (non-operator
+→ 403). The **workspace owner** is the person who signed up, with full rights inside their own workspace only.
+The operator has **no read access to other tenants' data**: their own data is the Default workspace; the operator
+API exposes only sign-up/user metadata (email, status, workspace name, dates), never another workspace's
+repositories, findings or settings. The V23 backfill and AdminBootstrap promote an operator only when none exists.
+Consequences: OD-9 resolved. The demo user (D-091) is never operator, so it loses `/admin/**`.
+
+## D-093 Tenancy by self sign-up (2026-11-05, accepted)
+Context: SecScan was single-tenant (Default workspace, D-011) on a tenant-ready schema (D-001).
+Decision: anyone can sign up; an **approved** sign-up gets its own private workspace (no invites, no members).
+Pending or rejected accounts cannot log in. Existing users and data stay in the Default workspace. The workspace
+is created at approval, not at sign-up.
+Consequences: every request path takes its workspace from the authenticated principal; no `Workspace.DEFAULT_ID`
+in request paths; tenant isolation is proven per endpoint (404 on another tenant's ids).
+
 ## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
 Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
 poor UX, and an avoidable secret-at-rest-in-memory. M8.8 adds a real browser session without weakening the
@@ -1481,7 +1554,7 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — decided at the container spike (D-082)
 - OD-6 Product name
-- OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+- OD-9 — RESOLVED by D-094 (M8.10: `/api/v1/admin/**` is operator-only). Admin intel endpoints were unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
