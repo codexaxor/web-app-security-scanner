@@ -1178,6 +1178,14 @@ button.health-item {
   gap: var(--sp-3);
   margin-bottom: var(--sp-4);
 }
+/* S11.10: KPI cards share a row height (grid stretch); centre their content so short cards (a single number,
+ * a last-scan line) don't leave an empty gap at the bottom. */
+.kpi-strip > .card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+}
 /* KPI card icon (S11.8) */
 .kpi-icon {
   display: inline-flex;
@@ -1777,6 +1785,18 @@ button.health-item {
   /* Command palette: full-bleed-ish on small screens, anchored nearer the top. */
   .palette-backdrop {
     padding: var(--sp-6) var(--sp-3) var(--sp-3);
+  }
+  /* S11: the top-bar search collapses to an icon-only button so the top bar fits phone width. */
+  .topbar-search {
+    min-width: 0;
+    max-width: none;
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+  .topbar-search-text,
+  .topbar-search-kbd {
+    display: none;
   }
 }
 
