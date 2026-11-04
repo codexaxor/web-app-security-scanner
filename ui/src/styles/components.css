@@ -1165,6 +1165,42 @@ button.health-item {
   gap: var(--sp-3);
   margin-bottom: var(--sp-4);
 }
+/* KPI card icon (S11.8) */
+.kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 16px;
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.stat-card-warn .kpi-icon,
+.stat-card-warn .stat-num {
+  color: var(--sev-high);
+}
+/* type-bar icon (S11.8) — coloured per finding type via an inline CSS var on the wrapper */
+.hbar-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  margin-right: var(--sp-1);
+}
+.hbar-label {
+  display: inline-flex;
+  align-items: center;
+}
+/* a repository name used as a link inside a table cell */
+.repo-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+.repo-name-link:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
 
 .toolbar {
   display: flex;

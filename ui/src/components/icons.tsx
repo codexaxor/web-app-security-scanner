@@ -19,6 +19,7 @@ export type IconName =
   | "chevronRight"
   | "chevronDown"
   | "check"
+  | "alert"
   | "scan"
   | "external"
   | "sca"
@@ -100,6 +101,13 @@ const PATHS: Record<IconName, ReactElement> = {
   chevronRight: <polyline points="9 5 16 12 9 19" />,
   chevronDown: <polyline points="5 9 12 16 19 9" />,
   check: <polyline points="4 12 10 18 20 6" />,
+  alert: (
+    <>
+      <path d="M12 3l9 16H3L12 3Z" />
+      <line x1="12" y1="10" x2="12" y2="14" />
+      <line x1="12" y1="17" x2="12" y2="17.5" />
+    </>
+  ),
   scan: (
     <>
       <path d="M4 8V6a2 2 0 0 1 2-2h2" />

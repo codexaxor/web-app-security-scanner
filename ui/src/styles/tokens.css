@@ -60,6 +60,13 @@
   --status-solved: #2f7a34;     /* green */
   --status-solved-bg: #e7f4e8;
 
+  /* finding-type accent colours (S11.8) — a categorical set for type bars/icons, distinct from severity. */
+  --type-sca: #6d4bd8;
+  --type-sast: #0e7c86;
+  --type-secret: #c23aa0;
+  --type-iac: #1f6feb;
+  --type-eol: #8a5a2b;
+
   /* feedback */
   --danger: #b3261e;
   --danger-hover: #8f1e18;
@@ -193,6 +200,11 @@
   --status-ignored-bg: #1d2740;
   --status-solved: #86d08a;
   --status-solved-bg: #16301a;
+  --type-sca: #b3a0f0;
+  --type-sast: #5fc2cc;
+  --type-secret: #f0a0d8;
+  --type-iac: #7fb0ff;
+  --type-eol: #d2a679;
   --danger: #f28b82;
   --danger-hover: #f4a49d;
   --danger-contrast: #2a0f0c;
