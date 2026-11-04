@@ -37,6 +37,9 @@ auditable; D-067(a–d) and D-092 are unchanged; the CSP is unchanged (no storag
 M10 deferred-register item "Theme (light/dark) preference persistence → M10 (user settings)"** — theme
 persistence ships now, scoped to this carve-out, and does not wait for M10 user settings. Proven by
 `themeStore.test.ts` and the guard self-test.
+Addendum (M8.11 review N-4): dark exists ONLY as the explicit `[data-theme="dark"]` token set — `tokens.css`
+has no `@media (prefers-color-scheme)` block, so the OS setting is never followed and first paint is light
+(asserted in `contrast.test.ts`).
 
 ## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
 Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
