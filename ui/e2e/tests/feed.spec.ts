@@ -70,6 +70,15 @@ test("server-side pagination for a repo with more than one page of groups", asyn
   await footer.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByTestId("pager-range")).toHaveText(/^21.40 of 64$/);
   await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^41.60 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  // The partial last page: the range's upper bound is clamped to totalElements (to = min(...)), and the server
+  // returns only the remaining rows.
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^61.64 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(4);
+  await expect(footer.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
 });
 
 test("default sort is severity desc and filters narrow by type", async ({ page, request }) => {
