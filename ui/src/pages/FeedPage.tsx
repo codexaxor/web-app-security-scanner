@@ -21,6 +21,7 @@ import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import RepoName from "../components/RepoName";
 import { Card, PageHeader, EmptyState, InfoTip, SeverityBar, Legend } from "../components/ui";
+import Breadcrumbs from "../components/Breadcrumbs";
 import { TableSkeleton } from "../components/Skeleton";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
@@ -105,6 +106,12 @@ export default function FeedPage() {
     queryFn: () => api.listIssueCategories(undefined, view),
     enabled: !invalid,
   });
+  // The open group (for the breadcrumb title); shares qk.group with the side panel, so no extra request.
+  const openGroup = useQuery({
+    queryKey: qk.group(groupId ?? ""),
+    queryFn: () => api.getGroup(groupId as string),
+    enabled: !!groupId && groupOk,
+  });
 
   const s = summary.data;
   const bands = s?.bands ?? { critical: 0, high: 0, medium: 0, low: 0 };
@@ -124,6 +131,14 @@ export default function FeedPage() {
 
   return (
     <section>
+      {groupId && groupOk ? (
+        <Breadcrumbs
+          items={[
+            { label: "Feed", to: params.toString() ? `/feed?${params.toString()}` : "/feed" },
+            { label: openGroup.data ? titleFor(openGroup.data).title : "Issue" },
+          ]}
+        />
+      ) : null}
       <PageHeader title="Feed" subtitle="One deduplicated, prioritized issue feed across your repositories." />
 
       <div className="cards">

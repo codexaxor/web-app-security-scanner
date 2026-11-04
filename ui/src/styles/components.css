@@ -575,7 +575,7 @@ a.stat-link:hover .stat-num {
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
-.table tbody tr.row-click td :is(a, button):not(.row-link) {
+.table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link) {
   position: relative;
   z-index: 1;
 }

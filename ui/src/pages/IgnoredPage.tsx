@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type IgnoreRuleView, type IgnoredItemView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
@@ -80,7 +80,16 @@ export default function IgnoredPage() {
       ) : null}
       {items.error ? <InlineError error={items.error} /> : null}
       {items.data && items.data.content.length === 0 ? (
-        <EmptyState title="Nothing is ignored">Everything found is in the feed.</EmptyState>
+        <EmptyState
+          title="Nothing is ignored"
+          action={
+            <Link className="btn btn-ghost btn-sm" to="/feed">
+              Go to the feed
+            </Link>
+          }
+        >
+          Everything found is in the feed.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">
@@ -135,7 +144,14 @@ export default function IgnoredPage() {
 
       <h2 className="section-head">Ignore rules</h2>
       {rules.data && rules.data.content.length === 0 ? (
-        <EmptyState title="No manual ignore rules">
+        <EmptyState
+          title="No manual ignore rules"
+          action={
+            <Link className="btn btn-ghost btn-sm" to="/feed">
+              Open the feed
+            </Link>
+          }
+        >
           Ignore a finding from its side panel to create a rule.
         </EmptyState>
       ) : (

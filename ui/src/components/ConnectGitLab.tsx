@@ -173,7 +173,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
   return (
     <div className="stack-4">
       <Card>
-        <h3>Add a source</h3>
+        <h3 id="add-source">Add a source</h3>
         {/* L5: at ≥1280 the help box sits in a right-hand column next to the form; it stacks below on narrow. */}
         <div className="source-wizard">
         <form className="form" data-testid="add-source-form" onSubmit={(e) => e.preventDefault()}>
@@ -291,7 +291,14 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
       <div>
         <h2 className="section-head">Connected sources</h2>
         {connections.length === 0 ? (
-          <EmptyState title="No sources yet">
+          <EmptyState
+            title="No sources yet"
+            action={
+              <a className="btn btn-primary btn-sm" href="#add-source">
+                Add a source
+              </a>
+            }
+          >
             Add a GitLab group/project, a GitHub owner/repository, or a public repository above.
           </EmptyState>
         ) : (

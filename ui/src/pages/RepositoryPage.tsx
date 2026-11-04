@@ -294,7 +294,14 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
       {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
-        <EmptyState title="No issues match these filters">
+        <EmptyState
+          title="No issues match these filters"
+          action={
+            <Link className="btn btn-ghost btn-sm" to={`/repositories/${repoId}?tab=scans`}>
+              View scans
+            </Link>
+          }
+        >
           Switch to All, clear a filter, or change the search.
         </EmptyState>
       ) : (
@@ -450,7 +457,12 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
     <div>
       {scans.error ? <InlineError error={scans.error} /> : null}
       {rows.length === 0 && !scans.isLoading ? (
-        <EmptyState title="No scans yet">This repository has not been scanned.</EmptyState>
+        <EmptyState
+          title="No scans yet"
+          action={<ScanButton repositoryId={repoId} primary />}
+        >
+          This repository has not been scanned.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">
