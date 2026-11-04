@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
+import { OPEN_PALETTE_EVENT } from "./PageLayout";
 import Icon, { type IconName } from "./icons";
 
 // Static destinations (the sidebar pages). Repositories are fetched live with the endpoint's server-side
@@ -32,7 +33,7 @@ export default function CommandPalette() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Global shortcut toggles the palette.
+  // Global shortcut toggles the palette; the top-bar search field opens it via a custom event.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -40,8 +41,13 @@ export default function CommandPalette() {
         setOpen((v) => !v);
       }
     };
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_PALETTE_EVENT, onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_PALETTE_EVENT, onOpen);
+    };
   }, []);
 
   useEffect(() => {

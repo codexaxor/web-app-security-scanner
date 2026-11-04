@@ -20,8 +20,8 @@ import SeverityPill from "../components/SeverityPill";
 import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import RepoName from "../components/RepoName";
-import { Card, PageHeader, EmptyState, InfoTip, SeverityBar, Legend } from "../components/ui";
-import Breadcrumbs from "../components/Breadcrumbs";
+import { Card, EmptyState, InfoTip, SeverityBar, Legend } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { TableSkeleton } from "../components/Skeleton";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
@@ -118,141 +118,164 @@ export default function FeedPage() {
 
   const rows = feed.data?.content ?? [];
 
+  const pagerOnPage = (p: number) => setFilter("page", p <= 0 ? null : String(p));
+  const pagerOnSize = (sz: number) => setFilter("size", sz === DEFAULT_PAGE_SIZE ? null : String(sz));
+
   if (invalid) {
     return (
-      <section>
-        <PageHeader title="Feed" subtitle="One deduplicated, prioritized issue feed across your repositories." />
+      <PageLayout title="Feed" subtitle="One deduplicated, prioritized issue feed across your repositories.">
         <EmptyState title="Page not found" testId="not-found">
           That link isn't valid. <a href="/feed">Go to the Feed</a>.
         </EmptyState>
-      </section>
+      </PageLayout>
     );
   }
 
   return (
-    <section>
-      {groupId && groupOk ? (
-        <Breadcrumbs
-          items={[
-            { label: "Feed", to: params.toString() ? `/feed?${params.toString()}` : "/feed" },
-            { label: openGroup.data ? titleFor(openGroup.data).title : "Issue" },
-          ]}
+    <PageLayout
+      title="Feed"
+      subtitle="One deduplicated, prioritized issue feed across your repositories."
+      breadcrumbs={
+        groupId && groupOk
+          ? [
+              { label: "Feed", to: params.toString() ? `/feed?${params.toString()}` : "/feed" },
+              { label: openGroup.data ? titleFor(openGroup.data).title : "Issue" },
+            ]
+          : undefined
+      }
+      kpi={
+        <>
+          <Card>
+            <div className="card-head">
+              <span className="stat-label">
+                Open issue groups
+                <InfoTip text="Distinct issue groups users triage, in the current view and filters. Solved groups are never counted." />
+              </span>
+            </div>
+            <div className="stat-num" data-testid="total-groups">
+              {s?.totalGroups ?? "—"}
+            </div>
+            <SeverityBar bands={bands} />
+            <Legend bands={bands} prefix="band" />
+          </Card>
+          <Card>
+            <div className="card-head">
+              <span className="stat-label">
+                Findings first seen · 7d
+                <InfoTip text="Findings first detected in the last 7 days (counted even if now ignored or solved)." />
+              </span>
+            </div>
+            <div className="stat-num" data-testid="new-7d">
+              {s?.newFindings ?? "—"}
+            </div>
+          </Card>
+          <Card>
+            <div className="card-head">
+              <span className="stat-label">
+                Solved · 7d
+                <InfoTip text="Findings moved to solved in the last 7 days (missing from a scan whose scanner succeeded). Branch changes are excluded." />
+              </span>
+            </div>
+            <div className="stat-num" data-testid="solved-7d">
+              {s?.solved ?? "—"}
+            </div>
+          </Card>
+          <Card>
+            <div className="card-head">
+              <span className="stat-label">
+                Auto-ignored · 7d
+                <InfoTip text="Findings auto-ignored by the system in the last 7 days (dev/test scope, excluded path, placeholder secret, low EPSS, duplicate rule)." />
+              </span>
+            </div>
+            <div className="stat-num" data-testid="autoignored-7d">
+              {s?.autoIgnored ?? "—"}
+            </div>
+          </Card>
+        </>
+      }
+      toolbar={
+        <>
+          <div className="segmented" role="group" aria-label="View">
+            <button className={view === "focus" ? "active" : ""} onClick={() => setFilter("view", "focus")}>
+              Focus
+            </button>
+            <button className={view === "all" ? "active" : ""} onClick={() => setFilter("view", "all")}>
+              All
+            </button>
+          </div>
+          <select aria-label="Type" value={type ?? ""} onChange={(e) => setFilter("type", e.target.value || null)}>
+            <option value="">All types</option>
+            {TYPES.map((t) => (
+              <option key={t} value={t}>
+                {typeLabel(t)}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Severity" value={band ?? ""} onChange={(e) => setFilter("band", e.target.value || null)}>
+            <option value="">All severities</option>
+            {BANDS.map((b) => (
+              <option key={b} value={b}>
+                {titleCase(b)}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Provider"
+            value={provider ?? ""}
+            onChange={(e) => setFilter("provider", e.target.value || null)}
+          >
+            <option value="">All sources</option>
+            {PROVIDERS.map((p) => (
+              <option key={p} value={p}>
+                {PROVIDER_LABEL[p]}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Category"
+            value={category ?? ""}
+            onChange={(e) => setFilter("category", e.target.value || null)}
+          >
+            <option value="">All categories</option>
+            {categories.data?.map((c) => (
+              <option key={c.category} value={c.category}>
+                {c.category} ({c.count})
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Repository"
+            value={repositoryId ?? ""}
+            onChange={(e) => setFilter("repositoryId", e.target.value || null)}
+          >
+            <option value="">All repositories</option>
+            {repos.data?.content.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.pathWithNamespace}
+              </option>
+            ))}
+          </select>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(e) => setFilter("includeInactive", e.target.checked ? "true" : null)}
+            />
+            Include inactive
+          </label>
+        </>
+      }
+      toolbarRight={
+        <Pager
+          variant="compact"
+          page={page}
+          size={size}
+          totalElements={feed.data?.totalElements ?? 0}
+          totalPages={feed.data?.totalPages ?? 1}
+          onPage={pagerOnPage}
         />
-      ) : null}
-      <PageHeader title="Feed" subtitle="One deduplicated, prioritized issue feed across your repositories." />
-
-      <div className="cards">
-        <Card>
-          <div className="card-head">
-            <span className="stat-label">
-              Open issue groups
-              <InfoTip text="Distinct issue groups users triage, in the current view and filters. Solved groups are never counted." />
-            </span>
-          </div>
-          <div className="stat-num" data-testid="total-groups">
-            {s?.totalGroups ?? "—"}
-          </div>
-          <SeverityBar bands={bands} />
-          <Legend bands={bands} prefix="band" />
-        </Card>
-        <Card>
-          <div className="card-head">
-            <span className="stat-label">
-              Findings first seen · 7d
-              <InfoTip text="Findings first detected in the last 7 days (counted even if now ignored or solved)." />
-            </span>
-          </div>
-          <div className="stat-num" data-testid="new-7d">
-            {s?.newFindings ?? "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="card-head">
-            <span className="stat-label">
-              Solved · 7d
-              <InfoTip text="Findings moved to solved in the last 7 days (missing from a scan whose scanner succeeded). Branch changes are excluded." />
-            </span>
-          </div>
-          <div className="stat-num" data-testid="solved-7d">
-            {s?.solved ?? "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="card-head">
-            <span className="stat-label">
-              Auto-ignored · 7d
-              <InfoTip text="Findings auto-ignored by the system in the last 7 days (dev/test scope, excluded path, placeholder secret, low EPSS, duplicate rule)." />
-            </span>
-          </div>
-          <div className="stat-num" data-testid="autoignored-7d">
-            {s?.autoIgnored ?? "—"}
-          </div>
-        </Card>
-      </div>
-
-      <div className="toolbar">
-        <div className="segmented" role="group" aria-label="View">
-          <button className={view === "focus" ? "active" : ""} onClick={() => setFilter("view", "focus")}>
-            Focus
-          </button>
-          <button className={view === "all" ? "active" : ""} onClick={() => setFilter("view", "all")}>
-            All
-          </button>
-        </div>
-        <select aria-label="Type" value={type ?? ""} onChange={(e) => setFilter("type", e.target.value || null)}>
-          <option value="">All types</option>
-          {TYPES.map((t) => (
-            <option key={t} value={t}>
-              {typeLabel(t)}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Severity" value={band ?? ""} onChange={(e) => setFilter("band", e.target.value || null)}>
-          <option value="">All severities</option>
-          {BANDS.map((b) => (
-            <option key={b} value={b}>
-              {titleCase(b)}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Provider" value={provider ?? ""} onChange={(e) => setFilter("provider", e.target.value || null)}>
-          <option value="">All sources</option>
-          {PROVIDERS.map((p) => (
-            <option key={p} value={p}>
-              {PROVIDER_LABEL[p]}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Category" value={category ?? ""} onChange={(e) => setFilter("category", e.target.value || null)}>
-          <option value="">All categories</option>
-          {categories.data?.map((c) => (
-            <option key={c.category} value={c.category}>
-              {c.category} ({c.count})
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Repository"
-          value={repositoryId ?? ""}
-          onChange={(e) => setFilter("repositoryId", e.target.value || null)}
-        >
-          <option value="">All repositories</option>
-          {repos.data?.content.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.pathWithNamespace}
-            </option>
-          ))}
-        </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={includeInactive}
-            onChange={(e) => setFilter("includeInactive", e.target.checked ? "true" : null)}
-          />
-          Include inactive
-        </label>
-      </div>
-
+      }
+    >
       {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
@@ -330,17 +353,16 @@ export default function FeedPage() {
             </tbody>
             )}
           </table>
+          <Pager
+            page={page}
+            size={size}
+            totalElements={feed.data?.totalElements ?? 0}
+            totalPages={feed.data?.totalPages ?? 1}
+            onPage={pagerOnPage}
+            onSize={pagerOnSize}
+          />
         </div>
       )}
-
-      <Pager
-        page={page}
-        size={size}
-        totalElements={feed.data?.totalElements ?? 0}
-        totalPages={feed.data?.totalPages ?? 1}
-        onPage={(p) => setFilter("page", p <= 0 ? null : String(p))}
-        onSize={(s) => setFilter("size", s === DEFAULT_PAGE_SIZE ? null : String(s))}
-      />
 
       {groupId ? (
         <SubIssuePanel
@@ -350,6 +372,6 @@ export default function FeedPage() {
           onClose={() => navigate({ pathname: "/feed", search: params.toString() })}
         />
       ) : null}
-    </section>
+    </PageLayout>
   );
 }

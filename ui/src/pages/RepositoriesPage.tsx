@@ -16,7 +16,8 @@ import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import Icon from "../components/icons";
 import { TableSkeleton } from "../components/Skeleton";
-import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
+import { EmptyState, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 const COLUMNS = 6;
 
@@ -93,26 +94,91 @@ export default function RepositoriesPage() {
   const activeCount = active.data?.totalElements;
 
   return (
-    <section>
-      <PageHeader
-        title="Repositories"
-        subtitle={
-          activeCount != null
-            ? `${activeCount} active ${activeCount === 1 ? "repository" : "repositories"}`
-            : "Repositories selected for scanning."
-        }
-        actions={
-          <>
-            <Link className="btn btn-secondary" to="/connect">
-              Add source
-            </Link>
-            <Link className="btn btn-primary" to="/select">
-              Select repositories
-            </Link>
-          </>
-        }
-      />
-
+    <PageLayout
+      title="Repositories"
+      subtitle={
+        activeCount != null
+          ? `${activeCount} active ${activeCount === 1 ? "repository" : "repositories"}`
+          : "Repositories selected for scanning."
+      }
+      actions={
+        <>
+          <Link className="btn btn-secondary" to="/connect">
+            Add source
+          </Link>
+          <Link className="btn btn-primary" to="/select">
+            Select repositories
+          </Link>
+        </>
+      }
+      toolbar={
+        <>
+          <div className="search-field">
+            <Icon name="search" className="search-icon" />
+            <input
+              type="search"
+              aria-label="Search repositories"
+              placeholder="Search name or path"
+              value={search}
+              onChange={(e) => resetAnd(() => setSearch(e.target.value))}
+            />
+          </div>
+          <select
+            aria-label="Sort"
+            value={sort}
+            onChange={(e) => resetAnd(() => setSort(e.target.value as RepoSort))}
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                Sort: {s.label}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <option value="">All sources</option>
+            {PROVIDERS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => resetAnd(() => setShowInactive(e.target.checked))}
+            />
+            Show inactive
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={hasOpenIssues}
+              onChange={(e) => resetAnd(() => setHasOpenIssues(e.target.checked))}
+            />
+            Has open issues
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={lastScanFailed}
+              onChange={(e) => resetAnd(() => setLastScanFailed(e.target.checked))}
+            />
+            Last scan failed
+          </label>
+        </>
+      }
+      toolbarRight={
+        <Pager
+          variant="compact"
+          page={page}
+          size={size}
+          totalElements={repos.data?.totalElements ?? 0}
+          totalPages={repos.data?.totalPages ?? 1}
+          onPage={setPage}
+        />
+      }
+    >
       {inactive && inactive.inactiveRepoCount > 0 ? (
         <p className="muted inactive-note" data-testid="inactive-line">
           {inactive.inactiveRepoCount} inactive repo{inactive.inactiveRepoCount === 1 ? "" : "s"},{" "}
@@ -120,58 +186,6 @@ export default function RepositoriesPage() {
           {inactive.openFindingsInInactiveRepos === 1 ? "" : "s"} (not scanned)
         </p>
       ) : null}
-
-      <div className="toolbar">
-        <div className="search-field">
-          <Icon name="search" className="search-icon" />
-          <input
-            type="search"
-            aria-label="Search repositories"
-            placeholder="Search name or path"
-            value={search}
-            onChange={(e) => resetAnd(() => setSearch(e.target.value))}
-          />
-        </div>
-        <select aria-label="Sort" value={sort} onChange={(e) => resetAnd(() => setSort(e.target.value as RepoSort))}>
-          {SORTS.map((s) => (
-            <option key={s.value} value={s.value}>
-              Sort: {s.label}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="">All sources</option>
-          {PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => resetAnd(() => setShowInactive(e.target.checked))}
-          />
-          Show inactive
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={hasOpenIssues}
-            onChange={(e) => resetAnd(() => setHasOpenIssues(e.target.checked))}
-          />
-          Has open issues
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={lastScanFailed}
-            onChange={(e) => resetAnd(() => setLastScanFailed(e.target.checked))}
-          />
-          Last scan failed
-        </label>
-      </div>
 
       {repos.error ? <InlineError error={repos.error} /> : null}
 
@@ -299,22 +313,21 @@ export default function RepositoriesPage() {
               </tbody>
             )}
           </table>
+          <Pager
+            page={page}
+            size={size}
+            totalElements={repos.data?.totalElements ?? 0}
+            totalPages={repos.data?.totalPages ?? 1}
+            onPage={setPage}
+            onSize={setSize}
+          />
         </div>
       )}
-
-      <Pager
-        page={page}
-        size={size}
-        totalElements={repos.data?.totalElements ?? 0}
-        totalPages={repos.data?.totalPages ?? 1}
-        onPage={setPage}
-        onSize={setSize}
-      />
 
       {editing ? <RepoSettingsDialog repo={editing} onClose={() => setEditing(null)} /> : null}
       {warnings ? (
         <WarningsDrawer scanId={warnings.scanId} repositoryPath={warnings.path} onClose={() => setWarnings(null)} />
       ) : null}
-    </section>
+    </PageLayout>
   );
 }

@@ -25,10 +25,10 @@ import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
 import Icon from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
-import Breadcrumbs from "../components/Breadcrumbs";
 import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
-import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
+import { EmptyState, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const TABS = ["issues", "scans", "settings"] as const;
@@ -73,56 +73,54 @@ export default function RepositoryPage() {
 
   if (!valid) {
     return (
-      <section>
-        <PageHeader title="Repository" />
+      <PageLayout title="Repository" breadcrumbs={[{ label: "Repositories", to: "/repositories" }, { label: "Repository" }]}>
         <EmptyState title="Page not found" testId="not-found">
           That link isn't valid. <Link to="/repositories">Go to Repositories</Link>.
         </EmptyState>
-      </section>
+      </PageLayout>
     );
   }
 
   const r = repo.data;
+  const shortName = r ? (r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace) : "Repository";
   return (
-    <section>
-      <Breadcrumbs
-        items={[
-          { label: "Repositories", to: "/repositories" },
-          { label: r ? (r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace) : "Repository" },
-        ]}
-      />
+    <PageLayout
+      title={shortName}
+      breadcrumbs={[{ label: "Repositories", to: "/repositories" }, { label: shortName }]}
+      subtitle={
+        r ? (
+          <span className="repo-header-sub">
+            <span className="mono">{r.pathWithNamespace}</span>
+            {r.effectiveBranch ? <span className="muted branch-label">· {r.effectiveBranch}</span> : null}
+            {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+          </span>
+        ) : undefined
+      }
+      actions={
+        r ? (
+          <>
+            <ScanButton repositoryId={r.id} disabled={!r.active} primary />
+            <RowMenu label="Repository actions">
+              {(close) => (
+                <button
+                  type="button"
+                  className="rowmenu-item"
+                  onClick={() => {
+                    close();
+                    goTab("settings");
+                  }}
+                >
+                  Settings
+                </button>
+              )}
+            </RowMenu>
+          </>
+        ) : undefined
+      }
+    >
       {repo.error ? <InlineError error={repo.error} /> : null}
       {r ? (
         <>
-          <PageHeader
-            title={r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
-            subtitle={
-              <span className="repo-header-sub">
-                <span className="mono">{r.pathWithNamespace}</span>
-                {r.effectiveBranch ? <span className="muted branch-label">· {r.effectiveBranch}</span> : null}
-                {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
-              </span>
-            }
-            actions={
-              <>
-                <ScanButton repositoryId={r.id} disabled={!r.active} primary />
-                <RowMenu label="Repository actions">
-                  {(close) => (
-                    <button
-                      type="button"
-                      className="rowmenu-item"
-                      onClick={() => {
-                        close();
-                        goTab("settings");
-                      }}
-                    >
-                      Settings
-                    </button>
-                  )}
-                </RowMenu>
-              </>
-            }
-          />
           <div className="repo-lastscan muted">
             {r.lastScan ? (
               <span className="row">
@@ -159,7 +157,7 @@ export default function RepositoryPage() {
           ) : null}
         </>
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
 

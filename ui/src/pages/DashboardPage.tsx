@@ -11,7 +11,8 @@ import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import FirstRunChecklist from "../components/FirstRunChecklist";
-import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
+import { Card, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import type { BandName } from "../lib/format";
 
 type Bands = { critical: number; high: number; medium: number; low: number };
@@ -45,8 +46,7 @@ export default function DashboardPage() {
   const bandLink = (b: BandName) => `/feed?band=${b}`;
 
   return (
-    <section>
-      <PageHeader title="Dashboard" subtitle="Posture across your connected repositories." />
+    <PageLayout title="Dashboard" subtitle="Posture across your connected repositories.">
       {dash.error ? <InlineError error={dash.error} /> : null}
       <FirstRunChecklist />
 
@@ -185,7 +185,7 @@ export default function DashboardPage() {
       {warnings ? (
         <WarningsDrawer scanId={warnings.scanId} repositoryPath={warnings.path} onClose={() => setWarnings(null)} />
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
 

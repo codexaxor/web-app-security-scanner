@@ -11,7 +11,8 @@ import { useToast, errorMessage } from "../toast";
 import Button from "../components/Button";
 import ConfirmDialog from "../components/ConfirmDialog";
 import TypeBadge from "../components/TypeBadge";
-import { EmptyState, PageHeader, PathText } from "../components/ui";
+import { EmptyState, PathText } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { TableSkeleton } from "../components/Skeleton";
 import CreateRuleDialog, { type RulePrefill } from "../components/CreateRuleDialog";
 
@@ -64,9 +65,7 @@ export default function IgnoredPage() {
   });
 
   return (
-    <section>
-      <PageHeader title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them." />
-
+    <PageLayout title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them.">
       <h2 className="section-head">Ignored findings</h2>
       {reason ? (
         <div className="filter-chip" data-testid="reason-filter">
@@ -131,16 +130,16 @@ export default function IgnoredPage() {
             </tbody>
             )}
           </table>
+          <Pager
+            page={itemsPaging.page}
+            size={itemsPaging.size}
+            totalElements={items.data?.totalElements ?? 0}
+            totalPages={items.data?.totalPages ?? 1}
+            onPage={itemsPaging.setPage}
+            onSize={itemsPaging.setSize}
+          />
         </div>
       )}
-      <Pager
-        page={itemsPaging.page}
-        size={itemsPaging.size}
-        totalElements={items.data?.totalElements ?? 0}
-        totalPages={items.data?.totalPages ?? 1}
-        onPage={itemsPaging.setPage}
-        onSize={itemsPaging.setSize}
-      />
 
       <h2 className="section-head">Ignore rules</h2>
       {rules.data && rules.data.content.length === 0 ? (
@@ -224,16 +223,16 @@ export default function IgnoredPage() {
               })}
             </tbody>
           </table>
+          <Pager
+            page={rulesPaging.page}
+            size={rulesPaging.size}
+            totalElements={rules.data?.totalElements ?? 0}
+            totalPages={rules.data?.totalPages ?? 1}
+            onPage={rulesPaging.setPage}
+            onSize={rulesPaging.setSize}
+          />
         </div>
       )}
-      <Pager
-        page={rulesPaging.page}
-        size={rulesPaging.size}
-        totalElements={rules.data?.totalElements ?? 0}
-        totalPages={rules.data?.totalPages ?? 1}
-        onPage={rulesPaging.setPage}
-        onSize={rulesPaging.setSize}
-      />
 
       {confirmDelete ? (
         <ConfirmDialog
@@ -252,6 +251,6 @@ export default function IgnoredPage() {
       ) : null}
 
       {prefill ? <CreateRuleDialog prefill={prefill} onClose={() => setPrefill(null)} /> : null}
-    </section>
+    </PageLayout>
   );
 }

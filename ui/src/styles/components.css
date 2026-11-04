@@ -1068,12 +1068,90 @@ button.health-item {
 }
 
 /* ---------- toolbar / filters ---------- */
+/* ---------- page template (S11.2): top bar + toolbar groups + KPI strip ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.topbar-left {
+  min-width: 0;
+  flex: 1;
+}
+.topbar-here {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.topbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: text;
+  flex: none;
+  transition: border-color var(--transition-fast);
+}
+.topbar-search:hover {
+  border-color: var(--accent);
+}
+.topbar-search-icon {
+  font-size: 16px;
+  flex: none;
+}
+.topbar-search-text {
+  flex: 1;
+  text-align: left;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-search-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
 .toolbar {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+.toolbar-main {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: var(--sp-4);
+  flex: 1;
+  min-width: 0;
+}
+.toolbar-right {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex: none;
 }
 .toolbar select,
 .toolbar input[type="text"],
@@ -1561,6 +1639,12 @@ button.health-item {
   color: var(--muted);
   font-size: var(--fs-sm);
   flex-wrap: wrap;
+}
+/* S11.2/S11.3: the pager lives in the content-card footer, not floating below the card. */
+.table-wrap > .pager {
+  margin-top: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
 }
 .pager-range {
   margin-right: auto; /* range on the left, controls on the right */

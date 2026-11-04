@@ -20,6 +20,7 @@ export default function Pager({
   totalPages,
   onPage,
   onSize,
+  variant = "default",
 }: {
   page: number;
   size: number;
@@ -27,6 +28,7 @@ export default function Pager({
   totalPages: number;
   onPage: (page: number) => void;
   onSize?: (size: number) => void;
+  variant?: "default" | "compact";
 }) {
   if (totalElements <= 0) {
     return null;
@@ -34,6 +36,36 @@ export default function Pager({
   const from = page * size + 1;
   const to = Math.min((page + 1) * size, totalElements);
   const lastPage = Math.max(totalPages, 1);
+  if (variant === "compact") {
+    // S11.3: a compact "1–20 of 63 · Prev / Next" for the toolbar right — no size selector.
+    return (
+      <div className="pager pager-compact" data-testid="pager-compact">
+        <span className="pager-range">
+          {from}–{to} of {totalElements}
+        </span>
+        <div className="pager-nav">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            aria-label="Previous page"
+            disabled={page <= 0}
+            onClick={() => onPage(page - 1)}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            aria-label="Next page"
+            disabled={page + 1 >= lastPage}
+            onClick={() => onPage(page + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="pager" data-testid="pager">
       <span className="pager-range" data-testid="pager-range">
