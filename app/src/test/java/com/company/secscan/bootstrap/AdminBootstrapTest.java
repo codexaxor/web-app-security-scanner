@@ -51,6 +51,65 @@ class AdminBootstrapTest {
         assertThat(saved.getValue().getRole()).isEqualTo("admin");
         assertThat(saved.getValue().getWorkspaceId()).isEqualTo(Workspace.DEFAULT_ID);
         assertThat(realEncoder.matches("sufficiently-long-pw", saved.getValue().getPasswordHash())).isTrue();
+        assertThat(saved.getValue().isActive()).isTrue();
+        assertThat(saved.getValue().isOperator()).as("D-094: no operator yet → the bootstrap admin is it").isTrue();
+    }
+
+    @Test
+    void theNewAdminIsNotMadeOperatorWhenAnOperatorAlreadyExists() { // D-094: never a second operator silently
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        when(users.existsByEmailContaining("@")).thenReturn(false);
+        when(users.existsByOperatorTrue()).thenReturn(true);
+
+        bootstrap(users, realEncoder, "admin@example.com", "sufficiently-long-pw").run(null);
+
+        ArgumentCaptor<AppUser> saved = ArgumentCaptor.forClass(AppUser.class);
+        verify(users).save(saved.capture());
+        assertThat(saved.getValue().isOperator()).isFalse();
+    }
+
+    @Test
+    void promotesTheExistingBootstrapAdminWhenNoOperatorExists() {
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        AppUser existing = new AppUser(Workspace.DEFAULT_ID, "admin@example.com", "hash", "admin");
+        when(users.existsByEmailContaining("@")).thenReturn(true);
+        when(users.existsByOperatorTrue()).thenReturn(false);
+        when(users.findByEmail("admin@example.com")).thenReturn(java.util.Optional.of(existing));
+
+        bootstrap(users, realEncoder, "Admin@Example.com", null).run(null); // the password is not needed
+
+        verify(users).save(existing);
+        assertThat(existing.isOperator()).isTrue();
+    }
+
+    @Test
+    void neverPromotesWhenAnOperatorAlreadyExists() {
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        AppUser existing = new AppUser(Workspace.DEFAULT_ID, "admin@example.com", "hash", "admin");
+        when(users.existsByEmailContaining("@")).thenReturn(true);
+        when(users.existsByOperatorTrue()).thenReturn(true);
+        when(users.findByEmail("admin@example.com")).thenReturn(java.util.Optional.of(existing));
+
+        bootstrap(users, realEncoder, "admin@example.com", "sufficiently-long-pw").run(null);
+
+        verify(users, never()).save(any());
+        assertThat(existing.isOperator()).isFalse();
+    }
+
+    @Test
+    void neverPromotesANonAdminOrANonEmailUser() {
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        when(users.existsByEmailContaining("@")).thenReturn(true);
+        when(users.existsByOperatorTrue()).thenReturn(false);
+        when(users.findByEmail("member@example.com")).thenReturn(java.util.Optional.of(
+                new AppUser(Workspace.DEFAULT_ID, "member@example.com", "hash", "member")));
+        when(users.findByEmail("demo")).thenReturn(java.util.Optional.of(
+                new AppUser(Workspace.DEFAULT_ID, "demo", "hash", "admin")));
+
+        bootstrap(users, realEncoder, "member@example.com", null).run(null);
+        bootstrap(users, realEncoder, "demo", null).run(null);
+
+        verify(users, never()).save(any());
     }
 
     @Test

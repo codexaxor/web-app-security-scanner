@@ -70,6 +70,9 @@ class DemoBootstrapTest {
         assertThat(saved.getValue().getPasswordHash()).isNotEqualTo("demo-pass");       // hashed, not plaintext
         assertThat(encoder.matches("demo-pass", saved.getValue().getPasswordHash())).isTrue();
         assertThat(warnedDemoMode()).isTrue();
+        // D-094: the demo user is an active Default-workspace user and NEVER the platform operator.
+        assertThat(saved.getValue().isActive()).isTrue();
+        assertThat(saved.getValue().isOperator()).isFalse();
     }
 
     @Test
