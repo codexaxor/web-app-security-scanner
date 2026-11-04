@@ -5,7 +5,7 @@ import Layout from "./Layout";
 import { useAuth } from "../auth";
 
 vi.mock("../auth", () => ({ useAuth: vi.fn() }));
-vi.mock("../theme", () => ({ useTheme: () => ({ theme: "system", setTheme: () => {} }) }));
+vi.mock("../theme", () => ({ useTheme: () => ({ theme: "light", setTheme: () => {}, toggle: () => {} }) }));
 
 function renderLayout(demoMode: boolean) {
   vi.mocked(useAuth).mockReturnValue({

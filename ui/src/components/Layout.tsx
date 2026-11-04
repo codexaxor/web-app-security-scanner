@@ -9,7 +9,6 @@ import Icon, { type IconName } from "./icons";
 const THEME_OPTS: [Theme, string][] = [
   ["light", "Light"],
   ["dark", "Dark"],
-  ["system", "System"],
 ];
 
 function ThemeControl() {
