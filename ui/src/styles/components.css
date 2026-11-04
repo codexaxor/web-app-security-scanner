@@ -1798,6 +1798,10 @@ button.health-item {
   .topbar-search-kbd {
     display: none;
   }
+  /* S11.10: a consistent, no-overflow 2-column KPI grid on phones (minmax(0,…) lets cards shrink to fit). */
+  .kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* M8.1 (D-076): branch label on repo rows / feed / side panel, and the "Branch to scan" picker. */
