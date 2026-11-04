@@ -39,8 +39,12 @@ import org.springframework.http.HttpStatus;
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
-    /** What the SPA needs after login / on load: who is signed in, whether this is a demo host, and the token. */
-    public record SessionInfo(String username, boolean demoMode, String csrfToken) {
+    /**
+     * What the SPA needs after login / on load: who is signed in, whether this is a demo host, the token, the
+     * user's workspace name (D-093) and whether they are the platform operator (D-094).
+     */
+    public record SessionInfo(String username, boolean demoMode, String csrfToken, String workspaceName,
+                              boolean operator) {
     }
 
     public record LoginRequest(String username, String password) {
@@ -51,18 +55,21 @@ public class AuthController {
     private final CsrfTokenRepository csrfTokenRepository;
     private final DemoMode demoMode;
     private final boolean cookieSecure;
+    private final com.company.secscan.workspace.WorkspaceRepository workspaces;
 
     public AuthController(AuthenticationManager authManager,
                           SecurityContextRepository securityContextRepository,
                           CsrfTokenRepository csrfTokenRepository,
                           DemoMode demoMode,
                           @org.springframework.beans.factory.annotation.Value(
-                                  "${SECSCAN_SESSION_COOKIE_SECURE:true}") boolean cookieSecure) {
+                                  "${SECSCAN_SESSION_COOKIE_SECURE:true}") boolean cookieSecure,
+                          com.company.secscan.workspace.WorkspaceRepository workspaces) {
         this.authManager = authManager;
         this.securityContextRepository = securityContextRepository;
         this.csrfTokenRepository = csrfTokenRepository;
         this.demoMode = demoMode;
         this.cookieSecure = cookieSecure;
+        this.workspaces = workspaces;
     }
 
     /**
@@ -81,6 +88,14 @@ public class AuthController {
         try {
             authentication = authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, password));
+        } catch (AccountPendingException e) {
+            // D-098: only reachable with the CORRECT password for a pending sign-up.
+            throw new com.company.secscan.api.ApiErrorException(HttpStatus.FORBIDDEN, "ACCOUNT_PENDING",
+                    "Your sign-up is awaiting approval.");
+        } catch (AccountInactiveException e) {
+            // D-098: only reachable with the CORRECT password for a disabled account.
+            throw new com.company.secscan.api.ApiErrorException(HttpStatus.FORBIDDEN, "ACCOUNT_INACTIVE",
+                    "This account is not active.");
         } catch (AuthenticationException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Wrong email or password.");
         }
@@ -101,7 +116,7 @@ public class AuthController {
         securityContextRepository.saveContext(context, request, response);
 
         String token = freshCsrfToken(request, response);
-        return ResponseEntity.ok(new SessionInfo(authentication.getName(), demoMode.enabled(), token));
+        return ResponseEntity.ok(sessionInfo(authentication, token));
     }
 
     /** JSON-only + CSRF-protected (enforced by the CsrfFilter): invalidates the session and clears the cookie. */
@@ -130,7 +145,19 @@ public class AuthController {
         }
         CsrfToken token = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
         String value = token != null ? token.getToken() : freshCsrfToken(request, response);
-        return new SessionInfo(authentication.getName(), demoMode.enabled(), value);
+        return sessionInfo(authentication, value);
+    }
+
+    private SessionInfo sessionInfo(Authentication authentication, String csrfToken) {
+        String workspaceName = null;
+        boolean operator = false;
+        if (authentication.getPrincipal() instanceof SecscanPrincipal principal) {
+            // The principal's OWN workspace, by id (domain rule 1: scoped to the caller).
+            workspaceName = workspaces.findById(principal.workspaceId())
+                    .map(com.company.secscan.workspace.Workspace::getName).orElse(null);
+            operator = principal.operator();
+        }
+        return new SessionInfo(authentication.getName(), demoMode.enabled(), csrfToken, workspaceName, operator);
     }
 
     private String freshCsrfToken(HttpServletRequest request, HttpServletResponse response) {

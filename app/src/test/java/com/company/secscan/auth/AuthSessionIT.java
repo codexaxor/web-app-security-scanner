@@ -170,6 +170,30 @@ class AuthSessionIT extends AbstractApiServerIT {
     }
 
     @Test
+    void theSessionCarriesTheWorkspaceNameAndOperatorFlag() { // M8.10 item 6 (D-093/D-094)
+        ResponseEntity<String> loginRes = login("admin@test.local", "correct-horse");
+        assertThat(loginRes.getBody()).contains("\"workspaceName\":\"Default\"");
+        assertThat(loginRes.getBody()).contains("\"operator\":false");
+
+        HttpHeaders withCookie = new HttpHeaders();
+        withCookie.add(HttpHeaders.COOKIE, sessionCookie(loginRes));
+        ResponseEntity<String> session = rest.exchange(url("/api/v1/auth/session"), HttpMethod.GET,
+                new HttpEntity<>(withCookie), String.class);
+        assertThat(session.getBody()).contains("\"workspaceName\":\"Default\"");
+        assertThat(session.getBody()).contains("\"operator\":false");
+    }
+
+    @Test
+    void theOperatorSeesOperatorTrue() {
+        AppUser admin = appUsers.findByEmail("admin@test.local").orElseThrow();
+        admin.promoteToOperator();
+        appUsers.save(admin);
+
+        ResponseEntity<String> loginRes = login("admin@test.local", "correct-horse");
+        assertThat(loginRes.getBody()).contains("\"operator\":true");
+    }
+
+    @Test
     void unauthenticatedIsAJson401WithoutWwwAuthenticate() {
         ResponseEntity<String> res = rest.exchange(url("/api/v1/repositories"), HttpMethod.GET,
                 HttpEntity.EMPTY, String.class);

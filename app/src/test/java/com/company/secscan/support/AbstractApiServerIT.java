@@ -48,11 +48,14 @@ public abstract class AbstractApiServerIT {
     private GitlabConnectionRepository connectionsForCleanup;
     @Autowired
     private AppUserRepository appUsersForCleanup;
+    @Autowired
+    private com.company.secscan.signup.SignupRequestRepository signupsForCleanup;
 
     @BeforeEach
     void cleanDatabase() {
         repositoriesForCleanup.deleteAll();
         connectionsForCleanup.deleteAll();
+        signupsForCleanup.deleteAll();      // M8.10: decided_by references app_user
         appUsersForCleanup.deleteAll();
     }
 }

@@ -17,7 +17,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -25,6 +24,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -72,11 +72,17 @@ public class SecurityConfig {
     }
 
     @Bean
-    AuthenticationManager authenticationManager(UserDetailsService userDetailsService, PasswordEncoder encoder) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
-        provider.setPasswordEncoder(encoder);
-        return new ProviderManager(provider);
+    AuthenticationManager authenticationManager(UserDetailsService userDetailsService, PasswordEncoder encoder,
+                                                com.company.secscan.signup.SignupRequestRepository signups) {
+        // D-098: one provider for the JSON login AND Basic — status after the password, pending sign-up check.
+        return new ProviderManager(
+                new com.company.secscan.auth.SecscanAuthenticationProvider(userDetailsService, encoder, signups));
+    }
+
+    /** D-098: a disabled user's live session/Basic request is refused on the next request (JSON 401). */
+    private static com.company.secscan.auth.ActiveAccountFilter activeAccountFilter(
+            com.company.secscan.user.AppUserRepository users) {
+        return new com.company.secscan.auth.ActiveAccountFilter(users, jsonUnauthorizedEntryPoint());
     }
 
     /** The hardened session cookie (D-092): HttpOnly + Secure (overridable only for the e2e host) + SameSite=Strict. */
@@ -98,17 +104,20 @@ public class SecurityConfig {
 
     @Bean
     @Order(1)
-    SecurityFilterChain basicAuthChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain basicAuthChain(HttpSecurity http, com.company.secscan.user.AppUserRepository users,
+                                       AuthenticationManager authenticationManager) throws Exception {
         AuthenticationEntryPoint jsonUnauthorized = jsonUnauthorizedEntryPoint();
         http
                 .securityMatcher(SecurityConfig::isHttpBasic)
+                .authenticationManager(authenticationManager)   // D-098: same provider as the JSON login
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(csrf -> csrf.disable())
                 .exceptionHandling(e -> e.authenticationEntryPoint(jsonUnauthorized))
-                .httpBasic(basic -> basic.authenticationEntryPoint(jsonUnauthorized));
+                .httpBasic(basic -> basic.authenticationEntryPoint(jsonUnauthorized))
+                .addFilterBefore(activeAccountFilter(users), AuthorizationFilter.class);
         return http.build();
     }
 
@@ -116,9 +125,12 @@ public class SecurityConfig {
     @Order(2)
     SecurityFilterChain browserChain(HttpSecurity http,
                                      SecurityContextRepository contextRepository,
-                                     CsrfTokenRepository csrfTokenRepository) throws Exception {
+                                     CsrfTokenRepository csrfTokenRepository,
+                                     com.company.secscan.user.AppUserRepository users,
+                                     AuthenticationManager authenticationManager) throws Exception {
         AuthenticationEntryPoint jsonUnauthorized = jsonUnauthorizedEntryPoint();
         http
+                .authenticationManager(authenticationManager)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         // Sign-in is reachable while unauthenticated; everything else (incl. /auth/session and
@@ -144,7 +156,8 @@ public class SecurityConfig {
                 // Enforce idle/absolute session lifetimes before the context is loaded (an expired session is
                 // invalidated → the request is anonymous → JSON 401).
                 .addFilterBefore(new SessionTimeoutFilter(IDLE_TIMEOUT, ABSOLUTE_TIMEOUT),
-                        SecurityContextHolderFilter.class);
+                        SecurityContextHolderFilter.class)
+                .addFilterBefore(activeAccountFilter(users), AuthorizationFilter.class);
         return http.build();
     }
 

@@ -22,6 +22,16 @@ public class ApiExceptionHandler {
     public record ApiError(String error, String message) {
     }
 
+    /** A coded error (M8.10): {@code {error: code, message}} plus {@code Retry-After} when given (429). */
+    @ExceptionHandler(ApiErrorException.class)
+    public ResponseEntity<ApiError> onApiError(ApiErrorException e) {
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(e.status());
+        if (e.retryAfterSeconds() != null) {
+            builder.header(org.springframework.http.HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSeconds()));
+        }
+        return builder.body(new ApiError(e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(EncryptionNotConfiguredException.class)
     public ResponseEntity<ApiError> onEncryption(EncryptionNotConfiguredException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
