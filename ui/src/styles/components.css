@@ -78,30 +78,14 @@
   flex-direction: column;
   gap: 2px;
 }
-.sidenav-group-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
+/* S11.5: a plain muted section label (not a toggle button) above each group. */
+.sidenav-section {
   padding: var(--sp-1) var(--sp-3);
-  background: transparent;
-  border: 0;
   color: var(--shell-muted);
   font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  cursor: pointer;
-}
-.sidenav-group-label:hover {
-  color: var(--shell-text);
-}
-.sidenav-caret {
-  font-size: 15px;
-  transition: transform var(--transition-fast);
-}
-.sidenav-caret.collapsed {
-  transform: rotate(-90deg);
 }
 .sidenav-items {
   display: flex;
@@ -153,6 +137,52 @@
   gap: var(--sp-3);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--shell-border);
+}
+/* S11.5: the one control that collapses the whole sidebar to icons. */
+.sidebar-collapse {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.sidebar-collapse:hover {
+  background: var(--shell-surface);
+  color: var(--shell-text);
+}
+/* Collapsed sidebar (desktop only): a narrow icon rail — labels, section titles and the brand/user text hide. */
+@media (min-width: 1025px) {
+  .app.sidebar-collapsed {
+    grid-template-columns: 64px 1fr;
+  }
+  .sidebar-collapsed .sidenav-label,
+  .sidebar-collapsed .brand-name,
+  .sidebar-collapsed .sidenav-section,
+  .sidebar-collapsed .user-menu-name,
+  .sidebar-collapsed .user-menu-caret {
+    display: none;
+  }
+  .sidebar-collapsed .sidebar-inner {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+  .sidebar-collapsed .sidebar-brand,
+  .sidebar-collapsed .sidenav-link,
+  .sidebar-collapsed .user-menu-trigger,
+  .sidebar-collapsed .sidebar-collapse {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 .theme-control {
   width: 100%;

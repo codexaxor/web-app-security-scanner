@@ -56,37 +56,25 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: "Workspace", items: [{ to: "/settings", label: "Workspace settings", icon: "settings" }] },
 ];
 
-function NavGroup({ group, pathname }: { group: (typeof NAV_GROUPS)[number]; pathname: string }) {
-  const hasActive = group.items.some((i) => pathname === i.to || pathname.startsWith(i.to + "/"));
-  const [open, setOpen] = useState(true);
-  // Always reveal the group that holds the current route, even if the user had collapsed it.
-  const expanded = open || hasActive;
+function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
+  // S11.5: no per-group chevrons — a small muted section label and the items are always shown. (The whole
+  // sidebar collapses to icons via the one control in the footer; the label is hidden when collapsed.)
   return (
     <div className="sidenav-group">
-      <button
-        type="button"
-        className="sidenav-group-label"
-        aria-expanded={expanded}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span>{group.label}</span>
-        <Icon name="chevronDown" className={expanded ? "sidenav-caret" : "sidenav-caret collapsed"} />
-      </button>
-      {expanded ? (
-        <div className="sidenav-items">
-          {group.items.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              title={n.label}
-              className={({ isActive }) => (isActive ? "sidenav-link active" : "sidenav-link")}
-            >
-              <Icon name={n.icon} className="sidenav-icon" />
-              <span className="sidenav-label">{n.label}</span>
-            </NavLink>
-          ))}
-        </div>
-      ) : null}
+      <div className="sidenav-section">{group.label}</div>
+      <div className="sidenav-items">
+        {group.items.map((n) => (
+          <NavLink
+            key={n.to}
+            to={n.to}
+            title={n.label}
+            className={({ isActive }) => (isActive ? "sidenav-link active" : "sidenav-link")}
+          >
+            <Icon name={n.icon} className="sidenav-icon" />
+            <span className="sidenav-label">{n.label}</span>
+          </NavLink>
+        ))}
+      </div>
     </div>
   );
 }
@@ -154,6 +142,7 @@ function UserMenu({ username, onSignOut }: { username: string | null; onSignOut:
 export default function Layout() {
   const { checking, signedIn, username, demoMode, signOut } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false); // S11.5: collapse the whole sidebar to icons (desktop)
   const location = useLocation();
 
   // Close the drawer on navigation and on Esc.
@@ -184,8 +173,11 @@ export default function Layout() {
     );
   }
 
+  const appClass = ["app", navOpen ? "nav-open" : "", collapsed ? "sidebar-collapsed" : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={navOpen ? "app nav-open" : "app"}>
+    <div className={appClass}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -228,11 +220,21 @@ export default function Layout() {
           </div>
           <nav className="sidenav" aria-label="Primary">
             {NAV_GROUPS.map((g) => (
-              <NavGroup key={g.label} group={g} pathname={location.pathname} />
+              <NavGroup key={g.label} group={g} />
             ))}
           </nav>
           <div className="sidebar-footer">
             <UserMenu username={username} onSignOut={signOut} />
+            <button
+              type="button"
+              className="sidebar-collapse"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-pressed={collapsed}
+              onClick={() => setCollapsed((v) => !v)}
+            >
+              <Icon name={collapsed ? "chevronRight" : "chevronLeft"} className="sidenav-icon" />
+              <span className="sidenav-label">Collapse</span>
+            </button>
           </div>
         </div>
       </aside>

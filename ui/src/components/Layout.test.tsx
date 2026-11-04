@@ -50,11 +50,19 @@ describe("DEMO MODE ribbon (M8.8 D-091 / SF-7)", () => {
 });
 
 describe("M8.11 shell — grouped nav", () => {
-  it("renders the four sidebar groups", () => {
+  it("renders the four sidebar section labels", () => {
     renderAt("/dashboard");
     for (const label of ["Overview", "Findings", "Sources & repos", "Workspace"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label, "i") })).not.toBeNull();
+      expect(screen.getByText(label)).not.toBeNull();
     }
+  });
+
+  it("has a single control that collapses the whole sidebar", () => {
+    renderAt("/dashboard");
+    const toggle = screen.getByRole("button", { name: "Collapse sidebar" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Expand sidebar" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("marks the current route's nav link active (aria-current=page)", () => {
