@@ -41,7 +41,16 @@
   top: var(--sp-2);
 }
 
+/* The sidebar is the grid CELL: its navy background stretches to the full grid-row height (which is at least
+ * 100vh, taller when the page content is taller), so the navy chrome never stops mid-page (S11.1). The nav
+ * itself lives in .sidebar-inner, which is sticky and 100vh with its own scroll. */
 .sidebar {
+  border-right: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  z-index: var(--z-drawer);
+}
+.sidebar-inner {
   position: sticky;
   top: 0;
   height: 100vh;
@@ -49,10 +58,7 @@
   flex-direction: column;
   gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-3);
-  border-right: 1px solid var(--shell-border);
-  background: var(--shell-bg);
-  color: var(--shell-text);
-  z-index: var(--z-drawer);
+  overflow-y: auto;
 }
 .sidebar-brand {
   display: flex;

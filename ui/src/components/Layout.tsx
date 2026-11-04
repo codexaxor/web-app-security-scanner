@@ -221,17 +221,19 @@ export default function Layout() {
         />
       ) : null}
       <aside className="sidebar" id="sidebar">
-        <div className="sidebar-brand">
-          <BrandMark />
-          <span className="brand-name">SecScan</span>
-        </div>
-        <nav className="sidenav" aria-label="Primary">
-          {NAV_GROUPS.map((g) => (
-            <NavGroup key={g.label} group={g} pathname={location.pathname} />
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <UserMenu username={username} onSignOut={signOut} />
+        <div className="sidebar-inner">
+          <div className="sidebar-brand">
+            <BrandMark />
+            <span className="brand-name">SecScan</span>
+          </div>
+          <nav className="sidenav" aria-label="Primary">
+            {NAV_GROUPS.map((g) => (
+              <NavGroup key={g.label} group={g} pathname={location.pathname} />
+            ))}
+          </nav>
+          <div className="sidebar-footer">
+            <UserMenu username={username} onSignOut={signOut} />
+          </div>
         </div>
       </aside>
       <main className="content" id="main">
