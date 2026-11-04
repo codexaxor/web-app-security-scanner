@@ -52,7 +52,10 @@ Decision: per workspace at most **1 running scan** — further scans wait in the
 serialises claims with a transaction advisory lock and claims at most the oldest queued job of a workspace that
 has no running job. At most **25 active repositories** per workspace (every workspace incl. Default; configurable
 `secscan.fair-use.*`); adding or reactivating past the limit → **409 `REPOSITORY_LIMIT_REACHED`**, a batch that
-would exceed it is refused whole; existing repositories above the limit are kept.
+would exceed it is refused whole; existing repositories above the limit are kept. The whole-batch check runs
+before any write; every transaction that activates a row re-checks under the workspace row lock. Two concurrent
+selection requests can therefore leave a batch **partly applied** (the later rows get 409), but a workspace never
+exceeds 25 active repositories.
 Consequences: a tenant with many queued scans does not delay others; Default (today's data) is subject to the
 same limits.
 

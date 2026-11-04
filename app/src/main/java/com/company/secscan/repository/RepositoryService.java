@@ -53,6 +53,7 @@ public class RepositoryService {
     private final RepositoryRepository repositories;
     private final RepositoryConnectionGuard guard;
     private final RepositoryUpserter upserter;
+    private final RepositoryLimitGuard limitGuard;
     private final RepositorySummaryService summaries;
     private final com.company.secscan.source.ProviderRegistry providers;
     private final com.company.secscan.source.SourceCredentials credentials;
@@ -68,7 +69,8 @@ public class RepositoryService {
                              com.company.secscan.source.ProviderRegistry providers,
                              com.company.secscan.source.SourceCredentials credentials,
                              org.springframework.beans.factory.ObjectProvider<com.company.secscan.issue.ReScoreService> reScore,
-                             PlatformTransactionManager txManager) {
+                             PlatformTransactionManager txManager,
+                             RepositoryLimitGuard limitGuard) {
         this.client = client;
         this.connections = connections;
         this.repositories = repositories;
@@ -79,6 +81,7 @@ public class RepositoryService {
         this.credentials = credentials;
         this.reScore = reScore;
         this.txTemplate = new TransactionTemplate(txManager);
+        this.limitGuard = limitGuard;
     }
 
     /** A provider-neutral descriptor of the connection's target, for the adapters (M8.7). */
@@ -115,6 +118,13 @@ public class RepositoryService {
         String host = conn.getHost();
         String token = tokenFor(conn);
         com.company.secscan.source.SourceProvider adapter = providers.require(provider);
+        // D-097: refuse the whole batch up front if it would exceed the active-repository limit (no write yet).
+        Set<String> activeHere = repositories.findByWorkspaceId(workspaceId).stream()
+                .filter(r -> provider.equals(r.getProvider()) && host != null && host.equals(r.getHost())
+                        && r.isActive())
+                .map(Repository::getProviderRepoId).collect(Collectors.toSet());
+        limitGuard.precheck(workspaceId, new java.util.LinkedHashSet<>(providerRepoIds).stream()
+                .filter(id -> !activeHere.contains(id)).count());
         List<RepositoryView> result = new ArrayList<>();
         for (String id : new java.util.LinkedHashSet<>(providerRepoIds)) {
             com.company.secscan.source.SourceRepo r = adapter.getRepository(conn.getBaseUrl(), token, id);
@@ -213,6 +223,10 @@ public class RepositoryService {
                         "Project " + p.pathWithNamespace() + " is an empty repository and cannot be scanned.");
             }
         }
+
+        // D-097: refuse the whole batch up front if it would exceed the active-repository limit (no write yet).
+        limitGuard.precheck(workspaceId, ids.stream()
+                .filter(id -> !Boolean.TRUE.equals(activeBefore.get(Long.toString(id)))).count());
 
         List<RepositoryView> result = new ArrayList<>();
         int added = 0;
@@ -542,6 +556,7 @@ public class RepositoryService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This repository cannot be reactivated here; re-select the project via a connection.");
         }
+        limitGuard.requireRoomFor(repo.getWorkspaceId(), 1);   // D-097 (inside the patch transaction)
         repo.activate();
     }
 

@@ -79,7 +79,8 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
    - the `scan_job` claim (`claimable`, `SELECT … FOR UPDATE SKIP LOCKED`) — the queue is drained across all
      workspaces; the claimed row's `workspace_id` then scopes the rest of that scan. The worker's follow-up
      re-read of that same claimed job by id (`ScanJobProcessor.process` via `ScanJobRepository.findById`) is
-     part of this trust root and is likewise unscoped.
+     part of this trust root and is likewise unscoped. Its D-097 fair-use subqueries (skip a workspace that
+     already has a running job; at most the oldest queued job per workspace) are part of the same claim.
    - the stale-lease sweep (`staleLeases`) — reclaims hung leases across all workspaces; each reclaimed job's
      `workspace_id` scopes its own state change.
    - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`, the D-053 EOL

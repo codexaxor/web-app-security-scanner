@@ -17,11 +17,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 class RepositoryUpserter {
 
-
     private final RepositoryRepository repositories;
+    private final RepositoryLimitGuard limit;
 
-    RepositoryUpserter(RepositoryRepository repositories) {
+    RepositoryUpserter(RepositoryRepository repositories, RepositoryLimitGuard limit) {
         this.repositories = repositories;
+        this.limit = limit;
     }
 
     /**
@@ -39,8 +40,11 @@ class RepositoryUpserter {
                 .map(r -> applyAndSave(r, connectionId, pathWithNamespace, defaultBranch, languages))
                 // host is filled by the V22 trigger from the connection (= this connection's host); identity on
                 // the row therefore matches the finder's (provider, host, providerRepoId) above.
-                .orElseGet(() -> repositories.saveAndFlush(new Repository(workspaceId, connectionId, projectId,
-                        pathWithNamespace, defaultBranch, languages)));
+                .orElseGet(() -> {
+                    limit.requireRoomFor(workspaceId, 1);   // D-097: a new row is a new active repository
+                    return repositories.saveAndFlush(new Repository(workspaceId, connectionId, projectId,
+                            pathWithNamespace, defaultBranch, languages));
+                });
     }
 
     /**
@@ -71,9 +75,11 @@ class RepositoryUpserter {
         return repositories.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
                         workspaceId, provider, host, providerRepoId)
                 .map(r -> applyAndSave(r, connectionId, fullName, defaultBranch, languages))
-                .orElseGet(() -> repositories.saveAndFlush(newRow(workspaceId, connectionId, provider, providerRepoId,
-                        fullName,
-                        defaultBranch, languages)));
+                .orElseGet(() -> {
+                    limit.requireRoomFor(workspaceId, 1);   // D-097
+                    return repositories.saveAndFlush(newRow(workspaceId, connectionId, provider, providerRepoId,
+                            fullName, defaultBranch, languages));
+                });
     }
 
     @Transactional
@@ -100,6 +106,9 @@ class RepositoryUpserter {
 
     private Repository applyAndSave(Repository r, UUID connectionId, String pathWithNamespace,
                                     String defaultBranch, List<String> languages) {
+        if (!r.isActive()) {
+            limit.requireRoomFor(r.getWorkspaceId(), 1);   // D-097: reactivating takes a slot
+        }
         if (r.getConnectionId() == null || !r.isActive()) {
             // Detached (its connection was removed) or inactive: the selecting connection takes it over,
             // clearing the inactive/provisional state (D-020).
