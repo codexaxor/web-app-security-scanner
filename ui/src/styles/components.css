@@ -336,7 +336,9 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
 }
 .page-header .subtitle {
   color: var(--muted);
@@ -439,6 +441,14 @@
   border-radius: var(--radius-lg);
   padding: var(--sp-4);
   box-shadow: var(--shadow-1);
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+/* Linked cards (e.g. the Dashboard band tiles) lift on hover; static cards are unaffected. */
+a.card:hover,
+.card-link:hover {
+  box-shadow: var(--shadow-2);
+  border-color: var(--border-strong);
+  text-decoration: none;
 }
 .card-head {
   display: flex;
