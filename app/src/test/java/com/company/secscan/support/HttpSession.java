@@ -30,6 +30,15 @@ public final class HttpSession {
         this.basic = basic;
     }
 
+    /**
+     * A client that never retries. The default (Apache HttpClient 5) retry strategy honours {@code Retry-After} on a
+     * 429 by SLEEPING and retrying — up to the full 15-minute window — so rate-limit tests must use this one.
+     */
+    public static TestRestTemplate noRetryClient() {
+        return new TestRestTemplate(new org.springframework.boot.web.client.RestTemplateBuilder()
+                .requestFactory(org.springframework.http.client.SimpleClientHttpRequestFactory::new));
+    }
+
     /** Raw JSON login (no assertion on the outcome). */
     public static ResponseEntity<String> login(TestRestTemplate rest, int port, String username, String password) {
         return postJson(rest, "http://localhost:" + port + "/api/v1/auth/login",

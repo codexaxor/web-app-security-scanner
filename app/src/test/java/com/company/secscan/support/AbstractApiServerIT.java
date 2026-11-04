@@ -52,11 +52,14 @@ public abstract class AbstractApiServerIT {
     private com.company.secscan.signup.SignupRequestRepository signupsForCleanup;
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcForCleanup;
+    @Autowired
+    private com.company.secscan.auth.RateLimits rateLimitsForCleanup;
 
     @BeforeEach
     void cleanDatabase() {
         repositoriesForCleanup.deleteAll();
         connectionsForCleanup.deleteAll();
+        rateLimitsForCleanup.clear();       // M8.10: the in-memory limiters outlive a test in the cached context
         signupsForCleanup.deleteAll();      // M8.10: decided_by references app_user
         jdbcForCleanup.update("update app_user set status_changed_by = null");   // M8.10 self-reference
         appUsersForCleanup.deleteAll();

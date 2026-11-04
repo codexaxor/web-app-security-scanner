@@ -54,6 +54,8 @@ public class SecurityConfig {
 
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "TRACE", "OPTIONS");
     private static final RequestMatcher LOGIN = new AntPathRequestMatcher("/api/v1/auth/login", "POST");
+    /** D-093: public self sign-up — unauthenticated and CSRF-exempt like login (it carries no session). */
+    private static final RequestMatcher SIGNUP = new AntPathRequestMatcher("/api/v1/auth/signup", "POST");
     private static final String[] PUBLIC_PATHS = {"/actuator/health", "/actuator/health/**"};
     private static final String ADMIN_PATHS = "/api/v1/admin/**";
 
@@ -139,6 +141,7 @@ public class SecurityConfig {
                         // Sign-in is reachable while unauthenticated; everything else (incl. /auth/session and
                         // /auth/logout) requires authentication.
                         .requestMatchers(LOGIN).permitAll()
+                        .requestMatchers(SIGNUP).permitAll()
                         // D-094: /api/v1/admin/** is the platform operator's alone (resolves OD-9).
                         .requestMatchers(ADMIN_PATHS).hasAuthority(SecscanPrincipal.ROLE_OPERATOR)
                         .anyRequest().authenticated())
@@ -168,10 +171,12 @@ public class SecurityConfig {
 
     /**
      * CSRF is required for an unsafe method on the browser chain, except {@code POST /auth/login} (the token is
-     * issued by it). Safe methods are already excluded here; HTTP Basic never reaches this chain.
+     * issued by it) and {@code POST /auth/signup} (public, sessionless,
+             JSON-only). Safe methods are already excluded here; HTTP Basic never reaches this chain.
      */
     private static RequestMatcher csrfRequiredMatcher() {
-        return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request);
+        return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request)
+                && !SIGNUP.matches(request);
     }
 
     /** Access denied → 401 JSON when the caller is unauthenticated (no/expired session), else the default 403. */
