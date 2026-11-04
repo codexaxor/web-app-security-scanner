@@ -39,15 +39,16 @@
   --shell-active-text: #ffffff; /* active nav item text */
   --shell-accent: #5b8def;      /* active indicator / focus on navy — 5.5:1 on --shell-bg */
 
-  /* severity bands — severity ONLY (AA text on --surface) */
+  /* severity bands — severity ONLY (AA text on --surface). Critical deep red, High orange, Medium amber/gold,
+   * Low slate blue — NEVER green (green is reserved for solved/completed). All four are visually distinct. */
   --sev-critical: #b3261e;
-  --sev-high: #b45309;
-  --sev-medium: #b45309;
-  --sev-low: #2f7a34;
+  --sev-high: #c2410c;
+  --sev-medium: #946a00;
+  --sev-low: #3f6090;
   --sev-critical-bg: #fbe9e7;
-  --sev-high-bg: #fdf0e3;
-  --sev-medium-bg: #fbf4d9;
-  --sev-low-bg: #e7f4e8;
+  --sev-high-bg: #fdeadd;
+  --sev-medium-bg: #fbf1cf;
+  --sev-low-bg: #e9eef8;
 
   /* status roles */
   --status-new: #2f52c8;        /* blue */
@@ -132,11 +133,11 @@
     --sev-critical: #f28b82;
     --sev-high: #f0a35e;
     --sev-medium: #e6c84f;
-    --sev-low: #86d08a;
+    --sev-low: #8fb3e8;
     --sev-critical-bg: #3a1f1d;
     --sev-high-bg: #352414;
     --sev-medium-bg: #332d15;
-    --sev-low-bg: #16301a;
+    --sev-low-bg: #1a2744;
 
     --status-new: #7f9cf5;
     --status-new-bg: #1e2740;
@@ -179,11 +180,11 @@
   --sev-critical: #f28b82;
   --sev-high: #f0a35e;
   --sev-medium: #e6c84f;
-  --sev-low: #86d08a;
+  --sev-low: #8fb3e8;
   --sev-critical-bg: #3a1f1d;
   --sev-high-bg: #352414;
   --sev-medium-bg: #332d15;
-  --sev-low-bg: #16301a;
+  --sev-low-bg: #1a2744;
   --status-new: #7f9cf5;
   --status-new-bg: #1e2740;
   --status-todo: #93a0ac;

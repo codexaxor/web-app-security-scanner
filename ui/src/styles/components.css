@@ -2286,8 +2286,8 @@ button.health-item {
   line-height: 1.4;
 }
 .toast-success {
-  border-color: var(--sev-low);
-  border-left: 4px solid var(--sev-low);
+  border-color: var(--ok);
+  border-left: 4px solid var(--ok);
 }
 .toast-info {
   border-left: 4px solid var(--accent);
