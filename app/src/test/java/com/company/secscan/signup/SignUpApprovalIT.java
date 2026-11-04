@@ -134,4 +134,44 @@ class SignUpApprovalIT extends AbstractApiServerIT {
         assertThat(operator.get("/api/v1/admin/sign-ups?status=bogus").getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
     }
+
+    @Test
+    void theOperatorListsDisablesAndReEnablesUsers() {
+        UUID id = pending("user@acme.test", "Acme");
+        operator.post("/api/v1/admin/sign-ups/" + id + "/approve", "{}");
+        UUID userId = users.findByEmail("user@acme.test").orElseThrow().getId();
+
+        var list = operator.get("/api/v1/admin/users");
+        assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(list.getBody()).contains("\"email\":\"user@acme.test\"").contains("\"workspaceName\":\"Acme\"")
+                .contains("\"status\":\"active\"").doesNotContain("passwordHash").doesNotContain("$2a$");
+
+        var disabled = operator.post("/api/v1/admin/users/" + userId + "/disable", "{}");
+        assertThat(HttpSession.field(disabled.getBody(), "status")).isEqualTo("disabled");
+        var refused = HttpSession.login(rest, port, "user@acme.test", SIGNUP_PASSWORD);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(HttpSession.field(refused.getBody(), "error")).isEqualTo("ACCOUNT_INACTIVE");
+        assertThat(operator.get("/api/v1/admin/users?status=disabled").getBody()).contains("user@acme.test");
+
+        var enabled = operator.post("/api/v1/admin/users/" + userId + "/enable", "{}");
+        assertThat(HttpSession.field(enabled.getBody(), "status")).isEqualTo("active");
+        assertThat(HttpSession.login(rest, port, "user@acme.test", SIGNUP_PASSWORD).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        AppUser after = users.findById(userId).orElseThrow();
+        assertThat(after.getStatusChangedBy()).isEqualTo(
+                users.findByEmail("operator@test.local").orElseThrow().getId());
+        assertThat(after.getStatusChangedAt()).isNotNull();
+    }
+
+    @Test
+    void theOperatorCannotBeDisabledAndUnknownUsersAre404() {
+        UUID operatorId = users.findByEmail("operator@test.local").orElseThrow().getId();
+        var res = operator.post("/api/v1/admin/users/" + operatorId + "/disable", "{}");
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(HttpSession.field(res.getBody(), "error")).isEqualTo("CANNOT_DISABLE_OPERATOR");
+        assertThat(operator.post("/api/v1/admin/users/" + UUID.randomUUID() + "/disable", "{}").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(operator.get("/api/v1/admin/users?status=pending").getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
 }

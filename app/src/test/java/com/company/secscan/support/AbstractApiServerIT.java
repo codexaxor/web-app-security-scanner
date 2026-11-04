@@ -50,12 +50,15 @@ public abstract class AbstractApiServerIT {
     private AppUserRepository appUsersForCleanup;
     @Autowired
     private com.company.secscan.signup.SignupRequestRepository signupsForCleanup;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcForCleanup;
 
     @BeforeEach
     void cleanDatabase() {
         repositoriesForCleanup.deleteAll();
         connectionsForCleanup.deleteAll();
         signupsForCleanup.deleteAll();      // M8.10: decided_by references app_user
+        jdbcForCleanup.update("update app_user set status_changed_by = null");   // M8.10 self-reference
         appUsersForCleanup.deleteAll();
     }
 }

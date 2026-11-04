@@ -81,6 +81,25 @@ public class AppUser {
         this.operator = true;
     }
 
+    /** Disables the account (D-094/D-098): refused at login after the password, live sessions end next request. */
+    public void disable(UUID by, Instant at) {
+        if (operator) {
+            throw new IllegalStateException("The operator cannot be disabled");
+        }
+        changeStatus(STATUS_DISABLED, by, at);
+    }
+
+    /** Re-enables a disabled account. */
+    public void enable(UUID by, Instant at) {
+        changeStatus(STATUS_ACTIVE, by, at);
+    }
+
+    private void changeStatus(String to, UUID by, Instant at) {
+        this.status = to;
+        this.statusChangedBy = by;
+        this.statusChangedAt = at;
+    }
+
     public UUID getId() {
         return id;
     }

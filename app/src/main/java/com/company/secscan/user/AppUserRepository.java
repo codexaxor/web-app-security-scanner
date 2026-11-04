@@ -16,4 +16,14 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
      * role, and this guard (AdminBootstrap) is what keeps a second operator from ever being created silently.
      */
     boolean existsByOperatorTrue();
+
+    /**
+     * The operator's account list (D-094), all workspaces — a platform-operator view (CLAUDE.md rule 1). Returns
+     * only account metadata; no tenant business data is reachable through it.
+     */
+    org.springframework.data.domain.Page<AppUser> findAllByOrderByCreatedAtAscIdAsc(
+            org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<AppUser> findByStatusOrderByCreatedAtAscIdAsc(
+            String status, org.springframework.data.domain.Pageable pageable);
 }

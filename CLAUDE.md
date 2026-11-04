@@ -99,6 +99,9 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
      - the per-request account check reloads the principal's own row by id (`ActiveAccountFilter` via
        `AppUserRepository.findById`) — part of the authentication trust root, like the login lookup.
      - the single-operator guard `AppUserRepository.existsByOperatorTrue` (the operator is a platform role).
+     - the operator's account list (`AppUserRepository.findAllByOrderByCreatedAtAscIdAsc` /
+       `findByStatusOrderByCreatedAtAscIdAsc`) and disable/enable by id — account metadata only (D-094: the
+       operator has no read access to other tenants' business data).
      - request paths take their workspace ONLY from the authenticated principal (`@CurrentWorkspace`);
        `Workspace.DEFAULT_ID` appears only in its declaration and the admin/demo bootstraps
        (`DefaultWorkspaceUsageGuardTest`).

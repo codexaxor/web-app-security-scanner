@@ -94,7 +94,7 @@ class OperatorAccessIT extends AbstractApiServerIT {
     void theEnumerationSeesTheKnownAdminEndpoints() {
         assertThat(adminEndpoints()).extracting(Endpoint::path).contains(
                 "/api/v1/admin/intel/kev/sync", "/api/v1/admin/maintenance/retire-ignored-orphans",
-                "/api/v1/admin/sign-ups");
+                "/api/v1/admin/sign-ups", "/api/v1/admin/users");
     }
 
     private List<Endpoint> adminEndpoints() {
