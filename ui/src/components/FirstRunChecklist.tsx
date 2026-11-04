@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { qk } from "../queryClient";
 import { firstRunComplete, firstRunSteps, nextStepKey, type ChecklistCounts } from "../lib/firstRunChecklist";
 import Icon from "./icons";
 
@@ -11,15 +12,17 @@ import Icon from "./icons";
  */
 export default function FirstRunChecklist() {
   const sources = useQuery({
-    queryKey: ["first-run", "sources"],
+    // Keys sit under the invalidated families (connections / repositories / scans-recent) so adding a source,
+    // selecting repositories or finishing a scan refreshes the checklist immediately (M8.11 review N-1).
+    queryKey: qk.connections({ page: 0, size: 1 }),
     queryFn: () => api.listConnections(0, 1),
   });
   const repositories = useQuery({
-    queryKey: ["first-run", "repositories"],
+    queryKey: qk.repositories({ page: 0, size: 1 }),
     queryFn: () => api.listRepositories({ page: 0, size: 1 }),
   });
   const scans = useQuery({
-    queryKey: ["first-run", "scans"],
+    queryKey: qk.scansCount,
     queryFn: () => api.listScansAll(0, 1),
   });
 

@@ -41,6 +41,11 @@ export const qk = {
   dashboard: (includeInactive: boolean) => ["dashboard", includeInactive] as const,
   dashboardAll: ["dashboard"] as const,
   scansRecent: ["scans-recent"] as const,
+  // The first-run checklist's scan count lives UNDER the scans-recent family, so every kind that refreshes the
+  // recent-scans list also refreshes it (M8.11 review N-1).
+  scansCount: ["scans-recent", "count"] as const,
+  connections: (params: unknown) => ["connections", params] as const,
+  connectionsAll: ["connections"] as const,
   scanDetail: (scanId: string) => ["scan-detail", scanId] as const,
   issueCategories: (params: unknown) => ["issue-categories", params] as const,
   workspaceSettings: ["workspace-settings"] as const,
@@ -51,7 +56,7 @@ export const qk = {
 // group header (`issue-group`) and per-sub-issue history (`sub-issue-events`), which SF-1 adds to all four
 // kinds (their omission was the "Medium 65" stale-header bug). Documented exactly so a new screen cannot
 // forget to refresh (R3/R5); the table-driven test in queryClient.test.ts asserts this map verbatim.
-export type MutationKind = "triage" | "settings" | "scan" | "workspaceSettings";
+export type MutationKind = "triage" | "settings" | "scan" | "workspaceSettings" | "sources";
 
 export const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   // ignore / unignore / delete-rule: statuses and every count move, plus the open panel's header + history.
@@ -67,6 +72,11 @@ export const AFFECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
   // EPSS toggle: LOW_EPSS auto-ignore + scoring tiers move feed/ignored/dashboard/repo counts, panel + history.
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
     qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll, qk.repositoryAll],
+  // add/remove a source, select repositories (M8.11 review N-1): the connection list and repository rollups
+  // move (the first-run checklist reads both); removing a source deactivates its repos, which moves the feed,
+  // dashboard and any open panel.
+  sources: [qk.connectionsAll, qk.repositoriesAll, qk.repositoryAll, qk.dashboardAll, qk.feedAll,
+    qk.feedSummaryAll, qk.groupAll, qk.subIssueEventsAll, qk.scansRecent],
 };
 
 export function invalidateFor(kind: MutationKind): Promise<void> {

@@ -115,3 +115,35 @@ for (const [theme, selector] of [
     });
   });
 }
+
+// M8.11 review N-5: the issue-type colours are GRAPHICS (Dashboard type-bar icons + fills, the repository Issues
+// type icon), so WCAG 1.4.11 non-text contrast applies: >= 3:1 against what they sit on — the card/row surface,
+// and the bar track / hovered row (--surface-2) — in both themes.
+const TYPES = ["sca", "sast", "secret", "iac", "eol"] as const;
+const GRAPHIC_PAIRS: [string, string][] = TYPES.flatMap((ty) => [
+  [`--type-${ty}`, "--surface"],
+  [`--type-${ty}`, "--surface-2"],
+] as [string, string][]);
+
+for (const [theme, selector] of [
+  ["light", ":root {"],
+  ["dark", ':root[data-theme="dark"] {'],
+] as const) {
+  describe(`WCAG non-text contrast — ${theme} issue-type colours`, () => {
+    const t = tokenBlock(selector);
+    it.each(GRAPHIC_PAIRS)("graphic %s on %s is >= 3:1", (fg, bg) => {
+      expect(t[fg], fg).toBeTruthy();
+      expect(t[bg], bg).toBeTruthy();
+      expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(3);
+    });
+  });
+}
+
+// M8.11 review N-4 (D-099): dark is ONLY an explicit [data-theme="dark"]; the OS preference is never followed,
+// so there must be no prefers-color-scheme block that could paint dark before the app sets data-theme.
+describe("theme selection is explicit only (N-4)", () => {
+  it("tokens.css has no @media (prefers-color-scheme) rule", () => {
+    const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/@media\s*\([^)]*prefers-color-scheme/);
+  });
+});

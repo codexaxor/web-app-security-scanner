@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { SkeletonLines } from "./Skeleton";
+import { invalidateFor } from "../queryClient";
 import { api, ConnectionView, Paged, ProjectView, RepositoryView } from "../api";
 import Button from "./Button";
 import InlineError from "./InlineError";
@@ -88,6 +89,7 @@ export default function SelectRepositories() {
       const result = await api.selectRepositories(connectionId, [...checked]);
       setSaved({ added: result.added, reactivated: result.reactivated, alreadySelected: result.alreadySelected });
       setChecked(new Set());
+      void invalidateFor("sources");
       const d = await api.listProjects(connectionId, page, PAGE_SIZE);
       setData(d);
       refreshSelected();

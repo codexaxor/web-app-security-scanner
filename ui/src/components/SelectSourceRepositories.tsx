@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { SkeletonLines } from "./Skeleton";
+import { invalidateFor } from "../queryClient";
 import { api, ConnectionView, Paged, SourceRepoView } from "../api";
 import Button from "./Button";
 import RepoName from "./RepoName";
@@ -69,6 +70,7 @@ export default function SelectSourceRepositories({
       const result = await api.selectSourceRepositories(connection.id, [...checked]);
       setAdded(result.length);
       setChecked(new Set());
+      void invalidateFor("sources");
       onSelected();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to select repositories");

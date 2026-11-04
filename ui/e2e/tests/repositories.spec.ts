@@ -117,6 +117,37 @@ test("whole-row: a row button does its own action; keyboard Enter on the row lin
   await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
 });
 
+test("N-8 — the full repository path is selectable text above the row link overlay", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Repositories", exact: true }).click();
+  const row = await repoRow(page, CORE_KEYCLOAK);
+  const path = row.locator(".repo-path");
+  await expect(path).toBeVisible();
+  const expected = (await path.textContent())!.trim();
+
+  // The topmost element at the path's centre is the path itself, not the stretched ::after of the row link.
+  const box = (await path.boundingBox())!;
+  const onTop = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.classList.contains("repo-path") ?? false,
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  expect(onTop, "repo path is above the overlay").toBe(true);
+
+  // Drag-select across it: the text is selected and the page did not navigate.
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.length, "some path text is selected").toBeGreaterThan(3);
+  expect(expected.includes(selected.trim()), `selection "${selected}" is part of the path`).toBe(true);
+  await expect(page).toHaveURL(/\/repositories$/);
+
+  // The rest of the row still opens the repository (the name link is unchanged).
+  await row.locator(".repo-name").click();
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
+});
+
 test("the warnings drawer lists a scan's warnings", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "Repositories", exact: true }).click();

@@ -83,6 +83,12 @@ export function checkThemeStore(text) {
       reasons.push(`${THEME_STORE_REL}: localStorage.${m[1]} is not allowed — only getItem/setItem/removeItem (D-099)`);
     }
   }
+  // Key check. This regex only sees LITERAL keys (getItem("x")). A key passed as a variable/expression is not
+  // matched here, but it is still constrained: every string literal in this file must be one of
+  // secscan-theme/light/dark (the loop below), so a variable key can only be built from those three strings
+  // (or from non-string expressions, which review catches). Limitation (shared by every rule in this text scan, all files): an identifier built at
+  // runtime, e.g. globalThis["local" + "Storage"], is not detected — the guard is a tripwire against accidental
+  // or casual use, not a sandbox; code review (and the e2e storage assertion in test-base) backs it up.
   for (const m of code.matchAll(/localStorage\s*\.\s*(?:getItem|setItem|removeItem)\s*\(\s*(['"`])([^'"`]*)\1/g)) {
     if (m[2] !== THEME_KEY) {
       reasons.push(`${THEME_STORE_REL}: localStorage key "${m[2]}" — only "${THEME_KEY}" is allowed (D-099)`);

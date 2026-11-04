@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ConnectionRemovalResult, ConnectionView, RepositoryView } from "../api";
 import { useToast, errorMessage } from "../toast";
+import { invalidateFor } from "../queryClient";
 import { isParseError, kindForPath, parseSourceUrl, type SourceKind } from "../lib/sourceInput";
 import Button from "./Button";
 import ConfirmDialog from "./ConfirmDialog";
@@ -102,6 +103,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
       setKindOverride(null);
       toast.success(`Added ${providerWord()} source. Now select its repositories.`);
       setSelecting(added);
+      void invalidateFor("sources");
       await refresh();
     } catch (e) {
       setError(errorMessage(e, "Could not add the source."));
@@ -156,6 +158,7 @@ export default function ConnectGitLab({ onChanged }: { onChanged: (anyConnection
       setRemoval(r);
       setConfirm(null);
       toast.success("Source removed.");
+      void invalidateFor("sources");
       await refresh();
     } catch (e) {
       setError(errorMessage(e, "Failed to remove the source."));

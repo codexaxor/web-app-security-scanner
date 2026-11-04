@@ -315,7 +315,7 @@
     align-items: center;
     gap: var(--sp-3);
     padding: var(--sp-2) var(--sp-4);
-    min-height: 52px;
+    height: var(--appbar-h); /* fixed, so sticky table headers can offset by exactly this (N-3) */
     border-bottom: 1px solid var(--shell-border);
     background: var(--shell-bg);
     color: var(--shell-text);
@@ -576,6 +576,13 @@ a.stat-link:hover .stat-num {
   color: var(--muted);
   font-weight: 650;
 }
+/* 721–1024px: the sticky navy app-bar occupies the top of the viewport, so the sticky header sticks just below
+ * it instead of sliding underneath (M8.11 review N-3). At <= 720px headers are static (wide tables scroll). */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .table thead th {
+    top: var(--appbar-h);
+  }
+}
 .table thead tr:first-child th:first-child {
   border-top-left-radius: var(--radius-lg);
 }
@@ -637,6 +644,16 @@ a.stat-link:hover .stat-num {
 .table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link):not(.row-link-btn) {
   position: relative;
   z-index: 1;
+}
+/* The full repository path is reference text people copy: keep it ABOVE the row-link overlay so it can be
+ * selected (a click on the path selects text instead of navigating; the name link and the rest of the row
+ * still open the repository) — M8.11 review N-8. */
+.table tbody tr.row-click td .repo-path {
+  position: relative;
+  z-index: 1;
+  width: fit-content; /* only the text itself sits above the overlay, not the empty rest of the cell */
+  cursor: text;
+  user-select: text;
 }
 .cell-num {
   text-align: right;

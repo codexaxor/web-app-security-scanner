@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import CommandPalette from "./CommandPalette";
+import CommandPalette, { SEARCH_DEBOUNCE_MS } from "./CommandPalette";
 import { api, type Paged, type RepositoryView } from "../api";
 
 function repo(id: string, path: string): RepositoryView {
@@ -198,5 +198,40 @@ describe("CommandPalette (⌘K)", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(input.getAttribute("aria-expanded")).toBe("false");
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("debounces the server repository search (~150 ms after the last keystroke, one request)", () => {
+    vi.useFakeTimers();
+    try {
+      const spy = setup([], 0);
+      openPalette();
+      const searches = () =>
+        spy.mock.calls.map((c) => (c[0] as { search?: string }).search).filter((x) => x !== undefined);
+      const input = screen.getByLabelText("Quick jump search");
+      expect(SEARCH_DEBOUNCE_MS).toBe(150);
+
+      // Three quick keystrokes, 50 ms apart: no server search yet.
+      for (const v of ["c", "co", "cor"]) {
+        fireEvent.change(input, { target: { value: v } });
+        act(() => {
+          vi.advanceTimersByTime(50);
+        });
+      }
+      expect(searches()).toEqual([]);
+      // Page matches are client-side and do not wait for the debounce.
+      expect(screen.queryByText("Feed")).toBeNull();
+
+      // 149 ms after the last keystroke: still nothing; at 150 ms: exactly one request, for the final value.
+      act(() => {
+        vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS - 1 - 50);
+      });
+      expect(searches()).toEqual([]);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(searches()).toEqual(["cor"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

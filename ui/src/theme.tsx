@@ -5,8 +5,8 @@ import { loadTheme, saveTheme, type ThemeChoice } from "./lib/themeStore";
  * Theme selection (M8.11, D-099). LIGHT by default; the only other choice is DARK — there is no "system"
  * option. The choice is remembered across reloads via `lib/themeStore` (one key in web storage, wrapped in
  * try/catch, falls back to light). The theme is applied as a `data-theme` attribute on <html> (setAttribute,
- * never an inline <style>); tokens.css selects the matching token set by [data-theme] and, for an unset value,
- * by @media (prefers-color-scheme) — but we always set an explicit value, so the user's choice wins over the OS.
+ * never an inline <style>); tokens.css defines the dark token set ONLY under [data-theme="dark"] — there is no
+ * @media (prefers-color-scheme) block, so the OS setting is never followed and first paint is light (N-4).
  */
 export type Theme = ThemeChoice;
 

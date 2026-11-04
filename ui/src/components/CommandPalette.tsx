@@ -18,6 +18,9 @@ const PAGES: { label: string; to: string; icon: IconName }[] = [
 ];
 
 const REPO_PAGE_SIZE = 6;
+// The repository search hits the server; wait this long after the last keystroke before sending it (N-2).
+// Page matches are filtered client-side on every keystroke and stay instant.
+export const SEARCH_DEBOUNCE_MS = 150;
 
 type Item = { key: string; label: string; sublabel?: string; to: string; icon: IconName };
 
@@ -101,9 +104,18 @@ export default function CommandPalette() {
   }, [open, here]);
 
   const search = q.trim();
+  const [repoSearch, setRepoSearch] = useState("");
+  useEffect(() => {
+    if (search === "") {
+      setRepoSearch(""); // clearing (and re-opening) needs no round-trip delay
+      return;
+    }
+    const t = setTimeout(() => setRepoSearch(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search]);
   const repoQuery = useQuery({
-    queryKey: qk.repositories({ palette: true, search: search || null }),
-    queryFn: () => api.listRepositories({ search: search || undefined, page: 0, size: REPO_PAGE_SIZE }),
+    queryKey: qk.repositories({ palette: true, search: repoSearch || null }),
+    queryFn: () => api.listRepositories({ search: repoSearch || undefined, page: 0, size: REPO_PAGE_SIZE }),
     enabled: open,
   });
 

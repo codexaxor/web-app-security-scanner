@@ -118,57 +118,14 @@
   --z-drawer: 40;
   --z-palette: 60;
   --z-toast: 80;
+
+  /* the navy top app-bar shown below the sidebar breakpoint (<= 1024px); sticky table headers sit under it */
+  --appbar-h: 56px;
 }
 
-/* Dark theme: auto (unless an explicit light override) and an explicit [data-theme="dark"]. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0b1020;
-    --surface: #121a2e;
-    --surface-2: #18223a;
-    --surface-3: #1f2b45;
-    --border: #2a3652;
-    --border-strong: #3a4968;
-    --text: #e9eef3;        /* 13.8:1 on --surface */
-    --text-2: #c2ccda;
-    --muted: #94a3bb;       /* 5.0:1 on --surface */
-    --accent: #7f9cf5;      /* 6.4:1 on --surface */
-    --accent-hover: #93abf7;
-    --accent-contrast: #0b1020;
-    --focus: #8fb0ff;
-
-    --sev-critical: #f28b82;
-    --sev-high: #f0a35e;
-    --sev-medium: #e6c84f;
-    --sev-low: #8fb3e8;
-    --sev-critical-bg: #3a1f1d;
-    --sev-high-bg: #352414;
-    --sev-medium-bg: #332d15;
-    --sev-low-bg: #1a2744;
-
-    --status-new: #7f9cf5;
-    --status-new-bg: #1e2740;
-    --status-todo: #93a0ac;
-    --status-todo-bg: #1d2740;
-    --status-ignored: #8a96a2;
-    --status-ignored-bg: #1d2740;
-    --status-solved: #86d08a;
-    --status-solved-bg: #16301a;
-
-    --danger: #f28b82;
-    --danger-hover: #f4a49d;
-    --danger-contrast: #2a0f0c;
-    --warn: #f0a35e;
-    --warn-bg: #352414;
-    --error-bg: #3a1f1d;
-    --error-border: #6e3030;
-    --error-text: #f4b5ae;
-    --ok: #86d08a;
-
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
-    --shadow-2: 0 10px 32px rgba(0, 0, 0, 0.55);
-  }
-}
+/* Dark theme (D-099): ONLY via an explicit [data-theme="dark"] set by the theme toggle. There is deliberately no
+ * @media (prefers-color-scheme) block — the UI is light by default and never follows the OS, so the first paint
+ * (before React sets data-theme) is light too and cannot flash dark (M8.11 review N-4). */
 
 :root[data-theme="dark"] {
   --bg: #0b1020;
