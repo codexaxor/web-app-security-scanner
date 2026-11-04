@@ -1,4 +1,4 @@
-import { test, expect, signIn } from "../fixtures/test-base";
+import { test, expect, signIn, openUserMenu, forceTheme } from "../fixtures/test-base";
 import { apiGet, sqlCount } from "../helpers/oracle";
 import type { Paged, IssueGroupView, DashboardSummaryView } from "../../src/api";
 
@@ -109,6 +109,7 @@ for (const width of [1280, 1440]) {
 test("S10e — the Sign out button is fully inside the viewport at 1280", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page, "/dashboard");
+  await openUserMenu(page); // Sign out lives in the user menu (M8.11)
   const btn = page.getByRole("button", { name: "Sign out" });
   const box = await btn.boundingBox();
   expect(box).not.toBeNull();
@@ -116,10 +117,14 @@ test("S10e — the Sign out button is fully inside the viewport at 1280", async 
   expect(box!.x + box!.width).toBeLessThanOrEqual(1280);
 });
 
-// ---- item 10: light theme ----
-test("S10e — theme control switches theme without reload and keeps storage empty", async ({ page }) => {
+// ---- item 10 / D-099: theme toggle (light default, dark via the user menu, no "system") ----
+test("S10e — the theme toggle switches without reload and persists only the theme key", async ({ page }) => {
   await signIn(page, "/dashboard");
   const html = page.locator("html");
+  // Light is the default.
+  await expect(html).toHaveAttribute("data-theme", "light");
+
+  await openUserMenu(page);
   await page.getByRole("button", { name: "Dark" }).click();
   await expect(html).toHaveAttribute("data-theme", "dark");
   const darkBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -130,18 +135,22 @@ test("S10e — theme control switches theme without reload and keeps storage emp
   expect(darkBg).not.toBe(lightBg);
   expect(luminance(lightBg)).toBeGreaterThan(luminance(darkBg));
 
-  await page.getByRole("button", { name: "System" }).click();
-  await expect(html).not.toHaveAttribute("data-theme");
-
-  const storage = await page.evaluate(() => ({ l: localStorage.length, s: sessionStorage.length }));
-  expect(storage.l).toBe(0);
-  expect(storage.s).toBe(0);
+  // D-099: the choice is persisted, and the ONLY web-storage key is the theme (never a credential/token).
+  const storage = await page.evaluate(() => ({
+    keys: Object.keys(localStorage),
+    theme: localStorage.getItem("secscan-theme"),
+    session: sessionStorage.length,
+  }));
+  expect(storage.keys).toEqual(["secscan-theme"]);
+  expect(storage.theme).toBe("light");
+  expect(storage.session).toBe(0);
 });
 
-test("S10e — System theme follows prefers-color-scheme; both token sets meet AA contrast", async ({ page }) => {
+test("S10e — both the light and dark token sets meet AA contrast (explicit theme)", async ({ page }) => {
   for (const scheme of ["light", "dark"] as const) {
-    await page.emulateMedia({ colorScheme: scheme });
+    await forceTheme(page, scheme); // D-099: explicit theme, not prefers-color-scheme
     await signIn(page, "/feed");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
     const bodyFg = await page.evaluate(() => getComputedStyle(document.body).color);
     const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     expect(contrast(bodyFg, bodyBg), `body contrast (${scheme})`).toBeGreaterThanOrEqual(4.5);
@@ -157,8 +166,5 @@ test("S10e — System theme follows prefers-color-scheme; both token sets meet A
       .first()
       .evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(contrast(labelFg, cardBg), `muted-on-card contrast (${scheme})`).toBeGreaterThanOrEqual(4.5);
-    await page.evaluate(() => {
-      window.localStorage?.clear?.();
-    });
   }
 });

@@ -91,6 +91,32 @@ test("polling drives the button back to idle once the scan reaches a terminal st
   await expect(row.getByRole("button", { name: "Scan", exact: true })).toBeVisible({ timeout: 10000 });
 });
 
+test("whole-row: a row button does its own action; keyboard Enter on the row link opens the repo", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Repositories", exact: true }).click();
+  const row = await repoRow(page, CORE_KEYCLOAK);
+
+  // (b) A button inside the linked row does its OWN action (opens the ⋮ menu) — NOT navigation.
+  await row.getByRole("button", { name: "Row actions" }).click();
+  await expect(page).toHaveURL(/\/repositories$/);
+  await expect(row.getByRole("button", { name: "Scan", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // (a) Keyboard: focus the row's repository link and press Enter → navigates to the repo detail.
+  await row.getByRole("link").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
+
+  // Whole-row left-click also opens it: clicking the row lands on the stretched link overlay and navigates.
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+  const row2 = await repoRow(page, CORE_KEYCLOAK);
+  await row2.click();
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
+});
+
 test("the warnings drawer lists a scan's warnings", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "Repositories", exact: true }).click();
