@@ -176,7 +176,16 @@ export default function RepositoriesPage() {
       {repos.error ? <InlineError error={repos.error} /> : null}
 
       {rows.length === 0 && !repos.isLoading ? (
-        <EmptyState title="No repositories match">
+        <EmptyState
+          title={search || hasOpenIssues || lastScanFailed ? "No repositories match" : "No repositories yet"}
+          action={
+            search || hasOpenIssues || lastScanFailed ? undefined : (
+              <Link className="btn btn-primary btn-sm" to="/connect">
+                Add a source
+              </Link>
+            )
+          }
+        >
           {search || hasOpenIssues || lastScanFailed
             ? "Clear a filter or search to see more repositories."
             : "Add a source and select repositories to start scanning."}

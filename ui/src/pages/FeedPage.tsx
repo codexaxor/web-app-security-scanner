@@ -241,7 +241,14 @@ export default function FeedPage() {
       {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
-        <EmptyState title="No issues match these filters">
+        <EmptyState
+          title="No issues match these filters"
+          action={
+            <Link className="btn btn-ghost btn-sm" to="/repositories">
+              Manage repositories
+            </Link>
+          }
+        >
           Try switching to All, clearing a filter, or including inactive repositories.
         </EmptyState>
       ) : (

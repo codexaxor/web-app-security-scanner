@@ -1418,6 +1418,73 @@ button.health-item {
   font-weight: 650;
   color: var(--text-2);
 }
+.empty-action {
+  margin-top: var(--sp-2);
+}
+
+/* ---------- first-run checklist (M8.11 item 5) ---------- */
+.checklist {
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.checklist-head {
+  margin-bottom: var(--sp-3);
+}
+.checklist-head .section-head {
+  margin: 0;
+}
+.checklist-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.checklist-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.checklist-step.done {
+  background: var(--status-solved-bg);
+  border-color: transparent;
+}
+.checklist-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+.checklist-step.done .checklist-marker {
+  background: var(--status-solved);
+  color: var(--accent-contrast);
+}
+.checklist-body {
+  flex: 1;
+  min-width: 0;
+}
+.checklist-label {
+  font-weight: 650;
+  color: var(--text);
+}
+.checklist-desc {
+  font-size: var(--fs-sm);
+}
 
 /* row title + muted subtitle */
 .stack-tight {

@@ -10,6 +10,7 @@ import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
+import FirstRunChecklist from "../components/FirstRunChecklist";
 import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
 import type { BandName } from "../lib/format";
 
@@ -47,6 +48,7 @@ export default function DashboardPage() {
     <section>
       <PageHeader title="Dashboard" subtitle="Posture across your connected repositories." />
       {dash.error ? <InlineError error={dash.error} /> : null}
+      <FirstRunChecklist />
 
       <div className="cards">
         <BandCard title="Issue groups" total={d?.totalGroups} bands={d?.groupBands} prefix="group" link={bandLink} />
@@ -135,7 +137,16 @@ export default function DashboardPage() {
 
       <h2 className="section-head">Recent scans</h2>
       {scans.data && scans.data.content.length === 0 ? (
-        <EmptyState title="No scans yet">Connect a repository and start a scan.</EmptyState>
+        <EmptyState
+          title="No scans yet"
+          action={
+            <Link className="btn btn-primary btn-sm" to="/repositories">
+              Go to Repositories
+            </Link>
+          }
+        >
+          Connect a repository and start a scan.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">
