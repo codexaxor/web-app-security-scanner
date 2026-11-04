@@ -267,6 +267,11 @@
   text-transform: uppercase;
   color: var(--muted);
 }
+.content:focus {
+  /* main is a programmatic focus target (skip link, palette close after navigation) — not an interactive
+     control, so no ring around the whole page (M8.11 review SF-4). */
+  outline: none;
+}
 .content {
   max-width: var(--content-max);
   width: 100%;

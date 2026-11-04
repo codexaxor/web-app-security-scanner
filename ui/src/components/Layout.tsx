@@ -238,7 +238,7 @@ export default function Layout() {
           </div>
         </div>
       </aside>
-      <main className="content" id="main">
+      <main className="content" id="main" tabIndex={-1}>
         <Outlet />
       </main>
     </div>

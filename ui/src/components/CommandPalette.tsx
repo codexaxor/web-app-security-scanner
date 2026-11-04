@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "../queryClient";
@@ -25,6 +25,12 @@ type Item = { key: string; label: string; sublabel?: string; to: string; icon: I
  * ⌘K / Ctrl+K quick-jump palette (M8.11 item 3). A modal dialog (role="dialog", aria-modal) with a focus trap:
  * focus opens on the input and Tab is kept inside; Esc closes; Up/Down move the selection; Enter navigates.
  * Results are pages (filtered client-side over the fixed list) + repositories (server-side search, first page).
+ *
+ * Accessibility (M8.11 review SF-4/SF-5): the input is an ARIA combobox that owns the listbox
+ * (aria-controls) and points at the highlighted option (aria-activedescendant), so screen readers announce the
+ * arrow-key selection while DOM focus stays in the input. Options are the listbox's direct children. On every
+ * close (Esc, Enter, backdrop, Ctrl+K) focus returns to the element that opened the palette; if a navigation
+ * removed that element, it goes to the main landmark instead of being lost on <body>.
  */
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -32,16 +38,33 @@ export default function CommandPalette() {
   const [active, setActive] = useState(0);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const location = useLocation();
+  const openerRef = useRef<HTMLElement | null>(null);
+  const restorePending = useRef(false); // a close happened and focus has not been restored yet
+  const navTarget = useRef<string | null>(null); // the path an Enter/click close is navigating to
+  const uid = useId();
+  const listId = `${uid}-list`;
+  const optionId = (i: number) => `${uid}-opt-${i}`;
 
   // Global shortcut toggles the palette; the top-bar search field opens it via a custom event.
   useEffect(() => {
+    const remember = () => {
+      const el = document.activeElement;
+      openerRef.current = el instanceof HTMLElement && el !== document.body ? el : null;
+    };
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
-        setOpen((v) => !v);
+        setOpen((v) => {
+          if (!v) remember();
+          return !v;
+        });
       }
     };
-    const onOpen = () => setOpen(true);
+    const onOpen = () => {
+      remember();
+      setOpen(true);
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener(OPEN_PALETTE_EVENT, onOpen);
     return () => {
@@ -52,11 +75,30 @@ export default function CommandPalette() {
 
   useEffect(() => {
     if (open) {
+      restorePending.current = true;
+      navTarget.current = null;
       setQ("");
       setActive(0);
       inputRef.current?.focus();
     }
   }, [open]);
+
+  // Restore focus after a close. When the close navigated, wait until the router has committed the new
+  // location (navigation renders after this component's own close), so we can tell whether the opener survived.
+  const here = location.pathname + location.search;
+  useEffect(() => {
+    if (open || !restorePending.current) return;
+    if (navTarget.current !== null && navTarget.current !== here) return;
+    restorePending.current = false;
+    navTarget.current = null;
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener && opener.isConnected) {
+      opener.focus();
+    } else {
+      document.getElementById("main")?.focus();
+    }
+  }, [open, here]);
 
   const search = q.trim();
   const repoQuery = useQuery({
@@ -101,6 +143,7 @@ export default function CommandPalette() {
   function go(item?: Item) {
     const target = item ?? items[activeIndex];
     if (!target) return;
+    navTarget.current = target.to;
     setOpen(false);
     navigate(target.to);
   }
@@ -143,8 +186,13 @@ export default function CommandPalette() {
             ref={inputRef}
             className="palette-input"
             type="text"
-            placeholder="Jump to a page or repository…"
+            role="combobox"
             aria-label="Quick jump search"
+            aria-autocomplete="list"
+            aria-expanded={items.length > 0}
+            aria-controls={listId}
+            aria-activedescendant={items.length > 0 ? optionId(activeIndex) : undefined}
+            placeholder="Jump to a page or repository…"
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -153,29 +201,28 @@ export default function CommandPalette() {
           />
           <kbd className="palette-kbd">Esc</kbd>
         </div>
-        <ul className="palette-list" role="listbox" aria-label="Results">
-          {items.length === 0 ? (
-            <li className="palette-empty">No matches</li>
-          ) : (
-            items.map((it, i) => (
-              <li key={it.key}>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  className={i === activeIndex ? "palette-item active" : "palette-item"}
-                  aria-selected={i === activeIndex}
-                  role="option"
-                  onMouseMove={() => setActive(i)}
-                  onClick={() => go(it)}
-                >
-                  <Icon name={it.icon} className="palette-item-icon" />
-                  <span className="palette-item-label truncate">{it.label}</span>
-                  {it.sublabel ? <span className="palette-item-sub truncate">{it.sublabel}</span> : null}
-                </button>
-              </li>
-            ))
-          )}
+        <ul className="palette-list" role="listbox" id={listId} aria-label="Results">
+          {items.map((it, i) => (
+            <li
+              key={it.key}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === activeIndex}
+              className={i === activeIndex ? "palette-item active" : "palette-item"}
+              onMouseMove={() => setActive(i)}
+              onClick={() => go(it)}
+            >
+              <Icon name={it.icon} className="palette-item-icon" />
+              <span className="palette-item-label truncate">{it.label}</span>
+              {it.sublabel ? <span className="palette-item-sub truncate">{it.sublabel}</span> : null}
+            </li>
+          ))}
         </ul>
+        {items.length === 0 ? (
+          <p className="palette-empty" role="status">
+            No matches
+          </p>
+        ) : null}
       </div>
     </div>
   );

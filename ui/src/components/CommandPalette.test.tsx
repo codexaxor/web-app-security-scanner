@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CommandPalette from "./CommandPalette";
@@ -39,10 +39,24 @@ function setup(repos: RepositoryView[], total: number) {
       <MemoryRouter initialEntries={["/"]}>
         <CommandPalette />
         <LocationProbe />
+        <Routes>
+          {/* The opener lives on "/" only, so navigating away unmounts it (like a page's top-bar button). */}
+          <Route path="/" element={<button type="button">Opener</button>} />
+          <Route path="*" element={null} />
+        </Routes>
+        <main id="main" tabIndex={-1} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
   return spy;
+}
+
+/** Focus the page's opener button, then open the palette from it with Ctrl+K. */
+function openFromOpener() {
+  const opener = screen.getByRole("button", { name: "Opener" });
+  opener.focus();
+  openPalette();
+  return opener;
 }
 
 function openPalette() {
@@ -94,5 +108,95 @@ describe("CommandPalette (⌘K)", () => {
     setup([repo("r1", "org/one"), repo("r2", "org/two")], 42);
     openPalette();
     await waitFor(() => expect(screen.getByText("View all repositories")).not.toBeNull());
+  });
+
+  it("Esc returns focus to the element that opened the palette", () => {
+    setup([], 0);
+    const opener = openFromOpener();
+    expect(document.activeElement).toBe(screen.getByLabelText("Quick jump search"));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("a backdrop click returns focus to the opener", () => {
+    setup([], 0);
+    const opener = openFromOpener();
+    const backdrop = screen.getByRole("dialog").parentElement!;
+    fireEvent.mouseDown(backdrop);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("Ctrl+K again (toggle close) returns focus to the opener", () => {
+    setup([], 0);
+    const opener = openFromOpener();
+    openPalette();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("after an Enter navigation that unmounts the opener, focus goes to the main landmark (not body)", () => {
+    setup([], 0);
+    openFromOpener();
+    // Enter on Dashboard navigates away from "/", which unmounts the opener → fall back to the main landmark.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+    expect(screen.getByTestId("loc").textContent).toBe("/dashboard");
+    expect(screen.queryByRole("button", { name: "Opener" })).toBeNull();
+    expect(document.activeElement).toBe(document.getElementById("main"));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("Enter with the opener still mounted returns focus to it", () => {
+    setup([], 0);
+    // An opener outside the routed area survives navigation.
+    const outside = document.createElement("button");
+    outside.textContent = "Persistent opener";
+    document.body.appendChild(outside);
+    try {
+      outside.focus();
+      openPalette();
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it("the input is a combobox that owns the listbox and points at the active option", () => {
+    setup([], 0);
+    openPalette();
+    const input = screen.getByRole("combobox", { name: "Quick jump search" });
+    const listbox = screen.getByRole("listbox", { name: "Results" });
+    expect(input.getAttribute("aria-controls")).toBe(listbox.id);
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    expect(input.getAttribute("aria-autocomplete")).toBe("list");
+
+    // Options are the listbox's DIRECT children, each with a unique id.
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const o of options) expect(o.parentElement).toBe(listbox);
+    expect(new Set(options.map((o) => o.id)).size).toBe(options.length);
+    expect(Array.from(listbox.children).every((c) => c.getAttribute("role") === "option")).toBe(true);
+
+    // aria-activedescendant follows the arrow keys; exactly one option is aria-selected.
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowDown" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(options.filter((o) => o.getAttribute("aria-selected") === "true")).toHaveLength(1);
+    // DOM focus never leaves the input.
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("with no matches the combobox is collapsed and has no active descendant", async () => {
+    setup([], 0);
+    openPalette();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "zzz-no-such-page" } });
+    await waitFor(() => expect(screen.getByText("No matches")).not.toBeNull());
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   });
 });
