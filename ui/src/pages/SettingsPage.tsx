@@ -5,7 +5,8 @@ import { invalidateFor, qk } from "../queryClient";
 import InlineError from "../components/InlineError";
 import { useToast, errorMessage } from "../toast";
 import Toggle from "../components/Toggle";
-import { Card, PageHeader } from "../components/ui";
+import { Card } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 /**
  * Workspace settings (S7 / R5): the EPSS auto-ignore toggle (D-060). Turning it on auto-ignores low-EPSS
@@ -31,8 +32,10 @@ export default function SettingsPage() {
       : (save.data?.epssAutoIgnoreEnabled ?? settings.data?.epssAutoIgnoreEnabled)) ?? false;
 
   return (
-    <section>
-      <PageHeader title="Workspace settings" subtitle="Settings that apply to every repository in this workspace." />
+    <PageLayout
+      title="Workspace settings"
+      subtitle="Settings that apply to every repository in this workspace."
+    >
       {settings.error ? <InlineError error={settings.error} /> : null}
 
       <Card className="settings-card">
@@ -69,6 +72,6 @@ export default function SettingsPage() {
           </p>
         ) : null}
       </Card>
-    </section>
+    </PageLayout>
   );
 }

@@ -68,6 +68,33 @@ const STRONG_PAIRS: [string, string][] = [
   ["--sev-medium", "--surface"],
 ];
 
+// Shell/brand chrome (M8.11): the navy sidebar + top bar are CONSTANT across light/dark (defined once in
+// :root, never overridden by the dark blocks), so their contrast is checked once against :root. shell-text /
+// shell-muted are normal text on navy (>= 4.5:1); the active-item text and the accent indicator are strong
+// (>= 3:1).
+const SHELL_TEXT_PAIRS: [string, string][] = [
+  ["--shell-text", "--shell-bg"],
+  ["--shell-muted", "--shell-bg"],
+];
+const SHELL_STRONG_PAIRS: [string, string][] = [
+  ["--shell-active-text", "--shell-active-bg"],
+  ["--shell-accent", "--shell-bg"],
+];
+
+describe("WCAG AA contrast — shell (navy, constant across themes)", () => {
+  const t = tokenBlock(":root {");
+  it.each(SHELL_TEXT_PAIRS)("normal text %s on %s is >= 4.5:1", (fg, bg) => {
+    expect(t[fg], fg).toBeTruthy();
+    expect(t[bg], bg).toBeTruthy();
+    expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(4.5);
+  });
+  it.each(SHELL_STRONG_PAIRS)("strong text %s on %s is >= 3:1", (fg, bg) => {
+    expect(t[fg], fg).toBeTruthy();
+    expect(t[bg], bg).toBeTruthy();
+    expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(3);
+  });
+});
+
 for (const [theme, selector] of [
   ["light", ":root {"],
   ["dark", ':root[data-theme="dark"] {'],
@@ -88,3 +115,35 @@ for (const [theme, selector] of [
     });
   });
 }
+
+// M8.11 review N-5: the issue-type colours are GRAPHICS (Dashboard type-bar icons + fills, the repository Issues
+// type icon), so WCAG 1.4.11 non-text contrast applies: >= 3:1 against what they sit on — the card/row surface,
+// and the bar track / hovered row (--surface-2) — in both themes.
+const TYPES = ["sca", "sast", "secret", "iac", "eol"] as const;
+const GRAPHIC_PAIRS: [string, string][] = TYPES.flatMap((ty) => [
+  [`--type-${ty}`, "--surface"],
+  [`--type-${ty}`, "--surface-2"],
+] as [string, string][]);
+
+for (const [theme, selector] of [
+  ["light", ":root {"],
+  ["dark", ':root[data-theme="dark"] {'],
+] as const) {
+  describe(`WCAG non-text contrast — ${theme} issue-type colours`, () => {
+    const t = tokenBlock(selector);
+    it.each(GRAPHIC_PAIRS)("graphic %s on %s is >= 3:1", (fg, bg) => {
+      expect(t[fg], fg).toBeTruthy();
+      expect(t[bg], bg).toBeTruthy();
+      expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(3);
+    });
+  });
+}
+
+// M8.11 review N-4 (D-099): dark is ONLY an explicit [data-theme="dark"]; the OS preference is never followed,
+// so there must be no prefers-color-scheme block that could paint dark before the app sets data-theme.
+describe("theme selection is explicit only (N-4)", () => {
+  it("tokens.css has no @media (prefers-color-scheme) rule", () => {
+    const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/@media\s*\([^)]*prefers-color-scheme/);
+  });
+});

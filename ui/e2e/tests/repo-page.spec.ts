@@ -1,4 +1,4 @@
-import { test, expect, signIn } from "../fixtures/test-base";
+import { test, expect, signIn, forceTheme } from "../fixtures/test-base";
 
 // M8.6 item 9: the list → repo page → panel flow. Uses the seeded core-keycloak repo and the linkable secret
 // finding (40-hex commit + file path + line) added to the fixture for the source-link assertions.
@@ -80,12 +80,33 @@ test("the secret panel renders source links with the exact expected hrefs", asyn
   );
 });
 
+test("S11.9 — a repo Issues row opens the panel via the keyboard (Enter and Space)", async ({ page }) => {
+  await signIn(page, `/repositories/${CORE_ID}?tab=issues`);
+  const openBtn = page.getByTestId("repo-issue-row").first().getByRole("button", { name: /^Open / });
+  const dialog = page.getByRole("dialog", { name: "Issue details" });
+
+  await openBtn.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  await openBtn.focus();
+  await page.keyboard.press(" ");
+  await expect(dialog).toBeVisible();
+});
+
 test.describe("dark mode", () => {
-  test.use({ colorScheme: "dark" });
   test("the repository page renders in dark mode", async ({ page }) => {
+    // D-099: the UI no longer follows prefers-color-scheme; set the theme explicitly.
+    await forceTheme(page, "dark");
     await signIn(page, `/repositories/${CORE_ID}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.getByRole("heading", { name: "core-keycloak" })).toBeVisible();
-    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-    expect(bg).not.toBe("rgb(255, 255, 255)"); // not the light background
+    const bg = await page.evaluate(() => {
+      const m = getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g)!.map(Number);
+      return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+    });
+    expect(bg, "dark background is actually dark").toBeLessThan(0.2);
   });
 });

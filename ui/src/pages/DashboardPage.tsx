@@ -10,7 +10,10 @@ import RelativeTime from "../components/RelativeTime";
 import RepoName from "../components/RepoName";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
-import { Card, PageHeader, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
+import FirstRunChecklist from "../components/FirstRunChecklist";
+import { Card, EmptyState, SeverityBar, Legend, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
+import Icon, { type IconName } from "../components/icons";
 import type { BandName } from "../lib/format";
 
 type Bands = { critical: number; high: number; medium: number; low: number };
@@ -44,14 +47,26 @@ export default function DashboardPage() {
   const bandLink = (b: BandName) => `/feed?band=${b}`;
 
   return (
-    <section>
-      <PageHeader title="Dashboard" subtitle="Posture across your connected repositories." />
+    <PageLayout
+      title="Dashboard"
+      subtitle="Posture across your connected repositories."
+      kpi={
+        <>
+          <BandCard icon="feed" title="Issue groups" total={d?.totalGroups} bands={d?.groupBands} prefix="group" link={bandLink} />
+          <BandCard icon="scan" title="Findings" total={d?.totalFindings} bands={d?.findingBands} prefix="finding" link={bandLink} />
+          <StatCard icon="repositories" label="Repositories" value={repos.data?.totalElements} to="/repositories" />
+          <StatCard
+            icon="alert"
+            label="Need attention"
+            value={d?.scanHealth.unhealthyRepoCount}
+            to="/repositories?lastScanFailed=true"
+            tone={(d?.scanHealth.unhealthyRepoCount ?? 0) > 0 ? "warn" : undefined}
+          />
+        </>
+      }
+    >
       {dash.error ? <InlineError error={dash.error} /> : null}
-
-      <div className="cards">
-        <BandCard title="Issue groups" total={d?.totalGroups} bands={d?.groupBands} prefix="group" link={bandLink} />
-        <BandCard title="Findings" total={d?.totalFindings} bands={d?.findingBands} prefix="finding" link={bandLink} />
-      </div>
+      <FirstRunChecklist />
 
       <h2 className="section-head">Issue types</h2>
       <div className="hbars" data-testid="type-breakdown">
@@ -59,10 +74,16 @@ export default function DashboardPage() {
         {(d?.byType ?? []).map((t) => (
           <Link key={t.type} className="hbar" to={`/feed?type=${t.type}`} data-testid={`type-${t.type}`}>
             <span className="hbar-label" title={typeAcronym(t.type)}>
+              <span className="hbar-icon" style={{ color: `var(--type-${t.type})` }}>
+                <Icon name={t.type as IconName} />
+              </span>
               {typeLabel(t.type)}
             </span>
             <span className="hbar-track">
-              <span className="hbar-fill" style={{ width: `${(t.count / maxType) * 100}%` }} />
+              <span
+                className="hbar-fill"
+                style={{ width: `${(t.count / maxType) * 100}%`, backgroundColor: `var(--type-${t.type})` }}
+              />
             </span>
             <span className="hbar-val">{t.count}</span>
           </Link>
@@ -135,7 +156,16 @@ export default function DashboardPage() {
 
       <h2 className="section-head">Recent scans</h2>
       {scans.data && scans.data.content.length === 0 ? (
-        <EmptyState title="No scans yet">Connect a repository and start a scan.</EmptyState>
+        <EmptyState
+          title="No scans yet"
+          action={
+            <Link className="btn btn-primary btn-sm" to="/repositories">
+              Go to Repositories
+            </Link>
+          }
+        >
+          Connect a repository and start a scan.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">
@@ -153,7 +183,9 @@ export default function DashboardPage() {
               {scans.data?.content.map((s) => (
                 <tr key={s.id} data-testid="scan-row">
                   <td>
-                    <RepoName path={repoById.get(s.repositoryId) ?? s.repositoryId} />
+                    <Link className="repo-name-link" to={`/repositories/${s.repositoryId}`}>
+                      <RepoName path={repoById.get(s.repositoryId) ?? s.repositoryId} />
+                    </Link>
                   </td>
                   <td>{s.branch ?? <span className="muted">—</span>}</td>
                   <td>{s.trigger}</td>
@@ -162,7 +194,9 @@ export default function DashboardPage() {
                   </td>
                   <td>{duration(s.startedAt, s.finishedAt)}</td>
                   <td>
-                    <RelativeTime iso={s.finishedAt ?? s.createdAt} />
+                    {/* S11.8: a queued/running scan has no finish time — show "—", not the just-created time
+                        (the old `finishedAt ?? createdAt` fallback rendered "just now" for unfinished scans). */}
+                    {s.finishedAt ? <RelativeTime iso={s.finishedAt} /> : <span className="muted">—</span>}
                   </td>
                 </tr>
               ))}
@@ -174,17 +208,19 @@ export default function DashboardPage() {
       {warnings ? (
         <WarningsDrawer scanId={warnings.scanId} repositoryPath={warnings.path} onClose={() => setWarnings(null)} />
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
 
 function BandCard({
+  icon,
   title,
   total,
   bands,
   prefix,
   link,
 }: {
+  icon: IconName;
   title: string;
   total: number | undefined;
   bands: Bands | undefined;
@@ -195,7 +231,12 @@ function BandCard({
   return (
     <Card>
       <div className="card-head">
-        <span className="stat-label">{title}</span>
+        <span className="stat-label">
+          <span className="kpi-icon" aria-hidden="true">
+            <Icon name={icon} />
+          </span>
+          {title}
+        </span>
       </div>
       <div className="stat-num" data-testid={`${prefix}-total`}>
         {total ?? "—"}
@@ -203,5 +244,33 @@ function BandCard({
       <SeverityBar bands={b} />
       <Legend bands={b} prefix={prefix} linkTo={link} />
     </Card>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  to,
+  tone,
+}: {
+  icon: IconName;
+  label: string;
+  value: number | undefined;
+  to: string;
+  tone?: "warn";
+}) {
+  return (
+    <Link className={tone === "warn" ? "card card-link stat-card stat-card-warn" : "card card-link stat-card"} to={to}>
+      <div className="card-head">
+        <span className="stat-label">
+          <span className="kpi-icon" aria-hidden="true">
+            <Icon name={icon} />
+          </span>
+          {label}
+        </span>
+      </div>
+      <div className="stat-num">{value ?? "—"}</div>
+    </Link>
   );
 }

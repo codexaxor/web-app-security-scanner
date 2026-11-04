@@ -14,6 +14,8 @@ const EXPECTED: Record<MutationKind, readonly (readonly unknown[])[]> = {
     qk.dashboardAll, qk.ignoredAll, qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.scansRecent],
   workspaceSettings: [qk.workspaceSettings, qk.feedAll, qk.feedSummaryAll, qk.ignoredAll, qk.dashboardAll,
     qk.subIssuesAll, qk.subIssueEventsAll, qk.groupAll, qk.repositoriesAll, qk.repositoryAll],
+  sources: [qk.connectionsAll, qk.repositoriesAll, qk.repositoryAll, qk.dashboardAll, qk.feedAll,
+    qk.feedSummaryAll, qk.groupAll, qk.subIssueEventsAll, qk.scansRecent],
 };
 
 const asSet = (keys: readonly (readonly unknown[])[]) => new Set(keys.map((k) => JSON.stringify(k)));

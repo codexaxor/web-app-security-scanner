@@ -22,6 +22,23 @@ test("L1 — the Repositories name row is one line and the page does not overflo
   expect(await noHorizontalPageOverflow(page), "no horizontal page overflow").toBe(true);
 });
 
+test("S11.1 — the navy sidebar fills the full page height on a long page", async ({ page }) => {
+  await signIn(page, "/feed"); // a long, scrolling page
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar).toBeVisible();
+  const viewportH = page.viewportSize()!.height;
+  // At the top: the sidebar covers the whole viewport height.
+  const top = await sidebar.boundingBox();
+  expect(top!.height, "sidebar covers viewport at top").toBeGreaterThanOrEqual(viewportH - 1);
+  // Scroll to the bottom of a long page: the sidebar's navy box still reaches the viewport bottom.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(100);
+  const box = await sidebar.boundingBox();
+  expect(box, "sidebar has a box after scroll").not.toBeNull();
+  expect(box!.y, "sidebar top is at/above the viewport top").toBeLessThanOrEqual(1);
+  expect(box!.y + box!.height, "sidebar reaches the viewport bottom").toBeGreaterThanOrEqual(viewportH - 1);
+});
+
 test("L2 — the Issues-tab location cell is one line and the page does not overflow at 1280", async ({ page }) => {
   await signIn(page, `/repositories/${CORE}?tab=issues`);
   const loc = page.locator(".location-path").first();

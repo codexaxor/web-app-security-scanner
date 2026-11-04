@@ -14,6 +14,33 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-099 Theme persistence: narrow localStorage allowlist (amends D-067(e)) (2026-11-05, accepted)
+Context: M8.11 makes the light/dark theme a user choice (light default, dark via a toggle) that must be
+remembered across reloads. D-067(e)'s security guard FAILS on `localStorage` anywhere in `ui/src` (no
+client-side persistence), so persisting the theme needs an explicit, audited carve-out rather than a silent
+lint exception. (Numbering: M8.10 owns D-093…D-098 in the parallel tenancy worktree; M8.11 merges first and
+takes D-099.)
+Decision: a single file — **`ui/src/lib/themeStore.ts`** — is the ONLY place `localStorage` is permitted. It
+reads/writes exactly one key, **`secscan-theme`**, whose value is **`light`** or **`dark`** and nothing else;
+every access is wrapped in `try/catch` and falls back to **light** (private-mode / blocked / cleared storage
+never throws to the UI). No credential, CSRF token, password or any other value is ever stored — those stay
+in memory per D-067(a)/D-092. The guard (`ui/scripts/guard-forbidden.mjs`) is amended to:
+ - keep `localStorage` FORBIDDEN in every file except `src/lib/themeStore.ts` (and `sessionStorage`,
+   `indexedDB`, `document.cookie`, `btoa`, the `Basic ` header literal etc. stay forbidden EVERYWHERE,
+   `themeStore.ts` included);
+ - additionally assert that `themeStore.ts` only ever references the literal key `"secscan-theme"` and only the
+   values `"light"`/`"dark"` — so the exemption cannot quietly widen to another key, value or secret.
+A guard self-test proves the guard exits non-zero if `localStorage` appears in another file, or if a different
+key or value appears in `themeStore.ts`.
+Consequences: the theme is remembered across reloads with a one-file, one-key, one-value exemption that stays
+auditable; D-067(a–d) and D-092 are unchanged; the CSP is unchanged (no storage touches it). This **closes the
+M10 deferred-register item "Theme (light/dark) preference persistence → M10 (user settings)"** — theme
+persistence ships now, scoped to this carve-out, and does not wait for M10 user settings. Proven by
+`themeStore.test.ts` and the guard self-test.
+Addendum (M8.11 review N-4): dark exists ONLY as the explicit `[data-theme="dark"]` token set — `tokens.css`
+has no `@media (prefers-color-scheme)` block, so the OS setting is never followed and first paint is light
+(asserted in `contrast.test.ts`).
+
 ## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
 Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
 poor UX, and an avoidable secret-at-rest-in-memory. M8.8 adds a real browser session without weakening the

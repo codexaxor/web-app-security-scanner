@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
@@ -16,7 +16,8 @@ import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import Icon from "../components/icons";
 import { TableSkeleton } from "../components/Skeleton";
-import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
+import { EmptyState, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 const COLUMNS = 6;
 
@@ -37,15 +38,16 @@ function providerFromParam(v: string | null): Provider | "" {
 }
 
 export default function RepositoriesPage() {
-  const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const provider = providerFromParam(sp.get("provider"));
   const { page, size, setPage, setSize } = useUrlPaging("page", "size");
-  const [search, setSearch] = useState("");
+  // M8.11 review SF-2/SF-3: search and "Last scan failed" are URL-addressable (?search=…, ?lastScanFailed=true)
+  // like ?provider, so the Dashboard "Need attention" card and the ⌘K palette "View all" link land filtered.
+  const search = sp.get("search") ?? "";
+  const lastScanFailed = sp.get("lastScanFailed") === "true";
   const [sort, setSort] = useState<RepoSort>("severity");
   const [showInactive, setShowInactive] = useState(false);
   const [hasOpenIssues, setHasOpenIssues] = useState(false);
-  const [lastScanFailed, setLastScanFailed] = useState(false);
   const [editing, setEditing] = useState<RepositoryView | null>(null);
   const [warnings, setWarnings] = useState<{ scanId: string; path: string } | null>(null);
 
@@ -63,6 +65,21 @@ export default function RepositoriesPage() {
   function resetAnd(fn: () => void) {
     setPage(0);
     fn();
+  }
+
+  // Set/clear one URL filter and reset the page in the SAME search-params update (see setProvider below).
+  // Search edits replace the history entry (no entry per keystroke); checkbox filters push one.
+  function setUrlFilter(key: string, value: string | null, replace: boolean) {
+    setSp(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        next.delete("page");
+        return next;
+      },
+      { replace },
+    );
   }
 
   // SF-1: the provider filter is URL-addressable (?provider=gitlab|github) so a filtered list is shareable.
@@ -94,26 +111,91 @@ export default function RepositoriesPage() {
   const activeCount = active.data?.totalElements;
 
   return (
-    <section>
-      <PageHeader
-        title="Repositories"
-        subtitle={
-          activeCount != null
-            ? `${activeCount} active ${activeCount === 1 ? "repository" : "repositories"}`
-            : "Repositories selected for scanning."
-        }
-        actions={
-          <>
-            <Link className="btn btn-secondary" to="/connect">
-              Add source
-            </Link>
-            <Link className="btn btn-primary" to="/select">
-              Select repositories
-            </Link>
-          </>
-        }
-      />
-
+    <PageLayout
+      title="Repositories"
+      subtitle={
+        activeCount != null
+          ? `${activeCount} active ${activeCount === 1 ? "repository" : "repositories"}`
+          : "Repositories selected for scanning."
+      }
+      actions={
+        <>
+          <Link className="btn btn-secondary" to="/connect">
+            Add source
+          </Link>
+          <Link className="btn btn-primary" to="/select">
+            Select repositories
+          </Link>
+        </>
+      }
+      toolbar={
+        <>
+          <div className="search-field">
+            <Icon name="search" className="search-icon" />
+            <input
+              type="search"
+              aria-label="Search repositories"
+              placeholder="Search name or path"
+              value={search}
+              onChange={(e) => setUrlFilter("search", e.target.value || null, true)}
+            />
+          </div>
+          <select
+            aria-label="Sort"
+            value={sort}
+            onChange={(e) => resetAnd(() => setSort(e.target.value as RepoSort))}
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                Sort: {s.label}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <option value="">All sources</option>
+            {PROVIDERS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => resetAnd(() => setShowInactive(e.target.checked))}
+            />
+            Show inactive
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={hasOpenIssues}
+              onChange={(e) => resetAnd(() => setHasOpenIssues(e.target.checked))}
+            />
+            Has open issues
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={lastScanFailed}
+              onChange={(e) => setUrlFilter("lastScanFailed", e.target.checked ? "true" : null, false)}
+            />
+            Last scan failed
+          </label>
+        </>
+      }
+      toolbarRight={
+        <Pager
+          variant="compact"
+          page={page}
+          size={size}
+          totalElements={repos.data?.totalElements ?? 0}
+          totalPages={repos.data?.totalPages ?? 1}
+          onPage={setPage}
+        />
+      }
+    >
       {inactive && inactive.inactiveRepoCount > 0 ? (
         <p className="muted inactive-note" data-testid="inactive-line">
           {inactive.inactiveRepoCount} inactive repo{inactive.inactiveRepoCount === 1 ? "" : "s"},{" "}
@@ -122,62 +204,19 @@ export default function RepositoriesPage() {
         </p>
       ) : null}
 
-      <div className="toolbar">
-        <div className="search-field">
-          <Icon name="search" className="search-icon" />
-          <input
-            type="search"
-            aria-label="Search repositories"
-            placeholder="Search name or path"
-            value={search}
-            onChange={(e) => resetAnd(() => setSearch(e.target.value))}
-          />
-        </div>
-        <select aria-label="Sort" value={sort} onChange={(e) => resetAnd(() => setSort(e.target.value as RepoSort))}>
-          {SORTS.map((s) => (
-            <option key={s.value} value={s.value}>
-              Sort: {s.label}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="">All sources</option>
-          {PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => resetAnd(() => setShowInactive(e.target.checked))}
-          />
-          Show inactive
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={hasOpenIssues}
-            onChange={(e) => resetAnd(() => setHasOpenIssues(e.target.checked))}
-          />
-          Has open issues
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={lastScanFailed}
-            onChange={(e) => resetAnd(() => setLastScanFailed(e.target.checked))}
-          />
-          Last scan failed
-        </label>
-      </div>
-
       {repos.error ? <InlineError error={repos.error} /> : null}
 
       {rows.length === 0 && !repos.isLoading ? (
-        <EmptyState title="No repositories match">
+        <EmptyState
+          title={search || hasOpenIssues || lastScanFailed ? "No repositories match" : "No repositories yet"}
+          action={
+            search || hasOpenIssues || lastScanFailed ? undefined : (
+              <Link className="btn btn-primary btn-sm" to="/connect">
+                Add a source
+              </Link>
+            )
+          }
+        >
           {search || hasOpenIssues || lastScanFailed
             ? "Clear a filter or search to see more repositories."
             : "Add a source and select repositories to start scanning."}
@@ -202,28 +241,22 @@ export default function RepositoriesPage() {
             ) : (
               <tbody>
                 {rows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="row-click"
-                    tabIndex={0}
-                    data-testid="repo-row"
-                    onClick={() => navigate(`/repositories/${r.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        navigate(`/repositories/${r.id}`);
-                      }
-                    }}
-                  >
+                  <tr key={r.id} className="row-click" data-testid="repo-row">
                     <td>
                       {/* L1: line 1 = badge + name + "· branch" on ONE non-wrapping line (name truncates); the
-                          full group/project path is line 2, truncated, with the full path in a title tooltip. */}
+                          full group/project path is line 2, truncated, with the full path in a title tooltip.
+                          The name is the real row link (approved change #4): Enter/middle/Ctrl-click work and a
+                          stretched ::after makes the whole row clickable. */}
                       <div className="repo-cell">
                         <div className="repo-line">
                           <ProviderBadge provider={r.provider} />
-                          <span className="repo-name" title={r.pathWithNamespace}>
+                          <Link
+                            className="repo-name row-link"
+                            to={`/repositories/${r.id}`}
+                            title={r.pathWithNamespace}
+                          >
                             {r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
-                          </span>
+                          </Link>
                           {r.effectiveBranch ? (
                             <span className="muted branch-label">· {r.effectiveBranch}</span>
                           ) : null}
@@ -297,22 +330,21 @@ export default function RepositoriesPage() {
               </tbody>
             )}
           </table>
+          <Pager
+            page={page}
+            size={size}
+            totalElements={repos.data?.totalElements ?? 0}
+            totalPages={repos.data?.totalPages ?? 1}
+            onPage={setPage}
+            onSize={setSize}
+          />
         </div>
       )}
-
-      <Pager
-        page={page}
-        size={size}
-        totalElements={repos.data?.totalElements ?? 0}
-        totalPages={repos.data?.totalPages ?? 1}
-        onPage={setPage}
-        onSize={setSize}
-      />
 
       {editing ? <RepoSettingsDialog repo={editing} onClose={() => setEditing(null)} /> : null}
       {warnings ? (
         <WarningsDrawer scanId={warnings.scanId} repositoryPath={warnings.path} onClose={() => setWarnings(null)} />
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
