@@ -38,7 +38,8 @@ class SourceGuardsIT extends AbstractGitLabIT {
                 WS, "https://github.com", GitlabConnection.PROVIDER_GITHUB, GitlabConnection.CREDENTIAL_NONE,
                 "123", "octo/pub", null, null, null));
 
-        assertThatThrownBy(() -> gitlabConnections.update(pub.getId(), "https://github.com", "tok", "octo/pub"))
+        assertThatThrownBy(() -> gitlabConnections.update(Workspace.DEFAULT_ID, pub.getId(), "https://github.com",
+                "tok", "octo/pub"))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     ResponseStatusException rse = (ResponseStatusException) e;
@@ -50,7 +51,8 @@ class SourceGuardsIT extends AbstractGitLabIT {
     @Test
     void addingAPublicRepoOnADeniedHostIsRejectedEvenIfTheUrlParses() {
         // The allowlist is "localhost" (AbstractGitLabIT); a well-formed https URL on another host is still denied.
-        assertThatThrownBy(() -> sourceConnections.createPublicRepo("https://evil.example.com/owner/repo"))
+        assertThatThrownBy(() -> sourceConnections.createPublicRepo(Workspace.DEFAULT_ID,
+                "https://evil.example.com/owner/repo"))
                 .isInstanceOf(GitLabException.class)
                 .satisfies(e -> assertThat(((GitLabException) e).getError()).isEqualTo(GitLabError.HOST_NOT_ALLOWED));
     }

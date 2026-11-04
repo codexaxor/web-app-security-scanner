@@ -1,5 +1,6 @@
 package com.company.secscan.gitlab;
 
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.gitlab.api.ConnectionRemovalResult;
 import com.company.secscan.gitlab.api.ConnectionRequest;
@@ -41,35 +42,36 @@ public class GitLabController {
 
     /** Tests and, on success, creates a new connection (token encrypted). */
     @PostMapping
-    public ConnectionTestResult create(@Valid @RequestBody ConnectionRequest req) {
-        return connectionService.create(req.baseUrl(), req.token(), req.targetType(), req.path());
+    public ConnectionTestResult create(@CurrentWorkspace UUID workspaceId, @Valid @RequestBody ConnectionRequest req) {
+        return connectionService.create(workspaceId, req.baseUrl(), req.token(), req.targetType(), req.path());
     }
 
     /** Rotates an existing connection's token (same target). */
     @PutMapping("/{id}")
-    public ConnectionTestResult update(@PathVariable UUID id, @Valid @RequestBody UpdateConnectionRequest req) {
-        return connectionService.update(id, req.baseUrl(), req.token(), req.path());
+    public ConnectionTestResult update(@CurrentWorkspace UUID workspaceId, @PathVariable UUID id,
+            @Valid @RequestBody UpdateConnectionRequest req) {
+        return connectionService.update(workspaceId, id, req.baseUrl(), req.token(), req.path());
     }
 
     @GetMapping
-    public PagedResponse<ConnectionView> list(
+    public PagedResponse<ConnectionView> list(@CurrentWorkspace UUID workspaceId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        List<ConnectionView> views = connectionService.list().stream().map(ConnectionView::of).toList();
+        List<ConnectionView> views = connectionService.list(workspaceId).stream().map(ConnectionView::of).toList();
         return PagedResponse.fromList(views, page, size);
     }
 
     /** Removes a connection; its repositories are reassigned or deactivated, never deleted (D-020). */
     @DeleteMapping("/{id}")
-    public ConnectionRemovalResult delete(@PathVariable UUID id) {
-        return connectionService.delete(id);
+    public ConnectionRemovalResult delete(@CurrentWorkspace UUID workspaceId, @PathVariable UUID id) {
+        return connectionService.delete(workspaceId, id);
     }
 
     @GetMapping("/{id}/projects")
-    public PagedResponse<ProjectView> projects(
+    public PagedResponse<ProjectView> projects(@CurrentWorkspace UUID workspaceId,
             @PathVariable UUID id,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return repositoryService.listProjects(id, page, size);
+        return repositoryService.listProjects(workspaceId, id, page, size);
     }
 }

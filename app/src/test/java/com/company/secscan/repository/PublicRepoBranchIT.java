@@ -85,7 +85,7 @@ class PublicRepoBranchIT extends AbstractGitLabIT {
                 "[{\"name\":\"main\",\"default\":true,\"protected\":true},"
                         + "{\"name\":\"dev\",\"default\":false,\"protected\":false}]", 2, 1);
 
-        var page = service.listBranches(repo.getId(), null, 0, 50);
+        var page = service.listBranches(Workspace.DEFAULT_ID, repo.getId(), null, 0, 50);
 
         assertThat(page.content()).extracting(BranchView::name).containsExactly("main", "dev");
         assertThat(page.content().get(0).isDefault()).isTrue();
@@ -102,7 +102,7 @@ class PublicRepoBranchIT extends AbstractGitLabIT {
         github.stubBranches("octo/pub",
                 "[{\"name\":\"main\",\"protected\":true},{\"name\":\"dev\",\"protected\":false}]");
 
-        var page = service.listBranches(repo.getId(), null, 0, 100);
+        var page = service.listBranches(Workspace.DEFAULT_ID, repo.getId(), null, 0, 100);
 
         assertThat(page.content()).extracting(BranchView::name).contains("main", "dev");
         assertThat(page.content().stream().filter(BranchView::isDefault)).singleElement()
@@ -117,7 +117,7 @@ class PublicRepoBranchIT extends AbstractGitLabIT {
         Repository repo = publicGitLabRepo(8202L);
         gitlab.stubBranch(8202L, "dev", "{\"name\":\"dev\",\"default\":false,\"protected\":false}");
 
-        RepositoryView view = service.patch(repo.getId(), null, null, null, new TextNode("dev"));
+        RepositoryView view = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null, new TextNode("dev"));
 
         assertThat(view.scanBranch()).isEqualTo("dev");
         assertThat(repositories.findById(repo.getId()).orElseThrow().getScanBranch()).isEqualTo("dev");
@@ -130,7 +130,8 @@ class PublicRepoBranchIT extends AbstractGitLabIT {
         Repository repo = publicGitLabRepo(8203L);
         gitlab.stubBranchStatus(8203L, "ghost", 404);
 
-        assertThatThrownBy(() -> service.patch(repo.getId(), null, null, null, new TextNode("ghost")))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null,
+                new TextNode("ghost")))
                 .isInstanceOf(GitLabException.class)
                 .satisfies(e -> assertThat(((GitLabException) e).getError()).isEqualTo(GitLabError.BRANCH_NOT_FOUND));
         // The branch stays unchanged (no save on a failed validation).

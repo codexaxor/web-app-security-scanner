@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class RepositoryConnectionGuard {
 
     private static final Logger log = LoggerFactory.getLogger(RepositoryConnectionGuard.class);
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
     static final String NO_ACCESSIBLE_CONNECTION = "NO_ACCESSIBLE_CONNECTION";
 
     private final RepositoryRepository repositories;
@@ -31,8 +30,8 @@ public class RepositoryConnectionGuard {
 
     /** The connection worked: a provisional reassignment onto it is now confirmed. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void confirm(UUID connectionId) {
-        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(WORKSPACE, connectionId)) {
+    public void confirm(UUID workspaceId, UUID connectionId) {
+        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(workspaceId, connectionId)) {
             if (repo.isProvisional()) {
                 repo.confirmConnection();
                 repositories.save(repo);
@@ -43,8 +42,8 @@ public class RepositoryConnectionGuard {
 
     /** The connection cannot reach its repositories: deactivate the provisionally reassigned ones. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void deactivate(UUID connectionId) {
-        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(WORKSPACE, connectionId)) {
+    public void deactivate(UUID workspaceId, UUID connectionId) {
+        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(workspaceId, connectionId)) {
             if (repo.isProvisional()) {
                 repo.deactivate(NO_ACCESSIBLE_CONNECTION);
                 repositories.save(repo);

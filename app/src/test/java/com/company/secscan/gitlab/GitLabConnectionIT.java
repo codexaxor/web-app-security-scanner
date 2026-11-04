@@ -121,7 +121,7 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     void createEncryptsTokenAndStoresConnection() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
 
-        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        ConnectionTestResult r = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
         assertThat(r.ok()).isTrue();
 
         GitlabConnection saved = connections.findByWorkspaceIdAndGitlabGroupId(Workspace.DEFAULT_ID, 42L)
@@ -136,9 +136,10 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     @Test
     void creatingTheSameGroupTwiceIsRejected() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
-        assertThat(service.create(gitlab.baseUrl(), TOKEN, "group", "services").ok()).isTrue();
+        assertThat(service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services").ok()).isTrue();
 
-        ConnectionTestResult second = service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        ConnectionTestResult second = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group",
+                "services");
 
         assertThat(second.ok()).isFalse();
         assertThat(second.errorCode()).isEqualTo(GitLabError.CONNECTION_EXISTS.name());
@@ -149,13 +150,13 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     void updateRotatesTokenAndKeepsSelectedRepositories() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services")
                 .stubProjectsFromSample(42L).stubLanguages(101, "{\"Java\":100.0}");
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
         UUID connId = groupConnectionId();
-        repositoryService.select(connId, List.of(101L));
+        repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(101L));
         String firstCiphertext = connections.findById(connId).orElseThrow().getTokenCiphertext();
 
         // Rotate the token on the same connection (same value here; a fresh IV still changes the ciphertext).
-        ConnectionTestResult r = service.update(connId, gitlab.baseUrl(), TOKEN, "services");
+        ConnectionTestResult r = service.update(Workspace.DEFAULT_ID, connId, gitlab.baseUrl(), TOKEN, "services");
 
         assertThat(r.ok()).isTrue();
         assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID)).hasSize(1); // updated in place
@@ -167,11 +168,11 @@ class GitLabConnectionIT extends AbstractGitLabIT {
     @Test
     void updatingToADifferentTargetIsRejected() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services"); // group id 42
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services"); // group id 42
         UUID connId = groupConnectionId();
 
         gitlab.stubGroupBody("other-group", "{\"id\":99,\"full_path\":\"other-group\"}");
-        ConnectionTestResult r = service.update(connId, gitlab.baseUrl(), TOKEN, "other-group");
+        ConnectionTestResult r = service.update(Workspace.DEFAULT_ID, connId, gitlab.baseUrl(), TOKEN, "other-group");
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.CONNECTION_TARGET_MISMATCH.name());

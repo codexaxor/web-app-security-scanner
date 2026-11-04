@@ -1,5 +1,6 @@
 package com.company.secscan.repository;
 
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositorySettingsRequest;
@@ -28,12 +29,12 @@ public class RepositoryController {
     }
 
     @PostMapping
-    public SelectResult select(@Valid @RequestBody SelectRepositoriesRequest req) {
-        return service.select(req.connectionId(), req.gitlabProjectIds());
+    public SelectResult select(@CurrentWorkspace UUID workspaceId, @Valid @RequestBody SelectRepositoriesRequest req) {
+        return service.select(workspaceId, req.connectionId(), req.gitlabProjectIds());
     }
 
     @GetMapping
-    public PagedResponse<RepositoryView> list(
+    public PagedResponse<RepositoryView> list(@CurrentWorkspace UUID workspaceId,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "false") boolean includeInactive,
             @RequestParam(defaultValue = "false") boolean hasOpenIssues,
@@ -42,29 +43,31 @@ public class RepositoryController {
             @RequestParam(defaultValue = "severity") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listSelected(search, includeInactive, hasOpenIssues, lastScanFailed, provider, sort, page,
+        return service.listSelected(workspaceId, search, includeInactive, hasOpenIssues, lastScanFailed, provider,
+                sort, page,
                 size);
     }
 
     /** One repository with its rollups (the M8.6 repository page header). 404 if not in this workspace. */
     @GetMapping("/{id}")
-    public RepositoryView get(@PathVariable UUID id) {
-        return service.getRepository(id);
+    public RepositoryView get(@CurrentWorkspace UUID workspaceId, @PathVariable UUID id) {
+        return service.getRepository(workspaceId, id);
     }
 
     /** Updates a repository's settings (sensitivity, include-dev-deps, active, scan branch). OD-15 / D-070 / D-076. */
     @PatchMapping("/{id}")
-    public RepositoryView patch(@PathVariable UUID id, @RequestBody RepositorySettingsRequest req) {
-        return service.patch(id, req.sensitivity(), req.includeDevDeps(), req.active(), req.scanBranch());
+    public RepositoryView patch(@CurrentWorkspace UUID workspaceId, @PathVariable UUID id,
+            @RequestBody RepositorySettingsRequest req) {
+        return service.patch(workspaceId, id, req.sensitivity(), req.includeDevDeps(), req.active(), req.scanBranch());
     }
 
     /** The branches for the "Branch to scan" picker (D-076): server-side {@code search} + pagination. */
     @GetMapping("/{id}/branches")
-    public com.company.secscan.repository.api.BranchPage branches(
+    public com.company.secscan.repository.api.BranchPage branches(@CurrentWorkspace UUID workspaceId,
             @PathVariable UUID id,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listBranches(id, search, page, size);
+        return service.listBranches(workspaceId, id, search, page, size);
     }
 }

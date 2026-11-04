@@ -91,20 +91,20 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
     /** Selects the four cross-provider sources into the one workspace (reused by both tests). */
     private void seedFourSources() {
         // Two GitLab hosts (self-managed + gitlab.com), token-credentialed.
-        gitlabConnections.create(selfManaged.baseUrl(), GL_TOKEN, "project", "ns/a");
-        gitlabConnections.create(dotCom.baseUrl(), GL_TOKEN, "project", "ns/b");
-        repositoryService.select(projectConn(selfManaged, 201), List.of(201L));
-        repositoryService.select(projectConn(dotCom, 202), List.of(202L));
+        gitlabConnections.create(Workspace.DEFAULT_ID, selfManaged.baseUrl(), GL_TOKEN, "project", "ns/a");
+        gitlabConnections.create(Workspace.DEFAULT_ID, dotCom.baseUrl(), GL_TOKEN, "project", "ns/b");
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn(selfManaged, 201), List.of(201L));
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn(dotCom, 202), List.of(202L));
 
         // A private GitHub repo (token) selected through its owner connection.
         SourceConnectionService gh = new SourceConnectionService(connections, cipher, hostPolicy, gitHubClient,
                 gitLabClient, github.baseUrl());
-        UUID ghConn = gh.createGitHubOwner("octo", GH_TOKEN).getId();
-        repositoryService.selectSource(ghConn, List.of("123"));
+        UUID ghConn = gh.createGitHubOwner(Workspace.DEFAULT_ID, "octo", GH_TOKEN).getId();
+        repositoryService.selectSource(Workspace.DEFAULT_ID, ghConn, List.of("123"));
 
         // A public repository added by URL (anonymous; credential_kind none) and selected.
-        UUID pubConn = gh.createPublicRepo(publicGl.baseUrl() + "/pub/proj").getId();
-        repositoryService.selectSource(pubConn, List.of("303"));
+        UUID pubConn = gh.createPublicRepo(Workspace.DEFAULT_ID, publicGl.baseUrl() + "/pub/proj").getId();
+        repositoryService.selectSource(Workspace.DEFAULT_ID, pubConn, List.of("303"));
     }
 
     @Test
@@ -117,7 +117,8 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
 
         // One feed, four sources: providers and hosts are distinct identities.
         Map<String, Long> byProvider = repos.stream().collect(
-                java.util.stream.Collectors.groupingBy(Repository::getProvider, java.util.stream.Collectors.counting()));
+                java.util.stream.Collectors.groupingBy(Repository::getProvider,
+                        java.util.stream.Collectors.counting()));
         assertThat(byProvider).containsEntry("gitlab", 3L).containsEntry("github", 1L);
         assertThat(repos.stream().map(Repository::getHost).distinct().count()).isEqualTo(4);
 
@@ -145,11 +146,14 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
         openGroup(gitLabRepo.getId(), "gl", "gl finding");
 
         // Repositories list: the provider filter is server-side + workspace-scoped (gitlab 3, github 1, none 4).
-        assertThat(repositoryService.listSelected(null, true, false, false, "github", "name", 0, 50).totalElements())
+        assertThat(repositoryService.listSelected(Workspace.DEFAULT_ID, null, true, false, false, "github", "name", 0,
+                50).totalElements())
                 .isEqualTo(1);
-        assertThat(repositoryService.listSelected(null, true, false, false, "gitlab", "name", 0, 50).totalElements())
+        assertThat(repositoryService.listSelected(Workspace.DEFAULT_ID, null, true, false, false, "gitlab", "name", 0,
+                50).totalElements())
                 .isEqualTo(3);
-        assertThat(repositoryService.listSelected(null, true, false, false, null, "name", 0, 50).totalElements())
+        assertThat(repositoryService.listSelected(Workspace.DEFAULT_ID, null, true, false, false, null, "name", 0,
+                50).totalElements())
                 .isEqualTo(4);
 
         // Feed (issue-groups): the provider filter narrows to that provider's groups.
@@ -159,7 +163,8 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
                 .extracting(IssueGroupView::title).containsExactly("gl finding");
 
         // Validated whitelist: anything else is a 400 on both endpoints (never trusted unchecked).
-        assertThatThrownBy(() -> repositoryService.listSelected(null, true, false, false, "bogus", "name", 0, 50))
+        assertThatThrownBy(() -> repositoryService.listSelected(Workspace.DEFAULT_ID, null, true, false, false,
+                "bogus", "name", 0, 50))
                 .isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> issueService.listGroups(null, null, null, null, "bogus", "all", null, true, 0, 50))
                 .isInstanceOf(ResponseStatusException.class);

@@ -235,11 +235,11 @@ public class ScanJobProcessor {
         }
         try {
             client.projectLanguages(conn.getBaseUrl(), token, repo.getGitlabProjectId());
-            guard.confirm(conn.getId());
+            guard.confirm(workspaceId, conn.getId());
             return true;
         } catch (GitLabException e) {
             if (accessDenied(e.getError())) {
-                guard.deactivate(conn.getId());
+                guard.deactivate(workspaceId, conn.getId());
                 state.resolveNoAccess(workspaceId, jobId, scanId,
                         "connection cannot reach repository: " + e.getError());
             } else {

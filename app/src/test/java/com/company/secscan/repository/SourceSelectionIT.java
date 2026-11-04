@@ -48,7 +48,7 @@ class SourceSelectionIT extends AbstractGitLabIT {
         gh.stubUser("octo", "User").stubOwner("octo", "Organization");
         SourceConnectionService svc = new SourceConnectionService(connections, cipher, hostPolicy, gitHubClient,
                 gitLabClient, gh.baseUrl());
-        ownerConnId = svc.createGitHubOwner("octo", TOKEN).getId();
+        ownerConnId = svc.createGitHubOwner(Workspace.DEFAULT_ID, "octo", TOKEN).getId();
     }
 
     @AfterEach
@@ -61,14 +61,16 @@ class SourceSelectionIT extends AbstractGitLabIT {
         gh.stubOwnerReposPage(true, "octo", 1,
                 "[{\"id\":1,\"full_name\":\"octo/a\",\"default_branch\":\"main\"},"
                         + "{\"id\":2,\"full_name\":\"octo/b\",\"default_branch\":\"main\"}]", 1);
-        PagedResponse<SourceRepo> page = repositoryService.listSourceRepositories(ownerConnId, null, 0, 100);
+        PagedResponse<SourceRepo> page = repositoryService.listSourceRepositories(Workspace.DEFAULT_ID, ownerConnId,
+                null, 0, 100);
         assertThat(page.content()).extracting(SourceRepo::fullName).containsExactly("octo/a", "octo/b");
     }
 
     @Test
     void selectsAGitHubRepositoryAsAProviderNeutralRow() {
         gh.stubRepoById(123, REPO_JSON);
-        List<RepositoryView> selected = repositoryService.selectSource(ownerConnId, List.of("123"));
+        List<RepositoryView> selected = repositoryService.selectSource(Workspace.DEFAULT_ID, ownerConnId,
+                List.of("123"));
         assertThat(selected).hasSize(1);
 
         List<Repository> stored = repositories.findByWorkspaceId(Workspace.DEFAULT_ID);
