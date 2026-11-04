@@ -1,5 +1,6 @@
 package com.company.secscan.config;
 
+import com.company.secscan.auth.SecscanPrincipal;
 import com.company.secscan.auth.SessionTimeoutFilter;
 import java.time.Duration;
 import java.util.Set;
@@ -54,6 +55,7 @@ public class SecurityConfig {
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "TRACE", "OPTIONS");
     private static final RequestMatcher LOGIN = new AntPathRequestMatcher("/api/v1/auth/login", "POST");
     private static final String[] PUBLIC_PATHS = {"/actuator/health", "/actuator/health/**"};
+    private static final String ADMIN_PATHS = "/api/v1/admin/**";
 
     // D-092 lifetimes: idle (refreshed by any request, incl. the status-poll) and the absolute cap (login-age).
     private static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
@@ -112,6 +114,7 @@ public class SecurityConfig {
                 .authenticationManager(authenticationManager)   // D-098: same provider as the JSON login
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .requestMatchers(ADMIN_PATHS).hasAuthority(SecscanPrincipal.ROLE_OPERATOR)   // D-094
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(csrf -> csrf.disable())
@@ -136,6 +139,8 @@ public class SecurityConfig {
                         // Sign-in is reachable while unauthenticated; everything else (incl. /auth/session and
                         // /auth/logout) requires authentication.
                         .requestMatchers(LOGIN).permitAll()
+                        // D-094: /api/v1/admin/** is the platform operator's alone (resolves OD-9).
+                        .requestMatchers(ADMIN_PATHS).hasAuthority(SecscanPrincipal.ROLE_OPERATOR)
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 // Nit: no saved-request cache (it would create a session for an anonymous request).
