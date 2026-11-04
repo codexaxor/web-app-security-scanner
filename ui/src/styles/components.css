@@ -16,11 +16,13 @@
   color: var(--text);
 }
 .brand-mark {
-  width: 22px;
-  height: 22px;
   flex: none;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--accent), var(--status-solved));
+  color: var(--shell-accent);
+}
+.brand-name {
+  font-weight: 750;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
 }
 
 /* keyboard: jump straight to main content, first tab stop */
@@ -45,48 +47,94 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-3);
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  z-index: 40;
+  border-right: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  z-index: var(--z-drawer);
 }
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
-  font-weight: 750;
-  font-size: var(--fs-md);
-  letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--shell-text);
 }
 .sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+.sidenav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidenav-group-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--sp-1) var(--sp-3);
+  background: transparent;
+  border: 0;
+  color: var(--shell-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.sidenav-group-label:hover {
+  color: var(--shell-text);
+}
+.sidenav-caret {
+  font-size: 15px;
+  transition: transform var(--transition-fast);
+}
+.sidenav-caret.collapsed {
+  transform: rotate(-90deg);
+}
+.sidenav-items {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .sidenav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   height: 38px;
   padding: 0 var(--sp-3);
   border-radius: var(--radius);
-  color: var(--muted);
+  color: var(--shell-muted);
   font-weight: 550;
   text-decoration: none;
   white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .sidenav-link:hover {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--shell-text);
+  background: var(--shell-surface);
   text-decoration: none;
 }
 .sidenav-link.active {
-  color: var(--accent);
-  background: var(--status-new-bg);
+  color: var(--shell-active-text);
+  background: var(--shell-active-bg);
   font-weight: 650;
+}
+.sidenav-link.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--shell-accent);
 }
 .sidenav-icon {
   font-size: 19px;
@@ -98,18 +146,7 @@
   flex-direction: column;
   gap: var(--sp-3);
   padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
-}
-.sidebar-user {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-.sidebar-user .muted {
-  min-width: 0;
+  border-top: 1px solid var(--shell-border);
 }
 .theme-control {
   width: 100%;
@@ -120,6 +157,79 @@
   padding: 0 var(--sp-1);
   font-size: var(--fs-xs);
   font-weight: 600;
+}
+
+/* user menu (footer of the navy sidebar) */
+.user-menu {
+  position: relative;
+}
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-text);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.user-menu-trigger:hover {
+  background: var(--shell-surface);
+}
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--shell-accent);
+  color: var(--shell-bg);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+}
+.user-menu-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.user-menu-caret {
+  font-size: 15px;
+  color: var(--shell-muted);
+}
+.user-menu-pop {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-palette);
+}
+.user-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.user-menu-heading {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .content {
   max-width: var(--content-max);
@@ -139,14 +249,17 @@
   width: 38px;
   height: 38px;
   font-size: 20px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--shell-border);
   border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
+  background: transparent;
+  color: var(--shell-text);
   cursor: pointer;
 }
 .appbar-menu:hover {
-  background: var(--surface-2);
+  background: var(--shell-surface);
+}
+.appbar .brand {
+  color: var(--shell-text);
 }
 .scrim {
   display: none;
@@ -162,8 +275,9 @@
     gap: var(--sp-3);
     padding: var(--sp-2) var(--sp-4);
     min-height: 52px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    border-bottom: 1px solid var(--shell-border);
+    background: var(--shell-bg);
+    color: var(--shell-text);
     position: sticky;
     top: 0;
     z-index: 30;
