@@ -2113,6 +2113,12 @@ button.health-item {
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
+.type-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  flex: none;
+}
 .category-tag {
   font-size: var(--fs-xs);
 }

@@ -23,12 +23,13 @@ import SubIssuePanel from "../components/SubIssuePanel";
 import SeverityPill from "../components/SeverityPill";
 import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
-import Icon from "../components/icons";
+import Icon, { type IconName } from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
-import { EmptyState, ScanStatusChip } from "../components/ui";
+import { Card, EmptyState, ScanStatusChip } from "../components/ui";
 import PageLayout from "../components/PageLayout";
+import SeverityChips from "../components/SeverityChips";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const TABS = ["issues", "scans", "settings"] as const;
@@ -117,21 +118,51 @@ export default function RepositoryPage() {
           </>
         ) : undefined
       }
+      kpi={
+        r ? (
+          <>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Open findings</span>
+              </div>
+              <SeverityChips counts={r.openBySeverity} />
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Last scan</span>
+              </div>
+              <div className="row">
+                {r.lastScan ? (
+                  <>
+                    <ScanStatusChip status={r.lastScan.status} />
+                    {r.lastScan.finishedAt ? <RelativeTime iso={r.lastScan.finishedAt} /> : null}
+                  </>
+                ) : (
+                  <span className="muted">Never scanned</span>
+                )}
+              </div>
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Languages</span>
+              </div>
+              <div className="truncate" title={r.languages.join(", ")}>
+                {r.languages.length ? r.languages.join(", ") : <span className="muted">Not detected</span>}
+              </div>
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Ignored</span>
+              </div>
+              <div className="stat-num">{r.ignoredCount}</div>
+            </Card>
+          </>
+        ) : undefined
+      }
     >
       {repo.error ? <InlineError error={repo.error} /> : null}
       {r ? (
         <>
-          <div className="repo-lastscan muted">
-            {r.lastScan ? (
-              <span className="row">
-                Last scan: <ScanStatusChip status={r.lastScan.status} />{" "}
-                <RelativeTime iso={r.lastScan.finishedAt} />
-              </span>
-            ) : (
-              <span>Never scanned</span>
-            )}
-          </div>
-
           {r.lastScan ? <CoverageBanner scanId={r.lastScan.id} /> : null}
 
           <nav className="tabs" role="tablist" aria-label="Repository sections">
@@ -341,6 +372,9 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                     >
                       <td>
                         <div className="type-cell">
+                          <span className="type-icon" style={{ color: `var(--type-${g.type})` }} aria-hidden="true">
+                            <Icon name={g.type as IconName} />
+                          </span>
                           <TypeBadge type={g.type} />
                           {g.level2Category ? <span className="muted category-tag">{g.level2Category}</span> : null}
                         </div>
