@@ -1,7 +1,7 @@
 package com.company.secscan.source;
 
-import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.gitlab.api.ConnectionView;
 import com.company.secscan.repository.RepositoryService;
 import com.company.secscan.repository.api.RepositoryView;

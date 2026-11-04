@@ -38,7 +38,7 @@ class ScanCreatedAtIT extends AbstractGitLabIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 9301L, "svc/scan", "main",
                 List.of("Java")));
 
-        ScanView view = scanService.startManual(repo.getId());
+        ScanView view = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         assertThat(view.createdAt()).isNotNull(); // R1 — was null before the @Generated(INSERT) fix
         assertThat(view.status()).isEqualTo(Scan.STATUS_QUEUED);
     }

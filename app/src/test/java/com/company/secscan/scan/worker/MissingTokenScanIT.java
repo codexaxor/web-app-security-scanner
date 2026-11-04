@@ -66,7 +66,7 @@ class MissingTokenScanIT extends AbstractScanWorkerIT {
         SubIssue open = subIssues.save(new SubIssue(WS, group.getId(), repo.getId(), "sca",
                 ScanTask.SCANNER_SCA, "fp-open", null));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

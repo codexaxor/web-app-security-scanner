@@ -145,7 +145,7 @@ class PublicRepoBranchIT extends AbstractGitLabIT {
                 "{\"id\":8204,\"path_with_namespace\":\"pub/8204\",\"default_branch\":\"release\","
                         + "\"empty_repo\":false}");
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.branch()).isEqualTo("release");
         assertThat(repositories.findById(repo.getId()).orElseThrow().getDefaultBranch()).isEqualTo("release");

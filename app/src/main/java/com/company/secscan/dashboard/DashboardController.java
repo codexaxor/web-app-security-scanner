@@ -1,5 +1,7 @@
 package com.company.secscan.dashboard;
 
+import com.company.secscan.auth.CurrentWorkspace;
+import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -17,8 +19,8 @@ public class DashboardController {
     }
 
     @GetMapping("/summary")
-    public DashboardSummaryView summary(
+    public DashboardSummaryView summary(@CurrentWorkspace UUID workspaceId, 
             @RequestParam(defaultValue = "false") boolean includeInactive) {
-        return service.summary(includeInactive);
+        return service.summary(workspaceId, includeInactive);
     }
 }

@@ -1,5 +1,7 @@
 package com.company.secscan.workspace;
 
+import com.company.secscan.auth.CurrentWorkspace;
+import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -8,8 +10,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Workspace settings API (M7): the EPSS auto-ignore toggle (D-060). Single-tenant, so it acts on the default
- * workspace. Changing the toggle re-evaluates LOW_EPSS across the workspace (status + scoring) in the service.
+ * Workspace settings API (M7): the EPSS auto-ignore toggle (D-060). Acts on the signed-in user's own
+ * workspace (D-093,
+         {@code @CurrentWorkspace}). Changing the toggle re-evaluates LOW_EPSS across the workspace (status + scoring) in the service.
  * Per review change #8, M7 exposes only the EPSS toggle here (no editable global exclude-path list).
  */
 @Profile("api")
@@ -33,12 +36,12 @@ public class WorkspaceSettingsController {
     }
 
     @GetMapping
-    public SettingsView get() {
-        return SettingsView.of(service.get(Workspace.DEFAULT_ID));
+    public SettingsView get(@CurrentWorkspace UUID workspaceId) {
+        return SettingsView.of(service.get(workspaceId));
     }
 
     @PutMapping
-    public SettingsView update(@RequestBody UpdateRequest req) {
-        return SettingsView.of(service.setEpssAutoIgnore(Workspace.DEFAULT_ID, req.epssAutoIgnoreEnabled()));
+    public SettingsView update(@CurrentWorkspace UUID workspaceId, @RequestBody UpdateRequest req) {
+        return SettingsView.of(service.setEpssAutoIgnore(workspaceId, req.epssAutoIgnoreEnabled()));
     }
 }

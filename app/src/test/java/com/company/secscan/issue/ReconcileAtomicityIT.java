@@ -76,7 +76,7 @@ class ReconcileAtomicityIT extends AbstractScanWorkerIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
                 List.of("Java")));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         UUID jobId = claimer.claimBatch(10).get(0);
         processor.process(jobId);
 

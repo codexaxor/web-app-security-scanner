@@ -1,7 +1,7 @@
 package com.company.secscan.gitlab;
 
-import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.gitlab.api.ConnectionRemovalResult;
 import com.company.secscan.gitlab.api.ConnectionRequest;
 import com.company.secscan.gitlab.api.ConnectionTestResult;

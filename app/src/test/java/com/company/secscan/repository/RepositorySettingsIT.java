@@ -95,7 +95,7 @@ class RepositorySettingsIT extends AbstractGitLabIT {
         service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, false); // deactivate
         long before = scans.count();
 
-        assertThatThrownBy(() -> scanService.startManual(repo.getId()))
+        assertThatThrownBy(() -> scanService.startManual(Workspace.DEFAULT_ID, repo.getId()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
 

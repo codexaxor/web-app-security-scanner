@@ -1,7 +1,7 @@
 package com.company.secscan.repository;
 
-import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.repository.api.BranchView;
 import com.company.secscan.repository.api.RepositorySettingsRequest;
 import com.company.secscan.repository.api.RepositoryView;
