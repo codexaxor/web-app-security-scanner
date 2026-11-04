@@ -24,7 +24,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  *       when there is no pending request, so every failed login costs the same two hash checks (no timing
  *       oracle for "this email has a pending sign-up").</li>
  * </ol>
- * The {@code signup_request} lookup is workspace-agnostic by design (pre-tenant, CLAUDE.md rule 1 / D-098).
+ * Login failures are rate limited per (account, IP), per IP and per account ({@link RateLimits}); a correct
+ * password for a pending/disabled account is not a failure. The {@code signup_request} lookup is workspace-agnostic by design (pre-tenant, CLAUDE.md rule 1 / D-098).
  */
 public class SecscanAuthenticationProvider implements AuthenticationProvider {
 
@@ -32,9 +33,12 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
     private final SignupRequestRepository signups;
     private final PasswordEncoder encoder;
     private final String dummyHash;
+    private final RateLimits limits;
+    private final ClientIpResolver clientIp;
 
     public SecscanAuthenticationProvider(UserDetailsService users, PasswordEncoder encoder,
-                                         SignupRequestRepository signups) {
+                                         SignupRequestRepository signups, RateLimits limits,
+                                         ClientIpResolver clientIp) {
         this.dao = new DaoAuthenticationProvider();
         this.dao.setUserDetailsService(users);
         this.dao.setPasswordEncoder(encoder);
@@ -46,15 +50,27 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
         this.signups = signups;
         this.encoder = encoder;
         this.dummyHash = encoder.encode("timing-equaliser-not-a-password");
+        this.limits = limits;
+        this.clientIp = clientIp;
     }
 
     @Override
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+        String email = authentication.getName() == null ? ""
+                : authentication.getName().trim().toLowerCase(Locale.ROOT);
+        String ip = currentClientIp();
+        // D-098: refuse BEFORE the password check once any failure limit is exceeded (JSON login and Basic alike).
+        long wait = ip == null ? 0 : limits.loginBlockedFor(email, ip);
+        if (wait > 0) {
+            throw new LoginRateLimitedException(wait);
+        }
         try {
-            return dao.authenticate(authentication);
+            Authentication ok = dao.authenticate(authentication);
+            if (ip != null) {
+                limits.loginSucceeded(email, ip);
+            }
+            return ok;
         } catch (BadCredentialsException bad) {
-            String email = authentication.getName() == null ? ""
-                    : authentication.getName().trim().toLowerCase(Locale.ROOT);
             Object credentials = authentication.getCredentials();
             String password = credentials == null ? "" : credentials.toString();
             Optional<SignupRequest> pending = email.contains("@")
@@ -63,10 +79,22 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
             String hash = pending.map(SignupRequest::getPasswordHash).orElse(dummyHash);
             boolean matches = encoder.matches(password, hash);
             if (pending.isPresent() && matches) {
-                throw new AccountPendingException();
+                throw new AccountPendingException();   // correct password: not a failure
+            }
+            if (ip != null) {
+                limits.loginFailed(email, ip);
             }
             throw bad;
         }
+    }
+
+    /** The client IP of the current HTTP request (null outside a request, e.g. a direct service call). */
+    private String currentClientIp() {
+        if (org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes attrs) {
+            return clientIp.resolve(attrs.getRequest());
+        }
+        return null;
     }
 
     @Override

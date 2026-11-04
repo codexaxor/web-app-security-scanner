@@ -77,10 +77,12 @@ public class SecurityConfig {
 
     @Bean
     AuthenticationManager authenticationManager(UserDetailsService userDetailsService, PasswordEncoder encoder,
-                                                com.company.secscan.signup.SignupRequestRepository signups) {
-        // D-098: one provider for the JSON login AND Basic — status after the password, pending sign-up check.
-        return new ProviderManager(
-                new com.company.secscan.auth.SecscanAuthenticationProvider(userDetailsService, encoder, signups));
+                                                com.company.secscan.signup.SignupRequestRepository signups,
+                                                com.company.secscan.auth.RateLimits limits,
+                                                com.company.secscan.auth.ClientIpResolver clientIp) {
+        // D-098: one provider for the JSON login AND Basic — rate limits, status after the password, pending check.
+        return new ProviderManager(new com.company.secscan.auth.SecscanAuthenticationProvider(
+                userDetailsService, encoder, signups, limits, clientIp));
     }
 
     /** D-098: a disabled user's live session/Basic request is refused on the next request (JSON 401). */
@@ -204,6 +206,15 @@ public class SecurityConfig {
 
     private static AuthenticationEntryPoint jsonUnauthorizedEntryPoint() {
         return (request, response, authException) -> {
+            if (authException instanceof com.company.secscan.auth.LoginRateLimitedException limited) {
+                // D-098: a rate-limited Basic attempt → 429 + Retry-After (no password was checked).
+                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                response.setHeader("Retry-After", Long.toString(limited.retryAfterSeconds()));
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"error\":\"RATE_LIMITED\",\"message\":\"Too many failed sign-in "
+                        + "attempts. Try again later.\"}");
+                return;
+            }
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"error\":\"UNAUTHORIZED\",\"message\":\"Authentication required.\"}");

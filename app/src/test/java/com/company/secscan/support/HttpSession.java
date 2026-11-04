@@ -36,7 +36,7 @@ public final class HttpSession {
      */
     public static TestRestTemplate noRetryClient() {
         return new TestRestTemplate(new org.springframework.boot.web.client.RestTemplateBuilder()
-                .requestFactory(org.springframework.http.client.SimpleClientHttpRequestFactory::new));
+                .requestFactory(() -> new org.springframework.http.client.JdkClientHttpRequestFactory()));
     }
 
     /** Raw JSON login (no assertion on the outcome). */

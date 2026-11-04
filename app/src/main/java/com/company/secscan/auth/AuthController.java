@@ -88,6 +88,9 @@ public class AuthController {
         try {
             authentication = authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, password));
+        } catch (LoginRateLimitedException e) {
+            throw new com.company.secscan.api.ApiErrorException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED",
+                    "Too many failed sign-in attempts. Try again later.", e.retryAfterSeconds());
         } catch (AccountPendingException e) {
             // D-098: only reachable with the CORRECT password for a pending sign-up.
             throw new com.company.secscan.api.ApiErrorException(HttpStatus.FORBIDDEN, "ACCOUNT_PENDING",
