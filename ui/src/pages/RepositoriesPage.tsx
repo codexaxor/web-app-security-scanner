@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Provider, type RepositoryView, type RepoSort } from "../api";
 import { qk } from "../queryClient";
@@ -37,7 +37,6 @@ function providerFromParam(v: string | null): Provider | "" {
 }
 
 export default function RepositoriesPage() {
-  const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const provider = providerFromParam(sp.get("provider"));
   const { page, size, setPage, setSize } = useUrlPaging("page", "size");
@@ -202,28 +201,22 @@ export default function RepositoriesPage() {
             ) : (
               <tbody>
                 {rows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="row-click"
-                    tabIndex={0}
-                    data-testid="repo-row"
-                    onClick={() => navigate(`/repositories/${r.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        navigate(`/repositories/${r.id}`);
-                      }
-                    }}
-                  >
+                  <tr key={r.id} className="row-click" data-testid="repo-row">
                     <td>
                       {/* L1: line 1 = badge + name + "· branch" on ONE non-wrapping line (name truncates); the
-                          full group/project path is line 2, truncated, with the full path in a title tooltip. */}
+                          full group/project path is line 2, truncated, with the full path in a title tooltip.
+                          The name is the real row link (approved change #4): Enter/middle/Ctrl-click work and a
+                          stretched ::after makes the whole row clickable. */}
                       <div className="repo-cell">
                         <div className="repo-line">
                           <ProviderBadge provider={r.provider} />
-                          <span className="repo-name" title={r.pathWithNamespace}>
+                          <Link
+                            className="repo-name row-link"
+                            to={`/repositories/${r.id}`}
+                            title={r.pathWithNamespace}
+                          >
                             {r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
-                          </span>
+                          </Link>
                           {r.effectiveBranch ? (
                             <span className="muted branch-label">· {r.effectiveBranch}</span>
                           ) : null}

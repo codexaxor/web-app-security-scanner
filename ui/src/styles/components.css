@@ -517,16 +517,39 @@ a.stat-link:hover .stat-num {
 .table tbody tr:last-child td {
   border-bottom: none;
 }
+/* Whole-row click via a REAL link (M8.11, approved change #4): the row's primary cell holds a .row-link whose
+ * ::after is stretched over the whole row, so left-click anywhere on the row follows the link while Enter,
+ * middle-click and Ctrl/⌘-click all work as a normal anchor. No onClick-only <tr>. Other interactive controls
+ * in the row sit above the overlay (z-index) so they remain independently clickable. */
 .table tbody tr.row-click {
+  position: relative;
   cursor: pointer;
 }
 .table tbody tr.row-click:hover td,
-.table tbody tr.row-click:focus-visible td {
+.table tbody tr.row-click:focus-within td {
   background: var(--surface-2);
 }
-.table tbody tr.row-click:focus-visible {
+.row-link {
+  color: inherit;
+  text-decoration: none;
+}
+.row-link:hover {
+  text-decoration: none;
+}
+.row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.row-link:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.table tbody tr.row-click td :is(a, button):not(.row-link) {
+  position: relative;
+  z-index: 1;
 }
 .cell-num {
   text-align: right;

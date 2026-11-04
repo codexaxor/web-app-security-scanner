@@ -1,4 +1,4 @@
-import { useSearchParams, useNavigate, useParams } from "react-router";
+import { Link, useSearchParams, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   api,
@@ -108,10 +108,6 @@ export default function FeedPage() {
 
   const s = summary.data;
   const bands = s?.bands ?? { critical: 0, high: 0, medium: 0, low: 0 };
-
-  function openGroup(id: string) {
-    navigate({ pathname: `/feed/${id}`, search: params.toString() });
-  }
 
   const rows = feed.data?.content ?? [];
 
@@ -269,25 +265,15 @@ export default function FeedPage() {
               {rows.map((g) => {
                 const t = titleFor(g);
                 return (
-                  <tr
-                    key={g.id}
-                    className="row-click"
-                    tabIndex={0}
-                    onClick={() => openGroup(g.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        openGroup(g.id);
-                      }
-                    }}
-                    data-testid="feed-row"
-                  >
+                  <tr key={g.id} className="row-click" data-testid="feed-row">
                     <td>
                       <TypeBadge type={g.type} />
                     </td>
                     <td>
                       <div className="stack-tight">
-                        <strong>{t.title}</strong>
+                        <Link className="row-link" to={{ pathname: `/feed/${g.id}`, search: params.toString() }}>
+                          <strong>{t.title}</strong>
+                        </Link>
                         {t.subtitle ? (
                           <div className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}>
                             {t.subtitle}
