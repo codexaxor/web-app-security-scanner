@@ -53,7 +53,7 @@ test("Focus hides ignored groups; All includes them", async ({ page, request }) 
   await expect(page.getByTestId("total-groups")).toHaveText(String(all.totalGroups));
 });
 
-test("server-side pagination for a repo with more than 50 groups", async ({ page, request }) => {
+test("server-side pagination for a repo with more than one page of groups", async ({ page, request }) => {
   await gotoFeed(page);
   // Filter to core-keycloak (64 bulk open groups).
   await page.getByLabel("Repository").selectOption(CORE);
@@ -61,14 +61,15 @@ test("server-side pagination for a repo with more than 50 groups", async ({ page
   const api = await apiGet<Paged<IssueGroupView>>(
     request, `/api/v1/issue-groups?view=focus&repositoryId=${CORE}&page=0&size=50`);
   expect(api.totalElements).toBe(64);
-  expect(api.content.length).toBe(50); // server caps the page, never the client
 
-  // Pager "of N" is EXACTLY the API totalElements (== the SQL count); the range bounds are exact too.
-  await expect(page.getByTestId("pager-range")).toHaveText(/^1.50 of 64$/);
-  await expect(page.getByTestId("feed-row")).toHaveCount(50);
-  await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByTestId("pager-range")).toHaveText(/^51.64 of 64$/);
-  await expect(page.getByTestId("feed-row")).toHaveCount(14);
+  // Default page size is 20 (S11.3); the footer pager's "of N" is EXACTLY the API totalElements and the range
+  // bounds are exact. "Next" is scoped to the footer pager (the toolbar also has a compact pager).
+  const footer = page.getByTestId("pager");
+  await expect(page.getByTestId("pager-range")).toHaveText(/^1.20 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^21.40 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
 });
 
 test("default sort is severity desc and filters narrow by type", async ({ page, request }) => {
@@ -126,5 +127,5 @@ test("the category filter narrows the feed server-side and is URL-addressable", 
   // server-side result (page capped at 50, as the pagination test above asserts).
   await page.getByLabel("Category").selectOption(cat.category);
   await expect.poll(() => new URL(page.url()).searchParams.get("category")).toBe(cat.category);
-  await expect(page.getByTestId("feed-row")).toHaveCount(Math.min(50, filtered.totalElements));
+  await expect(page.getByTestId("feed-row")).toHaveCount(Math.min(20, filtered.totalElements));
 });

@@ -523,6 +523,11 @@ a.stat-link:hover .stat-num {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
+/* S11.3: compact rows (~44–48px) — tighter vertical padding on body cells; the header keeps its padding. */
+.table td {
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
 /* Sticky header (design pass, item 2) — the wrapper no longer clips, so the header sticks to the viewport as
  * the page scrolls; corners are rounded on the edge cells instead of by overflow:hidden. */
 .table thead th {

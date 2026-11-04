@@ -25,7 +25,8 @@ test("S10e — Feed count = API openCount = SQL open sub-issues; Σ Focus openCo
   request,
 }) => {
   await signIn(page, "/feed");
-  const api = await apiGet<Paged<IssueGroupView>>(request, "/api/v1/issue-groups?view=focus&page=0&size=50");
+  // size=20 matches the UI default page size (S11.3) so the rendered rows equal api.content.
+  const api = await apiGet<Paged<IssueGroupView>>(request, "/api/v1/issue-groups?view=focus&page=0&size=20");
 
   // Wait for the page's rows to fully render before reading them.
   await expect(page.getByTestId("feed-row")).toHaveCount(api.content.length);

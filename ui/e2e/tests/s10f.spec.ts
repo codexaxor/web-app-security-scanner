@@ -40,7 +40,7 @@ test("S10f — filtering by the full name 'Vulnerable dependency' returns the sa
   await signIn(page, "/feed");
   const apiSca = await apiGet<Paged<IssueGroupView>>(
     request,
-    "/api/v1/issue-groups?view=focus&type=sca&page=0&size=50",
+    "/api/v1/issue-groups?view=focus&type=sca&page=0&size=20",
   );
 
   await page.getByLabel("Type").selectOption({ label: "Vulnerable dependency" });
