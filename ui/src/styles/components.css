@@ -1587,6 +1587,23 @@ button.health-item {
   .hbar {
     grid-template-columns: 120px 1fr 40px;
   }
+  /* First-run checklist (M8.11): at phone width the CTA wraps to its own full-width line. */
+  .checklist {
+    padding: var(--sp-4);
+  }
+  .checklist-step {
+    flex-wrap: wrap;
+  }
+  .checklist-body {
+    min-width: 0;
+  }
+  .checklist-step .btn {
+    width: 100%;
+  }
+  /* Command palette: full-bleed-ish on small screens, anchored nearer the top. */
+  .palette-backdrop {
+    padding: var(--sp-6) var(--sp-3) var(--sp-3);
+  }
 }
 
 /* M8.1 (D-076): branch label on repo rows / feed / side panel, and the "Branch to scan" picker. */
