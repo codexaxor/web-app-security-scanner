@@ -10,7 +10,6 @@ import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanTaskView;
 import com.company.secscan.scan.api.ScanView;
 import com.company.secscan.scan.api.ScanWarningView;
-import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;

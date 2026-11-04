@@ -10,7 +10,6 @@ import com.company.secscan.gitlab.dto.GitLabVersion;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryEventRecorder;
 import com.company.secscan.repository.RepositoryRepository;
-import com.company.secscan.workspace.Workspace;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;

@@ -67,11 +67,13 @@ class AllIgnoredGroupRollupIT extends AbstractGitLabIT {
         rollup.recompute(WORKSPACE, g.getId(), Map.of());
         assertThat(groups.findById(g.getId()).orElseThrow().getSeverityScore()).isEqualTo(82);
 
-        triage.ignoreSubIssue(high.getId(), "accepted risk");   // one still open (65) → severity 65, still open
+        triage.ignoreSubIssue(Workspace.DEFAULT_ID, high.getId(),
+                "accepted risk");   // one still open (65) → severity 65, still open
         assertThat(groups.findById(g.getId()).orElseThrow().getSeverityScore()).isEqualTo(65);
         assertThat(groups.findById(g.getId()).orElseThrow().getStatus()).isEqualTo(IssueGroup.STATUS_OPEN);
 
-        triage.ignoreSubIssue(medium.getId(), "accepted risk");  // last open now ignored → all-ignored
+        triage.ignoreSubIssue(Workspace.DEFAULT_ID, medium.getId(),
+                "accepted risk");  // last open now ignored → all-ignored
 
         IssueGroup after = groups.findById(g.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(IssueGroup.STATUS_IGNORED);
@@ -107,7 +109,8 @@ class AllIgnoredGroupRollupIT extends AbstractGitLabIT {
         solved.solve();
         subIssues.save(solved);
 
-        triage.ignoreSubIssue(open.getId(), "accepted risk"); // no open left; a solved sibling exists
+        triage.ignoreSubIssue(Workspace.DEFAULT_ID, open.getId(),
+                "accepted risk"); // no open left; a solved sibling exists
 
         IssueGroup after = groups.findById(g.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(IssueGroup.STATUS_SOLVED);

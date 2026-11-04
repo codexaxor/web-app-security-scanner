@@ -223,7 +223,7 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         assertThat(subFor(repo, "CVE-100").getIgnoredByRuleId()).isNull();   // cleared by solveIgnored
         long eventsBefore = events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, f).size();
 
-        triage.removeRule(rule.getId());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.getId());
 
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);  // still solved
         assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, f)).hasSize((int) eventsBefore);
@@ -238,7 +238,8 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         IgnoreRule rule = cveRule(repo, "CVE-100");
         seedIgnoredSca(repo, "CVE-100", rule.getId(), null);
         assertThat(retirer.retire(false).retired()).isEqualTo(1);
-        triage.removeRule(rule.getId());                                   // drop the rule so it won't re-ignore
+        triage.removeRule(Workspace.DEFAULT_ID,
+                rule.getId());                                   // drop the rule so it won't re-ignore
 
         reconcileScanWith(repo, "main", "CVE-100");                        // F re-detected on the same branch
 

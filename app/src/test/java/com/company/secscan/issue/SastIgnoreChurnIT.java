@@ -2,6 +2,7 @@ package com.company.secscan.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ class SastIgnoreChurnIT extends TriageSeedSupport {
         seedSast(scan1, repo, "opengrep-rules.custom.csrf", "src/Security.java", "hash-before");
         reconcile.reconcile(scan1, WORKSPACE);
         SubIssue before = byFile(repo, "src/Security.java");
-        triage.ignoreSubIssue(before.getId(), "reviewed, accepted");
+        triage.ignoreSubIssue(Workspace.DEFAULT_ID, before.getId(), "reviewed, accepted");
         assertThat(subBySnippet(repo, "hash-before").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
 
         // Edit the matched snippet -> new normalized-snippet hash -> NEW fingerprint for the same rule+file.
@@ -45,7 +46,7 @@ class SastIgnoreChurnIT extends TriageSeedSupport {
         assertThat(openForRuleFile).isEmpty();
 
         // GET /ignored carries the finding's line so the Ignored view can show file:line (M8 S10b/S10d).
-        var ignored = triage.listIgnored(0, 50);
+        var ignored = triage.listIgnored(Workspace.DEFAULT_ID, 0, 50);
         assertThat(ignored.content()).anySatisfy(it -> {
             assertThat(it.filePath()).isEqualTo("src/Security.java");
             assertThat(it.line()).isEqualTo(10);

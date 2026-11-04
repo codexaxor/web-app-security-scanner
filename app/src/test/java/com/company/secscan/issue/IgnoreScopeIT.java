@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.secscan.triage.ReasonCode;
+import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class IgnoreScopeIT extends TriageSeedSupport {
         reconcile.reconcile(scan, WORKSPACE);
         SubIssue sub = byVuln(repo, "CVE-2022-42889");
 
-        triage.ignoreSubIssue(sub.getId(), "false positive");
+        triage.ignoreSubIssue(Workspace.DEFAULT_ID, sub.getId(), "false positive");
 
         assertIgnoredByRule(byVuln(repo, "CVE-2022-42889"));
     }
@@ -40,7 +41,8 @@ class IgnoreScopeIT extends TriageSeedSupport {
     @Test
     void createRuleRejectsARepositoryOutsideTheWorkspace() {
         // N1: a per-repo rule must target a repository in this workspace — a random/foreign id is a 404.
-        assertThatThrownBy(() -> triage.createRule(IgnoreRule.SCOPE_PATH, UUID.randomUUID(), "src/x", "reason"))
+        assertThatThrownBy(() -> triage.createRule(Workspace.DEFAULT_ID, IgnoreRule.SCOPE_PATH, UUID.randomUUID(),
+                "src/x", "reason"))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                         .isEqualTo(HttpStatus.NOT_FOUND));
@@ -56,7 +58,7 @@ class IgnoreScopeIT extends TriageSeedSupport {
         reconcile.reconcile(scan, WORKSPACE);
         UUID groupId = byVuln(repo, "CVE-2100-1").getGroupId();
 
-        triage.ignoreGroup(groupId, "whole package accepted");
+        triage.ignoreGroup(Workspace.DEFAULT_ID, groupId, "whole package accepted");
 
         assertIgnoredByRule(byVuln(repo, "CVE-2100-1"));
         assertIgnoredByRule(byVuln(repo, "CVE-2100-2"));
@@ -70,7 +72,7 @@ class IgnoreScopeIT extends TriageSeedSupport {
         seedSast(scan, repo, "opengrep-rules.custom.y", "src/main/java/Foo.java", "h2");
         reconcile.reconcile(scan, WORKSPACE);
 
-        triage.createRule(IgnoreRule.SCOPE_PATH, repo, "src/test", "test code");
+        triage.createRule(Workspace.DEFAULT_ID, IgnoreRule.SCOPE_PATH, repo, "src/test", "test code");
 
         assertIgnoredByRule(byFile(repo, "src/test/java/FooTest.java"));
         assertThat(byFile(repo, "src/main/java/Foo.java").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
@@ -84,7 +86,7 @@ class IgnoreScopeIT extends TriageSeedSupport {
         seedSca(scan, repo, "CVE-2100-9", "org.other:lib", "pom.xml");
         reconcile.reconcile(scan, WORKSPACE);
 
-        triage.createRule(IgnoreRule.SCOPE_CVE, null, "CVE-2022-42889", "accepted everywhere");
+        triage.createRule(Workspace.DEFAULT_ID, IgnoreRule.SCOPE_CVE, null, "CVE-2022-42889", "accepted everywhere");
 
         assertIgnoredByRule(byVuln(repo, "CVE-2022-42889"));
         assertThat(byVuln(repo, "CVE-2100-9").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
@@ -99,7 +101,8 @@ class IgnoreScopeIT extends TriageSeedSupport {
         seedSast(scan, repo, "opengrep-rules.custom.other", "C.java", "h3");
         reconcile.reconcile(scan, WORKSPACE);
 
-        triage.createRule(IgnoreRule.SCOPE_RULE, repo, "opengrep-rules.custom.csrf", "rule accepted");
+        triage.createRule(Workspace.DEFAULT_ID, IgnoreRule.SCOPE_RULE, repo, "opengrep-rules.custom.csrf",
+                "rule accepted");
 
         assertIgnoredByRule(byFile(repo, "A.java"));
         assertIgnoredByRule(byFile(repo, "B.java"));

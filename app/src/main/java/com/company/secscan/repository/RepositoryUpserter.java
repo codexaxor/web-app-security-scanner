@@ -1,6 +1,5 @@
 package com.company.secscan.repository;
 
-import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Component;

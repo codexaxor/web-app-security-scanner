@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.company.secscan.scan.parse.DeclaredScope;
 import com.company.secscan.scan.parse.SecscanConfig;
 import com.company.secscan.triage.ReasonCode;
+import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -38,14 +39,14 @@ class RuleRemovalKeepsScanTimeCauseIT extends TriageSeedSupport {
         assertThat(sub.getAutoIgnoreReason()).isEqualTo(ReasonCode.TEST_SCOPE.code());
 
         // Manual sub-issue ignore over it → IGNORE_RULE holds it (quiet re-point), auto cause preserved.
-        UUID ruleId = triage.ignoreSubIssue(sub.getId(), "team accepted").id();
+        UUID ruleId = triage.ignoreSubIssue(Workspace.DEFAULT_ID, sub.getId(), "team accepted").id();
         sub = byVuln(repo, "CVE-SF1-1");
         assertThat(sub.getIgnoreReason()).isEqualTo(ReasonCode.IGNORE_RULE.code());
         assertThat(sub.getAutoIgnoreReason()).isEqualTo(ReasonCode.TEST_SCOPE.code());
         long before = events.count();
 
         // Remove the rule → re-reason to TEST_SCOPE, stays ignored, NO event.
-        triage.removeRule(ruleId);
+        triage.removeRule(Workspace.DEFAULT_ID, ruleId);
         sub = byVuln(repo, "CVE-SF1-1");
         assertThat(sub.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
         assertThat(sub.getIgnoreReason()).isEqualTo(ReasonCode.TEST_SCOPE.code());
@@ -72,13 +73,13 @@ class RuleRemovalKeepsScanTimeCauseIT extends TriageSeedSupport {
         assertThat(stock.getIgnoreReason()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
         assertThat(stock.getAutoIgnoreReason()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
 
-        UUID ruleId = triage.ignoreSubIssue(stock.getId(), "accepted").id();
+        UUID ruleId = triage.ignoreSubIssue(Workspace.DEFAULT_ID, stock.getId(), "accepted").id();
         stock = byFileAndRule(repo, "src/Sec.java", STOCK_CSRF);
         assertThat(stock.getIgnoreReason()).isEqualTo(ReasonCode.IGNORE_RULE.code());
         assertThat(stock.getAutoIgnoreReason()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
         long before = events.count();
 
-        triage.removeRule(ruleId);
+        triage.removeRule(Workspace.DEFAULT_ID, ruleId);
         stock = byFileAndRule(repo, "src/Sec.java", STOCK_CSRF);
         assertThat(stock.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
         assertThat(stock.getIgnoreReason()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());

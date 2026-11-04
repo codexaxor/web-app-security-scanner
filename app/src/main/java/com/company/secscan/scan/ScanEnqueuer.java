@@ -1,7 +1,6 @@
 package com.company.secscan.scan;
 
 import com.company.secscan.repository.RepositoryRepository;
-import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;

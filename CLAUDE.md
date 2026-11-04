@@ -91,6 +91,17 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
      scoping. The intel sync and the re-score sweep (`ReScoreService`, driven by `WorkspaceRepository.findAll`)
      are system maintenance jobs that run across all workspaces; the sweep then loads each workspace's own
      open sub-issues, so every sub-issue/repository/group query stays scoped by the row's own `workspace_id`.
+     The operator's ignored-orphan retire pass (`IgnoredOrphanRetirer.retire`, M8.10) is the same kind of
+     all-workspace maintenance loop: per workspace, every query is scoped by that workspace's id.
+   - M8.10 tenancy (D-093/D-094/D-098):
+     - `signup_request` is a **pre-tenant** table (a pending sign-up belongs to no workspace yet), read only by
+       sign-up, the login pending-check (`SignupRequestRepository.findByEmailAndStatus`) and the operator API.
+     - the per-request account check reloads the principal's own row by id (`ActiveAccountFilter` via
+       `AppUserRepository.findById`) — part of the authentication trust root, like the login lookup.
+     - the single-operator guard `AppUserRepository.existsByOperatorTrue` (the operator is a platform role).
+     - request paths take their workspace ONLY from the authenticated principal (`@CurrentWorkspace`);
+       `Workspace.DEFAULT_ID` appears only in its declaration and the admin/demo bootstraps
+       (`DefaultWorkspaceUsageGuardTest`).
 2. `issue_group` (what users triage) vs `sub_issue` (one finding, stable fingerprint = SHA-256 of fields joined
    with `|`):
    - SCA: package + vuln id (CVE, else GHSA/OSV) + manifest path

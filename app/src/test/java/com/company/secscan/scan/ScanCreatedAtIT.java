@@ -45,7 +45,8 @@ class ScanCreatedAtIT extends AbstractGitLabIT {
 
     @Test
     void postIgnoreRuleReturnsANonNullCreatedAt() {
-        IgnoreRuleView rule = triageService.createRule("cve", null, "CVE-2022-42889", "offline build tool only");
+        IgnoreRuleView rule = triageService.createRule(Workspace.DEFAULT_ID, "cve", null, "CVE-2022-42889",
+                "offline build tool only");
         assertThat(rule.createdAt()).isNotNull(); // R4 — Ignored view's createdAt is never null/blank
     }
 }

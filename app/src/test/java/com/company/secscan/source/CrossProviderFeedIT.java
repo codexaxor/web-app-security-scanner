@@ -157,16 +157,19 @@ class CrossProviderFeedIT extends AbstractGitLabIT {
                 .isEqualTo(4);
 
         // Feed (issue-groups): the provider filter narrows to that provider's groups.
-        assertThat(issueService.listGroups(null, null, null, null, "github", "all", null, true, 0, 50).content())
+        assertThat(issueService.listGroups(Workspace.DEFAULT_ID, null, null, null, null, "github", "all", null, true,
+                0, 50).content())
                 .extracting(IssueGroupView::title).containsExactly("gh finding");
-        assertThat(issueService.listGroups(null, null, null, null, "gitlab", "all", null, true, 0, 50).content())
+        assertThat(issueService.listGroups(Workspace.DEFAULT_ID, null, null, null, null, "gitlab", "all", null, true,
+                0, 50).content())
                 .extracting(IssueGroupView::title).containsExactly("gl finding");
 
         // Validated whitelist: anything else is a 400 on both endpoints (never trusted unchecked).
         assertThatThrownBy(() -> repositoryService.listSelected(Workspace.DEFAULT_ID, null, true, false, false,
                 "bogus", "name", 0, 50))
                 .isInstanceOf(ResponseStatusException.class);
-        assertThatThrownBy(() -> issueService.listGroups(null, null, null, null, "bogus", "all", null, true, 0, 50))
+        assertThatThrownBy(() -> issueService.listGroups(Workspace.DEFAULT_ID, null, null, null, null, "bogus", "all",
+                null, true, 0, 50))
                 .isInstanceOf(ResponseStatusException.class);
     }
 

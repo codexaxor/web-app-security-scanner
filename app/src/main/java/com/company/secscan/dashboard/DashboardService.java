@@ -13,7 +13,6 @@ import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.repository.RepositorySummaryService;
 import com.company.secscan.repository.RepositorySummaryService.RepositorySummary;
 import com.company.secscan.scan.Scan;
-import com.company.secscan.workspace.Workspace;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

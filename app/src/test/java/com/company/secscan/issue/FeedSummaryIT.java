@@ -131,7 +131,7 @@ class FeedSummaryIT extends AbstractGitLabIT {
         event(sub(gCrit, repo.getId(), "fp-a2"), "ignored", "system", 8);
         event(sub(gCrit, repo.getId(), "fp-u1"), "ignored", "user", 1);
 
-        FeedSummaryView s = service.feedSummary(null, null, "focus", false);
+        FeedSummaryView s = service.feedSummary(Workspace.DEFAULT_ID, null, null, "focus", false);
         assertThat(s.bands().critical()).isEqualTo(1);
         assertThat(s.bands().high()).isEqualTo(1);
         assertThat(s.newFindings()).isEqualTo(2); // only fp-new-1, fp-new-2 (the others are backdated out)
@@ -145,7 +145,8 @@ class FeedSummaryIT extends AbstractGitLabIT {
         assertThat(s.bands().critical()).isEqualTo(sqlCrit);
 
         // The 7-day buckets honour type+repo only, not the view: focus and all agree.
-        assertThat(service.feedSummary(null, null, "all", false).newFindings()).isEqualTo(s.newFindings());
+        assertThat(service.feedSummary(Workspace.DEFAULT_ID, null, null, "all",
+                false).newFindings()).isEqualTo(s.newFindings());
     }
 
     @Test
@@ -156,7 +157,7 @@ class FeedSummaryIT extends AbstractGitLabIT {
         solvedWithReason(sub(g, repo.getId(), "fp-nullreason"), null, 1);    // a solve with NULL reason → counts
         solvedWithReason(sub(g, repo.getId(), "fp-branch"), TriageEvent.REASON_BRANCH_CHANGED, 1); // excluded
 
-        FeedSummaryView s = service.feedSummary(null, null, "focus", false);
+        FeedSummaryView s = service.feedSummary(Workspace.DEFAULT_ID, null, null, "focus", false);
         assertThat(s.solved()).isEqualTo(2);   // genuine + null-reason; the branch-change close is excluded
     }
 
@@ -170,7 +171,7 @@ class FeedSummaryIT extends AbstractGitLabIT {
         subFirstSeenOn(g, repo.getId(), "fp-on-dev", scanOn(repo.getId(), "dev"));    // counts (tracked branch)
         subFirstSeenOn(g, repo.getId(), "fp-on-main", scanOn(repo.getId(), "main"));  // excluded (old branch)
 
-        assertThat(service.feedSummary(null, null, "focus", false).newFindings()).isEqualTo(1);
+        assertThat(service.feedSummary(Workspace.DEFAULT_ID, null, null, "focus", false).newFindings()).isEqualTo(1);
 
         // SQL oracle: distinct subs created in 7d whose first-seen scan branch = the repo's effective branch.
         Long sql = jdbc.queryForObject(

@@ -11,7 +11,6 @@ import com.company.secscan.source.github.GitHubClient;
 import com.company.secscan.source.github.GitHubProvider;
 import com.company.secscan.source.github.dto.GitHubRepo;
 import com.company.secscan.source.gitlab.GitLabProvider;
-import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
