@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SkeletonLines } from "./Skeleton";
 import { api, ConnectionView, Paged, SourceRepoView } from "../api";
 import Button from "./Button";
 import RepoName from "./RepoName";
@@ -110,7 +111,7 @@ export default function SelectSourceRepositories({
       {error ? <p className="field-error">{error}</p> : null}
 
       {!data ? (
-        <p className="muted">Loading repositories…</p>
+        <SkeletonLines />
       ) : data.content.length === 0 ? (
         <EmptyState title="No repositories found">This connection exposes no repositories to select.</EmptyState>
       ) : (

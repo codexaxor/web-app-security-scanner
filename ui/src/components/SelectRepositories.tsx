@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SkeletonLines } from "./Skeleton";
 import { api, ConnectionView, Paged, ProjectView, RepositoryView } from "../api";
 import Button from "./Button";
 import RepoName from "./RepoName";
@@ -110,7 +111,7 @@ export default function SelectRepositories() {
         </div>
 
         {!data ? (
-          <p className="muted">Loading projects…</p>
+          <SkeletonLines />
         ) : (
           <>
             <p className="muted">

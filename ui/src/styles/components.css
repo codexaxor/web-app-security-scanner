@@ -329,6 +329,24 @@
   justify-content: center;
   margin-bottom: var(--sp-6);
 }
+.signin-brand .brand-mark {
+  color: var(--accent);
+}
+/* Login card (M8.11): the sign-in form sits in a surface card for a polished, focused screen. */
+.signin-form {
+  max-width: none;
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+/* Reserved room for a future "Create account" link (M8.10). Empty today — keeps the card from reflowing when
+ * the link lands. */
+.signin-footer {
+  min-height: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
 
 /* ---------- page header ---------- */
 .page-header {
@@ -717,6 +735,17 @@ a.stat-link:hover .stat-num {
 }
 .skeleton-row td {
   border-bottom: 1px solid var(--border);
+}
+.skeleton-lines {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+.skeleton-lines .skeleton {
+  height: 14px;
+}
+.skeleton-lines .skeleton:last-child {
+  width: 60%;
 }
 @keyframes skeleton-shimmer {
   0% {

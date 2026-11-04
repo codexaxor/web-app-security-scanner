@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from "react";
+import { SkeletonLines } from "./Skeleton";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type SubIssueView, type TriageEventView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
@@ -218,7 +219,7 @@ export default function SubIssuePanel({
           </div>
         ) : null}
 
-        {q.isLoading ? <p className="muted">Loading…</p> : null}
+        {q.isLoading ? <SkeletonLines lines={4} /> : null}
 
         {byLocation.map(([file, locSubs]) => (
           <div className="loc-group" key={file}>
@@ -478,7 +479,7 @@ function History({ subId }: { subId: string }) {
     queryFn: () => api.listSubIssueEvents(subId, 0, 50),
   });
   if (q.isLoading) {
-    return <p className="muted">Loading history…</p>;
+    return <SkeletonLines lines={3} />;
   }
   if (!q.data || q.data.content.length === 0) {
     return <p className="muted">No status changes yet.</p>;

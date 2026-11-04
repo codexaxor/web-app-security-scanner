@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { SkeletonLines } from "./Skeleton";
 import { api } from "../api";
 import { qk } from "../queryClient";
 import InlineError from "./InlineError";
@@ -37,7 +38,7 @@ export default function WarningsDrawer({
       </div>
       <div className="panel-body stack">
         {q.error ? <InlineError error={q.error} /> : null}
-        {q.isLoading ? <p className="muted">Loading…</p> : null}
+        {q.isLoading ? <SkeletonLines lines={3} /> : null}
         {q.data && q.data.content.length === 0 ? <p className="muted">No warnings for this scan.</p> : null}
         {q.data?.content.map((w) => (
           <div key={w.id} className="location">
