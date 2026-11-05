@@ -6,7 +6,8 @@ const DELTEST_GROUP = "40000000-0000-0000-0000-000000000006"; // held by the ded
 
 test("the Ignored list matches GET /ignored and shows reason, creator and time", async ({ page, request }) => {
   await signIn(page, "/ignored");
-  const api = await apiGet<Paged<IgnoredItemView>>(request, "/api/v1/ignored?page=0&size=50");
+  // size=20 matches the UI's default page size (S11.3), so the first page's row count equals api.content.
+  const api = await apiGet<Paged<IgnoredItemView>>(request, "/api/v1/ignored?page=0&size=20");
   await expect(page.getByTestId("ignored-item")).toHaveCount(api.content.length);
 
   // Every ignored row shows a reason code and a non-blank ignored time (createdAt/ignoredAt, R4).

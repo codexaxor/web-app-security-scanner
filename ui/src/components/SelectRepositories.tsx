@@ -1,23 +1,32 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { SkeletonLines } from "./Skeleton";
+import { invalidateFor } from "../queryClient";
 import { api, ConnectionView, Paged, ProjectView, RepositoryView } from "../api";
 import Button from "./Button";
+import InlineError from "./InlineError";
 import RepoName from "./RepoName";
 import { EmptyState } from "./ui";
 
 const PAGE_SIZE = 50;
 
 /**
- * Pick a connection, list the projects it exposes (a group's projects, or its single project) and select them.
- * Below, the workspace's selected repositories with the connection that reaches each one and any inactive reason.
+ * Pick a GitLab connection, list the projects it exposes (a group's projects, or its single project) and select
+ * them. Below, the workspace's selected repositories with the connection that reaches each one and any inactive
+ * reason. This screen is GitLab-only (the projects endpoint is GitLab's); GitHub/public sources pick their
+ * repositories in the Sources wizard. Errors render INLINE where the failed content belongs — never as a
+ * replacement for the whole page (M8.11 review SF-1).
  */
 export default function SelectRepositories() {
-  const [connections, setConnections] = useState<ConnectionView[]>([]);
+  const [connections, setConnections] = useState<ConnectionView[] | null>(null); // null = still loading
+  const [connError, setConnError] = useState<unknown>(null);
   const [connectionId, setConnectionId] = useState<string>("");
   const [page, setPage] = useState(0);
   const [data, setData] = useState<Paged<ProjectView> | null>(null);
+  const [listError, setListError] = useState<unknown>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<RepositoryView[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null); // the "Add selected" action's own error
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<{ added: number; reactivated: number; alreadySelected: number } | null>(
     null,
@@ -27,10 +36,14 @@ export default function SelectRepositories() {
     api
       .listConnections(0, 100)
       .then((c) => {
-        setConnections(c.content);
-        if (c.content.length > 0) setConnectionId((prev) => prev || c.content[0].id);
+        const gitlab = c.content.filter((x) => x.provider === "gitlab");
+        setConnections(gitlab);
+        if (gitlab.length > 0) setConnectionId((prev) => prev || gitlab[0].id);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load connections"));
+      .catch((e) => {
+        setConnections([]);
+        setConnError(e);
+      });
     refreshSelected();
   }, []);
 
@@ -38,10 +51,15 @@ export default function SelectRepositories() {
     if (!connectionId) return;
     let active = true;
     setData(null);
+    setListError(null);
     api
       .listProjects(connectionId, page, PAGE_SIZE)
-      .then((d) => active && setData(d))
-      .catch((e) => active && setError(e instanceof Error ? e.message : "Failed to load projects"));
+      .then((d) => {
+        if (active) setData(d);
+      })
+      .catch((e) => {
+        if (active) setListError(e);
+      });
     return () => {
       active = false;
     };
@@ -71,11 +89,12 @@ export default function SelectRepositories() {
       const result = await api.selectRepositories(connectionId, [...checked]);
       setSaved({ added: result.added, reactivated: result.reactivated, alreadySelected: result.alreadySelected });
       setChecked(new Set());
+      void invalidateFor("sources");
       const d = await api.listProjects(connectionId, page, PAGE_SIZE);
       setData(d);
       refreshSelected();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to select repositories");
+      setError(e);
     } finally {
       setBusy(false);
     }
@@ -84,8 +103,23 @@ export default function SelectRepositories() {
   const label = (c: ConnectionView) =>
     `${c.targetType}: ${c.targetType === "group" ? c.groupFullPath : c.projectFullPath}`;
 
-  if (error) return <p className="field-error">{error}</p>;
-  if (connections.length === 0) return <EmptyState title="Add a GitLab connection first" />;
+  if (connections === null) return <SkeletonLines />;
+  if (connError) return <InlineError error={connError} />;
+  if (connections.length === 0) {
+    return (
+      <EmptyState
+        title="Add a source first"
+        testId="select-no-source"
+        action={
+          <Link className="btn btn-primary btn-sm" to="/connect">
+            Add a source
+          </Link>
+        }
+      >
+        Connect a GitLab group or project, then pick the repositories to scan here.
+      </EmptyState>
+    );
+  }
 
   return (
     <div className="stack-4 onboarding-wide">
@@ -109,8 +143,13 @@ export default function SelectRepositories() {
           </select>
         </div>
 
-        {!data ? (
-          <p className="muted">Loading projects…</p>
+        {listError ? (
+          <div className="stack" data-testid="select-list-error">
+            <p className="muted">Could not load projects from this connection.</p>
+            <InlineError error={listError} />
+          </div>
+        ) : !data ? (
+          <SkeletonLines />
         ) : (
           <>
             <p className="muted">
@@ -180,6 +219,7 @@ export default function SelectRepositories() {
                 </span>
               )}
             </div>
+            {error ? <InlineError error={error} variant="field" /> : null}
           </>
         )}
       </div>

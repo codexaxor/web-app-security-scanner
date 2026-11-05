@@ -24,6 +24,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // M8.11: run test files serially. Under default file-parallelism many concurrent jsdom environments starve
+    // real-timer `findBy*`/`waitFor` calls (e.g. BranchPicker's branch list), producing load-dependent timeout
+    // flakes. Serial execution keeps the suite deterministic (~15s) without weakening any assertion.
+    fileParallelism: false,
     include: ["src/**/*.test.{ts,tsx}"],
     // The e2e/ tree is Playwright-driven and run separately (npm run e2e); keep vitest out of it.
     exclude: ["e2e/**", "node_modules/**", "dist/**"],

@@ -23,11 +23,13 @@ import SubIssuePanel from "../components/SubIssuePanel";
 import SeverityPill from "../components/SeverityPill";
 import StatusChip, { type StatusKind } from "../components/StatusChip";
 import TypeBadge from "../components/TypeBadge";
-import Icon from "../components/icons";
+import Icon, { type IconName } from "../components/icons";
 import WarningsDrawer from "../components/WarningsDrawer";
 import InlineError from "../components/InlineError";
 import { TableSkeleton } from "../components/Skeleton";
-import { PageHeader, EmptyState, ScanStatusChip } from "../components/ui";
+import { Card, EmptyState, ScanStatusChip } from "../components/ui";
+import PageLayout from "../components/PageLayout";
+import SeverityChips from "../components/SeverityChips";
 
 const TYPES: IssueType[] = ["sca", "sast", "secret", "iac", "eol"];
 const TABS = ["issues", "scans", "settings"] as const;
@@ -72,64 +74,95 @@ export default function RepositoryPage() {
 
   if (!valid) {
     return (
-      <section>
-        <PageHeader title="Repository" />
+      <PageLayout title="Repository" breadcrumbs={[{ label: "Repositories", to: "/repositories" }, { label: "Repository" }]}>
         <EmptyState title="Page not found" testId="not-found">
           That link isn't valid. <Link to="/repositories">Go to Repositories</Link>.
         </EmptyState>
-      </section>
+      </PageLayout>
     );
   }
 
   const r = repo.data;
+  const shortName = r ? (r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace) : "Repository";
   return (
-    <section>
-      <div className="breadcrumb">
-        <Link to="/repositories">← Repositories</Link>
-      </div>
+    <PageLayout
+      title={shortName}
+      breadcrumbs={[{ label: "Repositories", to: "/repositories" }, { label: shortName }]}
+      subtitle={
+        r ? (
+          <span className="repo-header-sub">
+            <span className="mono">{r.pathWithNamespace}</span>
+            {r.effectiveBranch ? <span className="muted branch-label">· {r.effectiveBranch}</span> : null}
+            {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
+          </span>
+        ) : undefined
+      }
+      actions={
+        r ? (
+          <>
+            <ScanButton repositoryId={r.id} disabled={!r.active} primary />
+            <RowMenu label="Repository actions">
+              {(close) => (
+                <button
+                  type="button"
+                  className="rowmenu-item"
+                  onClick={() => {
+                    close();
+                    goTab("settings");
+                  }}
+                >
+                  Settings
+                </button>
+              )}
+            </RowMenu>
+          </>
+        ) : undefined
+      }
+      kpi={
+        r ? (
+          <>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Open findings</span>
+              </div>
+              <SeverityChips counts={r.openBySeverity} />
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Last scan</span>
+              </div>
+              <div className="row">
+                {r.lastScan ? (
+                  <>
+                    <ScanStatusChip status={r.lastScan.status} />
+                    {r.lastScan.finishedAt ? <RelativeTime iso={r.lastScan.finishedAt} /> : null}
+                  </>
+                ) : (
+                  <span className="muted">Never scanned</span>
+                )}
+              </div>
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Languages</span>
+              </div>
+              <div className="truncate" title={r.languages.join(", ")}>
+                {r.languages.length ? r.languages.join(", ") : <span className="muted">Not detected</span>}
+              </div>
+            </Card>
+            <Card>
+              <div className="card-head">
+                <span className="stat-label">Ignored</span>
+              </div>
+              <div className="stat-num">{r.ignoredCount}</div>
+            </Card>
+          </>
+        ) : undefined
+      }
+    >
       {repo.error ? <InlineError error={repo.error} /> : null}
       {r ? (
         <>
-          <PageHeader
-            title={r.pathWithNamespace.split("/").filter(Boolean).pop() ?? r.pathWithNamespace}
-            subtitle={
-              <span className="repo-header-sub">
-                <span className="mono">{r.pathWithNamespace}</span>
-                {r.effectiveBranch ? <span className="muted branch-label">· {r.effectiveBranch}</span> : null}
-                {!r.active ? <span className="chip chip-ignored">Inactive</span> : null}
-              </span>
-            }
-            actions={
-              <>
-                <ScanButton repositoryId={r.id} disabled={!r.active} primary />
-                <RowMenu label="Repository actions">
-                  {(close) => (
-                    <button
-                      type="button"
-                      className="rowmenu-item"
-                      onClick={() => {
-                        close();
-                        goTab("settings");
-                      }}
-                    >
-                      Settings
-                    </button>
-                  )}
-                </RowMenu>
-              </>
-            }
-          />
-          <div className="repo-lastscan muted">
-            {r.lastScan ? (
-              <span className="row">
-                Last scan: <ScanStatusChip status={r.lastScan.status} />{" "}
-                <RelativeTime iso={r.lastScan.finishedAt} />
-              </span>
-            ) : (
-              <span>Never scanned</span>
-            )}
-          </div>
-
           {r.lastScan ? <CoverageBanner scanId={r.lastScan.id} /> : null}
 
           <nav className="tabs" role="tablist" aria-label="Repository sections">
@@ -155,7 +188,7 @@ export default function RepositoryPage() {
           ) : null}
         </>
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
 
@@ -290,7 +323,14 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
       {feed.error ? <InlineError error={feed.error} /> : null}
 
       {rows.length === 0 && !feed.isLoading ? (
-        <EmptyState title="No issues match these filters">
+        <EmptyState
+          title="No issues match these filters"
+          action={
+            <Link className="btn btn-ghost btn-sm" to={`/repositories/${repoId}?tab=scans`}>
+              View scans
+            </Link>
+          }
+        >
           Switch to All, clear a filter, or change the search.
         </EmptyState>
       ) : (
@@ -317,28 +357,28 @@ function RepoIssuesTab({ repoId }: { repoId: string }) {
                   const t = titleFor(g);
                   const more = g.locationCount > 1 ? g.locationCount - 1 : 0;
                   return (
-                    <tr
-                      key={g.id}
-                      className="row-click"
-                      tabIndex={0}
-                      data-testid="repo-issue-row"
-                      onClick={() => openPanel(g.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openPanel(g.id);
-                        }
-                      }}
-                    >
+                    <tr key={g.id} className="row-click" data-testid="repo-issue-row">
                       <td>
                         <div className="type-cell">
+                          <span className="type-icon" style={{ color: `var(--type-${g.type})` }} aria-hidden="true">
+                            <Icon name={g.type as IconName} />
+                          </span>
                           <TypeBadge type={g.type} />
                           {g.level2Category ? <span className="muted category-tag">{g.level2Category}</span> : null}
                         </div>
                       </td>
                       <td>
                         <div className="stack-tight">
-                          <strong>{t.title}</strong>
+                          {/* S11.9: a real button opens the panel — Enter/Space work natively; its stretched
+                              ::after makes the whole row clickable. The row menu stays above the overlay. */}
+                          <button
+                            type="button"
+                            className="row-link-btn"
+                            onClick={() => openPanel(g.id)}
+                            aria-label={`Open ${t.title}`}
+                          >
+                            <strong>{t.title}</strong>
+                          </button>
                           {t.subtitle ? (
                             <div
                               className={g.type === "sast" ? "muted mono-sub" : "muted subtitle-text"}
@@ -446,7 +486,12 @@ function RepoScansTab({ repoId, repoPath }: { repoId: string; repoPath: string }
     <div>
       {scans.error ? <InlineError error={scans.error} /> : null}
       {rows.length === 0 && !scans.isLoading ? (
-        <EmptyState title="No scans yet">This repository has not been scanned.</EmptyState>
+        <EmptyState
+          title="No scans yet"
+          action={<ScanButton repositoryId={repoId} primary />}
+        >
+          This repository has not been scanned.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">

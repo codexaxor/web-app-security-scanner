@@ -16,11 +16,13 @@
   color: var(--text);
 }
 .brand-mark {
-  width: 22px;
-  height: 22px;
   flex: none;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--accent), var(--status-solved));
+  color: var(--shell-accent);
+}
+.brand-name {
+  font-weight: 750;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
 }
 
 /* keyboard: jump straight to main content, first tab stop */
@@ -39,54 +41,90 @@
   top: var(--sp-2);
 }
 
+/* The sidebar is the grid CELL: its navy background stretches to the full grid-row height (which is at least
+ * 100vh, taller when the page content is taller), so the navy chrome never stops mid-page (S11.1). The nav
+ * itself lives in .sidebar-inner, which is sticky and 100vh with its own scroll. */
 .sidebar {
+  border-right: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  z-index: var(--z-drawer);
+}
+.sidebar-inner {
   position: sticky;
   top: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-3);
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  z-index: 40;
+  overflow-y: auto;
 }
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
-  font-weight: 750;
-  font-size: var(--fs-md);
-  letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--shell-text);
 }
 .sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+.sidenav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* S11.5: a plain muted section label (not a toggle button) above each group. */
+.sidenav-section {
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--shell-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sidenav-items {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .sidenav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   height: 38px;
   padding: 0 var(--sp-3);
   border-radius: var(--radius);
-  color: var(--muted);
+  color: var(--shell-muted);
   font-weight: 550;
   text-decoration: none;
   white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .sidenav-link:hover {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--shell-text);
+  background: var(--shell-surface);
   text-decoration: none;
 }
 .sidenav-link.active {
-  color: var(--accent);
-  background: var(--status-new-bg);
+  color: var(--shell-active-text);
+  background: var(--shell-active-bg);
   font-weight: 650;
+}
+.sidenav-link.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--shell-accent);
 }
 .sidenav-icon {
   font-size: 19px;
@@ -98,18 +136,53 @@
   flex-direction: column;
   gap: var(--sp-3);
   padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--shell-border);
 }
-.sidebar-user {
+/* S11.5: the one control that collapses the whole sidebar to icons. */
+.sidebar-collapse {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  color: var(--muted);
+  gap: var(--sp-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-muted);
+  font: inherit;
   font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.sidebar-user .muted {
-  min-width: 0;
+.sidebar-collapse:hover {
+  background: var(--shell-surface);
+  color: var(--shell-text);
+}
+/* Collapsed sidebar (desktop only): a narrow icon rail — labels, section titles and the brand/user text hide. */
+@media (min-width: 1025px) {
+  .app.sidebar-collapsed {
+    grid-template-columns: 64px 1fr;
+  }
+  .sidebar-collapsed .sidenav-label,
+  .sidebar-collapsed .brand-name,
+  .sidebar-collapsed .sidenav-section,
+  .sidebar-collapsed .user-menu-name,
+  .sidebar-collapsed .user-menu-caret {
+    display: none;
+  }
+  .sidebar-collapsed .sidebar-inner {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+  .sidebar-collapsed .sidebar-brand,
+  .sidebar-collapsed .sidenav-link,
+  .sidebar-collapsed .user-menu-trigger,
+  .sidebar-collapsed .sidebar-collapse {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 .theme-control {
   width: 100%;
@@ -120,6 +193,84 @@
   padding: 0 var(--sp-1);
   font-size: var(--fs-xs);
   font-weight: 600;
+}
+
+/* user menu (footer of the navy sidebar) */
+.user-menu {
+  position: relative;
+}
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-text);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.user-menu-trigger:hover {
+  background: var(--shell-surface);
+}
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--shell-accent);
+  color: var(--shell-bg);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+}
+.user-menu-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.user-menu-caret {
+  font-size: 15px;
+  color: var(--shell-muted);
+}
+.user-menu-pop {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-palette);
+}
+.user-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.user-menu-heading {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.content:focus {
+  /* main is a programmatic focus target (skip link, palette close after navigation) — not an interactive
+     control, so no ring around the whole page (M8.11 review SF-4). */
+  outline: none;
 }
 .content {
   max-width: var(--content-max);
@@ -139,14 +290,17 @@
   width: 38px;
   height: 38px;
   font-size: 20px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--shell-border);
   border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
+  background: transparent;
+  color: var(--shell-text);
   cursor: pointer;
 }
 .appbar-menu:hover {
-  background: var(--surface-2);
+  background: var(--shell-surface);
+}
+.appbar .brand {
+  color: var(--shell-text);
 }
 .scrim {
   display: none;
@@ -161,9 +315,10 @@
     align-items: center;
     gap: var(--sp-3);
     padding: var(--sp-2) var(--sp-4);
-    min-height: 52px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    height: var(--appbar-h); /* fixed, so sticky table headers can offset by exactly this (N-3) */
+    border-bottom: 1px solid var(--shell-border);
+    background: var(--shell-bg);
+    color: var(--shell-text);
     position: sticky;
     top: 0;
     z-index: 30;
@@ -215,6 +370,24 @@
   justify-content: center;
   margin-bottom: var(--sp-6);
 }
+.signin-brand .brand-mark {
+  color: var(--accent);
+}
+/* Login card (M8.11): the sign-in form sits in a surface card for a polished, focused screen. */
+.signin-form {
+  max-width: none;
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+/* Reserved room for a future "Create account" link (M8.10). Empty today — keeps the card from reflowing when
+ * the link lands. */
+.signin-footer {
+  min-height: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
 
 /* ---------- page header ---------- */
 .page-header {
@@ -222,7 +395,9 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
 }
 .page-header .subtitle {
   color: var(--muted);
@@ -325,6 +500,14 @@
   border-radius: var(--radius-lg);
   padding: var(--sp-4);
   box-shadow: var(--shadow-1);
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+/* Linked cards (e.g. the Dashboard band tiles) lift on hover; static cards are unaffected. */
+a.card:hover,
+.card-link:hover {
+  box-shadow: var(--shadow-2);
+  border-color: var(--border-strong);
+  text-decoration: none;
 }
 .card-head {
   display: flex;
@@ -375,6 +558,11 @@ a.stat-link:hover .stat-num {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
+/* S11.3: compact rows (~44–48px) — tighter vertical padding on body cells; the header keeps its padding. */
+.table td {
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
 /* Sticky header (design pass, item 2) — the wrapper no longer clips, so the header sticks to the viewport as
  * the page scrolls; corners are rounded on the edge cells instead of by overflow:hidden. */
 .table thead th {
@@ -387,6 +575,13 @@ a.stat-link:hover .stat-num {
   letter-spacing: 0.04em;
   color: var(--muted);
   font-weight: 650;
+}
+/* 721–1024px: the sticky navy app-bar occupies the top of the viewport, so the sticky header sticks just below
+ * it instead of sliding underneath (M8.11 review N-3). At <= 720px headers are static (wide tables scroll). */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .table thead th {
+    top: var(--appbar-h);
+  }
 }
 .table thead tr:first-child th:first-child {
   border-top-left-radius: var(--radius-lg);
@@ -403,16 +598,62 @@ a.stat-link:hover .stat-num {
 .table tbody tr:last-child td {
   border-bottom: none;
 }
+/* Whole-row click via a REAL link (M8.11, approved change #4): the row's primary cell holds a .row-link whose
+ * ::after is stretched over the whole row, so left-click anywhere on the row follows the link while Enter,
+ * middle-click and Ctrl/⌘-click all work as a normal anchor. No onClick-only <tr>. Other interactive controls
+ * in the row sit above the overlay (z-index) so they remain independently clickable. */
 .table tbody tr.row-click {
+  position: relative;
   cursor: pointer;
 }
 .table tbody tr.row-click:hover td,
-.table tbody tr.row-click:focus-visible td {
+.table tbody tr.row-click:focus-within td {
   background: var(--surface-2);
 }
-.table tbody tr.row-click:focus-visible {
+.row-link {
+  color: inherit;
+  text-decoration: none;
+}
+.row-link:hover {
+  text-decoration: none;
+}
+/* A real <button> that opens an in-page panel (not navigation), stretched over the row like .row-link (S11.9). */
+.row-link-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-link::after,
+.row-link-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.row-link:focus-visible,
+.row-link-btn:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link):not(.row-link-btn) {
+  position: relative;
+  z-index: 1;
+}
+/* The full repository path is reference text people copy: keep it ABOVE the row-link overlay so it can be
+ * selected (a click on the path selects text instead of navigating; the name link and the rest of the row
+ * still open the repository) — M8.11 review N-8. */
+.table tbody tr.row-click td .repo-path {
+  position: relative;
+  z-index: 1;
+  width: fit-content; /* only the text itself sits above the overlay, not the empty rest of the cell */
+  cursor: text;
+  user-select: text;
 }
 .cell-num {
   text-align: right;
@@ -570,6 +811,17 @@ a.stat-link:hover .stat-num {
 }
 .skeleton-row td {
   border-bottom: 1px solid var(--border);
+}
+.skeleton-lines {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+.skeleton-lines .skeleton {
+  height: 14px;
+}
+.skeleton-lines .skeleton:last-child {
+  width: 60%;
 }
 @keyframes skeleton-shimmer {
   0% {
@@ -886,12 +1138,134 @@ button.health-item {
 }
 
 /* ---------- toolbar / filters ---------- */
+/* ---------- page template (S11.2): top bar + toolbar groups + KPI strip ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.topbar-left {
+  min-width: 0;
+  flex: 1;
+}
+.topbar-here {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.topbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: text;
+  flex: none;
+  transition: border-color var(--transition-fast);
+}
+.topbar-search:hover {
+  border-color: var(--accent);
+}
+.topbar-search-icon {
+  font-size: 16px;
+  flex: none;
+}
+.topbar-search-text {
+  flex: 1;
+  text-align: left;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-search-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+/* S11.10: KPI cards share a row height (grid stretch); centre their content so short cards (a single number,
+ * a last-scan line) don't leave an empty gap at the bottom. */
+.kpi-strip > .card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+/* KPI card icon (S11.8) */
+.kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 16px;
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.stat-card-warn .kpi-icon,
+.stat-card-warn .stat-num {
+  color: var(--sev-high);
+}
+/* type-bar icon (S11.8) — coloured per finding type via an inline CSS var on the wrapper */
+.hbar-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  margin-right: var(--sp-1);
+}
+.hbar-label {
+  display: inline-flex;
+  align-items: center;
+}
+/* a repository name used as a link inside a table cell */
+.repo-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+.repo-name-link:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 .toolbar {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+.toolbar-main {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: var(--sp-4);
+  flex: 1;
+  min-width: 0;
+}
+.toolbar-right {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex: none;
 }
 .toolbar select,
 .toolbar input[type="text"],
@@ -1281,6 +1655,73 @@ button.health-item {
   font-weight: 650;
   color: var(--text-2);
 }
+.empty-action {
+  margin-top: var(--sp-2);
+}
+
+/* ---------- first-run checklist (M8.11 item 5) ---------- */
+.checklist {
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.checklist-head {
+  margin-bottom: var(--sp-3);
+}
+.checklist-head .section-head {
+  margin: 0;
+}
+.checklist-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.checklist-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.checklist-step.done {
+  background: var(--status-solved-bg);
+  border-color: transparent;
+}
+.checklist-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+.checklist-step.done .checklist-marker {
+  background: var(--status-solved);
+  color: var(--accent-contrast);
+}
+.checklist-body {
+  flex: 1;
+  min-width: 0;
+}
+.checklist-label {
+  font-weight: 650;
+  color: var(--text);
+}
+.checklist-desc {
+  font-size: var(--fs-sm);
+}
 
 /* row title + muted subtitle */
 .stack-tight {
@@ -1313,6 +1754,12 @@ button.health-item {
   font-size: var(--fs-sm);
   flex-wrap: wrap;
 }
+/* S11.2/S11.3: the pager lives in the content-card footer, not floating below the card. */
+.table-wrap > .pager {
+  margin-top: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+}
 .pager-range {
   margin-right: auto; /* range on the left, controls on the right */
 }
@@ -1343,6 +1790,39 @@ button.health-item {
   }
   .hbar {
     grid-template-columns: 120px 1fr 40px;
+  }
+  /* First-run checklist (M8.11): at phone width the CTA wraps to its own full-width line. */
+  .checklist {
+    padding: var(--sp-4);
+  }
+  .checklist-step {
+    flex-wrap: wrap;
+  }
+  .checklist-body {
+    min-width: 0;
+  }
+  .checklist-step .btn {
+    width: 100%;
+  }
+  /* Command palette: full-bleed-ish on small screens, anchored nearer the top. */
+  .palette-backdrop {
+    padding: var(--sp-6) var(--sp-3) var(--sp-3);
+  }
+  /* S11: the top-bar search collapses to an icon-only button so the top bar fits phone width. */
+  .topbar-search {
+    min-width: 0;
+    max-width: none;
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+  .topbar-search-text,
+  .topbar-search-kbd {
+    display: none;
+  }
+  /* S11.10: a consistent, no-overflow 2-column KPI grid on phones (minmax(0,…) lets cards shrink to fit). */
+  .kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1490,6 +1970,137 @@ button.health-item {
   margin-bottom: var(--sp-3);
   font-size: var(--fs-sm);
 }
+.breadcrumbs {
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.breadcrumbs a {
+  color: var(--muted);
+}
+.breadcrumbs a:hover {
+  color: var(--accent);
+}
+.breadcrumbs [aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.breadcrumb-sep {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ---------- ⌘K command palette ---------- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh var(--sp-4) var(--sp-4);
+  background: rgba(8, 12, 24, 0.5);
+}
+.palette {
+  width: 100%;
+  max-width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.palette-search-icon {
+  font-size: 18px;
+  color: var(--muted);
+  flex: none;
+}
+.palette-input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md);
+  outline: none;
+}
+.palette-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.palette-list {
+  margin: 0;
+  padding: var(--sp-2);
+  list-style: none;
+  overflow-y: auto;
+}
+.palette-empty {
+  padding: var(--sp-4);
+  text-align: center;
+  color: var(--muted);
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.palette-item.active {
+  background: var(--status-new-bg);
+  color: var(--accent);
+}
+.palette-item-icon {
+  font-size: 18px;
+  flex: none;
+  color: var(--muted);
+}
+.palette-item.active .palette-item-icon {
+  color: var(--accent);
+}
+.palette-item-label {
+  font-weight: 600;
+  flex: none;
+  max-width: 45%;
+}
+.palette-item-sub {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-left: auto;
+}
 .repo-header-sub {
   display: inline-flex;
   align-items: center;
@@ -1560,6 +2171,12 @@ button.health-item {
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+.type-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  flex: none;
 }
 .category-tag {
   font-size: var(--fs-xs);
@@ -1800,11 +2417,11 @@ button.health-item {
   line-height: 1.4;
 }
 .toast-success {
-  border-color: var(--sev-low, #3a7d44);
-  border-left: 4px solid var(--sev-low, #3a7d44);
+  border-color: var(--ok);
+  border-left: 4px solid var(--ok);
 }
 .toast-info {
-  border-left: 4px solid var(--accent, #3b6ea5);
+  border-left: 4px solid var(--accent);
 }
 .toast-error {
   border-color: var(--error-border);
@@ -1813,7 +2430,7 @@ button.health-item {
 .toast-close {
   border: none;
   background: transparent;
-  color: var(--text-muted, inherit);
+  color: var(--muted);
   font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
@@ -1887,7 +2504,7 @@ button.health-item {
   border: 2px solid currentcolor;
   border-top-color: transparent;
   border-radius: 50%;
-  color: var(--primary-contrast, #fff);
+  color: var(--accent-contrast);
   animation: btn-spin 0.6s linear infinite;
 }
 .btn-secondary.is-busy::after,

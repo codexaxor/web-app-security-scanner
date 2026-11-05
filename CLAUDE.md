@@ -59,6 +59,7 @@ scripts/compose-smoke.sh           # isolated compose smoke (own project `secsca
 docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag must match ScannerProperties.image
 cd ui && npm ci && npm run dev
 cd ui && npm run build && npm run typecheck && npm test && npm run guard  # UI gate (M8): tsc, vite build, vitest, security guard
+#   npm test runs serially (vite.config.ts test.fileParallelism:false) to avoid the BranchPicker timing flake; no command changed (M8.11).
 cd ui && npm run e2e               # M8 E2E: isolated `secscan-e2e` compose (own volume/ports) + Playwright-in-Docker; builds, seeds, tests, down -v
 ./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"   # live-osv tests (osv.dev/deps.dev); excluded by default
 ./gradlew :app:test -PliveIntel --tests "*LiveIntelIT"     # live-intel tests (CISA KEV / FIRST EPSS); excluded by default

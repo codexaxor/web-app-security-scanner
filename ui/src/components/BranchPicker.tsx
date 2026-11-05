@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SkeletonLines } from "./Skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import Button from "./Button";
@@ -62,7 +63,7 @@ export default function BranchPicker({
         >
           {defaultLabel}
         </button>
-        {q.isLoading ? <p className="muted">Loading branches…</p> : null}
+        {q.isLoading ? <SkeletonLines lines={3} /> : null}
         {q.error ? <p className="field-error">Could not load branches.</p> : null}
         {q.data?.content.map((b) => (
           <button

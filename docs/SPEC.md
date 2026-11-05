@@ -450,6 +450,27 @@ reload still signed in → sign out, the demo ribbon, live queued→running→co
 a field error on Sources, `Pager` on Repositories and Feed, and the settings text + link. (Detailed Done when:
 architect, before `/start-milestone M8.8`.)
 
+## M8.11 UI redesign + navigation
+
+**Scope (D-099; `ui/` only).** A redesign and navigation pass over the existing screens — no `app/`/`core/`,
+migration, compose or API-contract change, no new runtime deps. Left-sidebar app shell with grouped sections
+(Overview / Findings / Sources & repos / Workspace) and a collapse-to-icons control; one design-token system;
+theme (D-099) LIGHT by default with explicit DARK only via the user-menu toggle (no "system", no
+`prefers-color-scheme` block), remembered through a single `secscan-theme` localStorage key behind the guard
+allowlist. One `PageLayout` template on every routed page (top bar → header → KPI strip → toolbar → content)
+with breadcrumbs on detail routes; a ⌘K/Ctrl+K quick-jump palette (ARIA combobox over pages + repositories via
+the server-side search, one page of 6, debounced). A Dashboard first-run checklist (add source → add repository →
+run first scan) derived from existing list counts. Whole-row real links (`<a href>`) on Repositories and Feed.
+Default page size 20 (sizes 20/50/100). URL-addressable Repositories filters (`provider`, `search`,
+`lastScanFailed`). `/select` lists GitLab connections only, with an "Add a source first" empty state. The guard
+still bans `Authorization: Basic` construction; e2e selectors updated for the new shell/theme without weakening
+assertions.
+
+**Done when:** the UI gate (`npm run build`/`typecheck`/`test`/`guard`) and e2e (×2) pass; theme persistence,
+palette (focus restore, combobox, debounce), first-run checklist, whole-row keyboard navigation, default page
+size 20 and the URL-addressable Repositories filters are proven by unit tests and e2e; AA contrast holds in both
+themes. See `docs/reports/M8.11.md`.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository

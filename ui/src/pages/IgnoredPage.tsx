@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type IgnoreRuleView, type IgnoredItemView } from "../api";
 import { invalidateFor, qk } from "../queryClient";
@@ -11,7 +11,8 @@ import { useToast, errorMessage } from "../toast";
 import Button from "../components/Button";
 import ConfirmDialog from "../components/ConfirmDialog";
 import TypeBadge from "../components/TypeBadge";
-import { EmptyState, PageHeader, PathText } from "../components/ui";
+import { EmptyState, PathText } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { TableSkeleton } from "../components/Skeleton";
 import CreateRuleDialog, { type RulePrefill } from "../components/CreateRuleDialog";
 
@@ -64,9 +65,7 @@ export default function IgnoredPage() {
   });
 
   return (
-    <section>
-      <PageHeader title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them." />
-
+    <PageLayout title="Ignored" subtitle="Findings held out of the feed, and the rules that hold them.">
       <h2 className="section-head">Ignored findings</h2>
       {reason ? (
         <div className="filter-chip" data-testid="reason-filter">
@@ -80,7 +79,16 @@ export default function IgnoredPage() {
       ) : null}
       {items.error ? <InlineError error={items.error} /> : null}
       {items.data && items.data.content.length === 0 ? (
-        <EmptyState title="Nothing is ignored">Everything found is in the feed.</EmptyState>
+        <EmptyState
+          title="Nothing is ignored"
+          action={
+            <Link className="btn btn-ghost btn-sm" to="/feed">
+              Go to the feed
+            </Link>
+          }
+        >
+          Everything found is in the feed.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="table">
@@ -122,20 +130,27 @@ export default function IgnoredPage() {
             </tbody>
             )}
           </table>
+          <Pager
+            page={itemsPaging.page}
+            size={itemsPaging.size}
+            totalElements={items.data?.totalElements ?? 0}
+            totalPages={items.data?.totalPages ?? 1}
+            onPage={itemsPaging.setPage}
+            onSize={itemsPaging.setSize}
+          />
         </div>
       )}
-      <Pager
-        page={itemsPaging.page}
-        size={itemsPaging.size}
-        totalElements={items.data?.totalElements ?? 0}
-        totalPages={items.data?.totalPages ?? 1}
-        onPage={itemsPaging.setPage}
-        onSize={itemsPaging.setSize}
-      />
 
       <h2 className="section-head">Ignore rules</h2>
       {rules.data && rules.data.content.length === 0 ? (
-        <EmptyState title="No manual ignore rules">
+        <EmptyState
+          title="No manual ignore rules"
+          action={
+            <Link className="btn btn-ghost btn-sm" to="/feed">
+              Open the feed
+            </Link>
+          }
+        >
           Ignore a finding from its side panel to create a rule.
         </EmptyState>
       ) : (
@@ -208,16 +223,16 @@ export default function IgnoredPage() {
               })}
             </tbody>
           </table>
+          <Pager
+            page={rulesPaging.page}
+            size={rulesPaging.size}
+            totalElements={rules.data?.totalElements ?? 0}
+            totalPages={rules.data?.totalPages ?? 1}
+            onPage={rulesPaging.setPage}
+            onSize={rulesPaging.setSize}
+          />
         </div>
       )}
-      <Pager
-        page={rulesPaging.page}
-        size={rulesPaging.size}
-        totalElements={rules.data?.totalElements ?? 0}
-        totalPages={rules.data?.totalPages ?? 1}
-        onPage={rulesPaging.setPage}
-        onSize={rulesPaging.setSize}
-      />
 
       {confirmDelete ? (
         <ConfirmDialog
@@ -236,6 +251,6 @@ export default function IgnoredPage() {
       ) : null}
 
       {prefill ? <CreateRuleDialog prefill={prefill} onClose={() => setPrefill(null)} /> : null}
-    </section>
+    </PageLayout>
   );
 }

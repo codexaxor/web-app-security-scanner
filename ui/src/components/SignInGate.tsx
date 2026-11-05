@@ -36,7 +36,7 @@ export default function SignInGate() {
   }
 
   return (
-    <form onSubmit={submit} className="form">
+    <form onSubmit={submit} className="form signin-form">
       <h1>Sign in</h1>
       <p className="muted">Enter your SecScan credentials.</p>
       <div className="field">
@@ -65,6 +65,9 @@ export default function SignInGate() {
       <Button type="submit" variant="primary" busy={busy}>
         {busy ? "Signing in…" : "Continue"}
       </Button>
+      {/* Reserved space for a future "Create account" link (M8.10 owns sign-up). Intentionally empty — no
+          placeholder, no route — so the layout already leaves room when that link lands. */}
+      <div className="signin-footer" aria-hidden="true" />
     </form>
   );
 }

@@ -1,4 +1,4 @@
-import { test, expect, signIn, adminEmail, adminPassword } from "../fixtures/test-base";
+import { test, expect, signIn, openUserMenu, adminEmail, adminPassword } from "../fixtures/test-base";
 
 // R8 regression + S3 shell: sign-in, the nav shell, the onboarding screens, and sign-out clearing everything.
 test("signs in and shows the app shell with navigation", async ({ page }) => {
@@ -6,7 +6,10 @@ test("signs in and shows the app shell with navigation", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Feed" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Repositories", exact: true })).toBeVisible();
+  // Sign out moved into the user menu (M8.11); open it to confirm the action is present.
+  await openUserMenu(page);
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // The Sources onboarding screen is still reachable and renders. The sidebar nav item and page heading are
   // "Sources" (M8.7); it lists connections and the add-source forms.
@@ -27,6 +30,7 @@ test("sign-out returns to the gate with no data and restores the route after re-
   await page.getByRole("link", { name: "Repositories", exact: true }).click();
   await expect(page).toHaveURL(/\/repositories$/);
 
+  await openUserMenu(page);
   await page.getByRole("button", { name: "Sign out" }).click();
   // Back at the gate; the nav (and any data) is gone.
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();

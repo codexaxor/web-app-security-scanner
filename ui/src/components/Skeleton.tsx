@@ -13,6 +13,17 @@ export function Skeleton({ width, className }: { width?: string; className?: str
   );
 }
 
+/** A small stack of shimmer lines, for non-table loading areas (panels, wizards, drawers). */
+export function SkeletonLines({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="skeleton-lines" aria-hidden="true" data-testid="skeleton-lines">
+      {Array.from({ length: lines }, (_, i) => (
+        <span key={i} className="skeleton" />
+      ))}
+    </div>
+  );
+}
+
 export function TableSkeleton({ columns, rows = 6 }: { columns: number; rows?: number }) {
   return (
     <tbody aria-hidden="true" data-testid="table-skeleton">

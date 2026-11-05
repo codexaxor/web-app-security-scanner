@@ -49,16 +49,19 @@ export function ScanStatusChip({ status }: { status: string }) {
 export function EmptyState({
   title,
   children,
+  action,
   testId,
 }: {
   title: string;
   children?: ReactNode;
+  action?: ReactNode;
   testId?: string;
 }) {
   return (
     <div className="empty" data-testid={testId}>
       <div className="empty-title">{title}</div>
       {children ? <div>{children}</div> : null}
+      {action ? <div className="empty-action">{action}</div> : null}
     </div>
   );
 }
