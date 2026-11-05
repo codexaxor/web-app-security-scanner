@@ -1,58 +1,56 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SignUpPage from "./SignUpPage";
-import AwaitingApprovalPage from "./AwaitingApprovalPage";
-import { RateLimitedError, signUp } from "../api/signups";
+import { ApiError, RateLimitedError, signUp } from "../api";
 
-vi.mock("../api/signups", async (orig) => {
-  const real = await orig<typeof import("../api/signups")>();
+vi.mock("../api", async (orig) => {
+  const real = await orig<typeof import("../api")>();
   return { ...real, signUp: vi.fn() };
 });
 
 afterEach(() => vi.mocked(signUp).mockReset());
 
 function fill(email: string, password: string, workspace: string) {
+  render(
+    <MemoryRouter>
+      <SignUpPage />
+    </MemoryRouter>,
+  );
   fireEvent.change(screen.getByLabelText("Work email"), { target: { value: email } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: password } });
   fireEvent.change(screen.getByLabelText("Workspace name"), { target: { value: workspace } });
-  fireEvent.click(screen.getByText("Request account"));
+  fireEvent.click(screen.getByRole("button", { name: "Request account" }));
 }
 
 describe("SignUpPage (M8.10)", () => {
-  it("validates on the client and does not call the API for an invalid form", async () => {
-    render(<SignUpPage />);
+  it("explains field problems before submitting and does not call the API", async () => {
     fill("not-an-email", "short", "");
-    expect(await screen.findByText("Enter a valid email address.")).toBeTruthy();
-    expect(screen.getByText(/at least 12 characters/)).toBeTruthy();
+    expect(await screen.findByText("Enter a valid email address.")).not.toBeNull();
+    expect(screen.getByText(/at least 12 characters/)).not.toBeNull();
+    expect(screen.getByLabelText("Work email").getAttribute("aria-invalid")).toBe("true");
     expect(signUp).not.toHaveBeenCalled();
   });
 
-  it("shows the server's single confirmation and clears the form (no account enumeration)", async () => {
-    vi.mocked(signUp).mockResolvedValue({ status: "RECEIVED", message: "If this address can be used, we got it." });
-    render(<SignUpPage />);
+  it("always ends on the same neutral confirmation, whatever the server message (no enumeration)", async () => {
+    vi.mocked(signUp).mockResolvedValue({ status: "RECEIVED", message: "server text that is not shown" });
     fill("a@b.example", "correct-horse-battery", "Acme");
     const done = await screen.findByTestId("signup-done");
-    expect(done.textContent).toContain("If this address can be used, we got it.");
-    expect(signUp).toHaveBeenCalledWith({
-      email: "a@b.example",
-      password: "correct-horse-battery",
-      workspaceName: "Acme",
-    });
+    expect(done.textContent).toContain("your request was received");
+    expect(done.textContent).not.toContain("server text");
+    expect(screen.getByRole("link", { name: "Back to sign in" }).getAttribute("href")).toBe("/");
+    expect(signUp).toHaveBeenCalledWith({ email: "a@b.example", password: "correct-horse-battery", workspaceName: "Acme" });
   });
 
-  it("explains a rate limit with the wait time", async () => {
+  it("explains a rate limit with the wait in minutes", async () => {
     vi.mocked(signUp).mockRejectedValue(new RateLimitedError("Too many", 900));
-    render(<SignUpPage />);
     fill("a@b.example", "correct-horse-battery", "Acme");
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Try again in 15 min"));
+    expect((await screen.findByRole("alert")).textContent).toBe("Too many sign-up attempts. Try again in 15 minutes.");
   });
-});
 
-describe("AwaitingApprovalPage (M8.10)", () => {
-  it("distinguishes a pending request from a disabled account", () => {
-    const { rerender } = render(<AwaitingApprovalPage reason="pending" />);
-    expect(screen.getByTestId("account-pending").textContent).toContain("not been approved yet");
-    rerender(<AwaitingApprovalPage reason="inactive" />);
-    expect(screen.getByTestId("account-inactive").textContent).toContain("disabled");
+  it("shows a server validation message as plain text", async () => {
+    vi.mocked(signUp).mockRejectedValue(new ApiError("email: must be a valid email address", "VALIDATION_FAILED"));
+    fill("a@b.example", "correct-horse-battery", "Acme");
+    expect((await screen.findByRole("alert")).textContent).toContain("must be a valid email address");
   });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,12 +8,27 @@ import { useAuth } from "../auth";
 vi.mock("../auth", () => ({ useAuth: vi.fn() }));
 vi.mock("../theme", () => ({ useTheme: () => ({ theme: "light", setTheme: () => {}, toggle: () => {} }) }));
 
-function signedIn(demoMode = false) {
+function signedIn(demoMode = false, operator = false) {
   vi.mocked(useAuth).mockReturnValue({
     checking: false,
     signedIn: true,
     username: "demoadmin",
     demoMode,
+    workspaceName: "Acme Security",
+    operator,
+    signIn: () => {},
+    signOut: () => {},
+  });
+}
+
+function signedOut() {
+  vi.mocked(useAuth).mockReturnValue({
+    checking: false,
+    signedIn: false,
+    username: null,
+    demoMode: false,
+    workspaceName: null,
+    operator: false,
     signIn: () => {},
     signOut: () => {},
   });
@@ -79,5 +94,38 @@ describe("M8.11 shell — user menu", () => {
     fireEvent.click(screen.getByRole("button", { name: /Account/ }));
     expect(screen.getByRole("button", { name: "Sign out" })).not.toBeNull();
     expect(screen.getByRole("group", { name: "Theme" })).not.toBeNull();
+  });
+});
+
+describe("M8.10 tenancy in the shell", () => {
+  it("shows the Operator section (Sign-ups, Users) only when the session says operator", () => {
+    renderAt("/dashboard");
+    expect(screen.queryByText("Operator")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Sign-ups" })).toBeNull();
+    cleanup();
+
+    signedIn(false, true);
+    renderAt("/dashboard");
+    expect(screen.getByText("Operator")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Sign-ups" }).getAttribute("href")).toBe("/admin/sign-ups");
+    expect(screen.getByRole("link", { name: "Users" }).getAttribute("href")).toBe("/admin/users");
+  });
+
+  it("shows the workspace name in the user menu", () => {
+    renderAt("/dashboard");
+    fireEvent.click(screen.getByRole("button", { name: /Account/ }));
+    expect(screen.getByTestId("user-menu-workspace").textContent).toContain("Acme Security");
+  });
+
+  it("signed out: the gate offers a real Create account link, and /signup renders the sign-up form", () => {
+    signedOut();
+    renderAt("/dashboard");
+    expect(screen.getByRole("link", { name: "Create account" }).getAttribute("href")).toBe("/signup");
+    cleanup();
+
+    signedOut();
+    renderAt("/signup");
+    expect(screen.getByTestId("signup-form")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).toBeNull();
   });
 });

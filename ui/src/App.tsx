@@ -8,6 +8,8 @@ import IgnoredPage from "./pages/IgnoredPage";
 import SettingsPage from "./pages/SettingsPage";
 import ConnectPage from "./pages/ConnectPage";
 import SelectPage from "./pages/SelectPage";
+import OperatorSignUpsPage from "./pages/admin/OperatorSignUpsPage";
+import OperatorUsersPage from "./pages/admin/OperatorUsersPage";
 
 /** Declarative routes (react-router v8, BrowserRouter). The side panel is a nested route of the Feed so the
  *  feed stays mounted behind it (/feed/:groupId). */
@@ -25,6 +27,9 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/select" element={<SelectPage />} />
+        {/* M8.10 operator pages: routed for everyone; the API answers 403 to non-operators (D-094). */}
+        <Route path="/admin/sign-ups" element={<OperatorSignUpsPage />} />
+        <Route path="/admin/users" element={<OperatorUsersPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

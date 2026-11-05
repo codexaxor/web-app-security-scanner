@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { useAuth } from "../auth";
 import { useTheme, type Theme } from "../theme";
 import SignInGate from "./SignInGate";
+import SignUpPage from "../pages/SignUpPage";
 import Button from "./Button";
 import BrandMark from "./BrandMark";
 import CommandPalette from "./CommandPalette";
@@ -56,6 +57,19 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: "Workspace", items: [{ to: "/settings", label: "Workspace settings", icon: "settings" }] },
 ];
 
+// M8.10 (D-094): shown ONLY when /auth/session reports operator. A UI convenience — every /api/v1/admin/** call
+// is operator-only on the server (403 for anyone else), so a hidden section is not the security boundary.
+export const OPERATOR_GROUP: (typeof NAV_GROUPS)[number] = {
+  label: "Operator",
+  items: [
+    { to: "/admin/sign-ups", label: "Sign-ups", icon: "inbox" },
+    { to: "/admin/users", label: "Users", icon: "users" },
+  ],
+};
+
+/** The public (signed-out) path for self sign-up (M8.10). Rendered in place of the gate, like the gate itself. */
+export const SIGNUP_PATH = "/signup";
+
 function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
   // S11.5: no per-group chevrons — a small muted section label and the items are always shown. (The whole
   // sidebar collapses to icons via the one control in the footer; the label is hidden when collapsed.)
@@ -79,7 +93,15 @@ function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
   );
 }
 
-function UserMenu({ username, onSignOut }: { username: string | null; onSignOut: () => void }) {
+function UserMenu({
+  username,
+  workspaceName,
+  onSignOut,
+}: {
+  username: string | null;
+  workspaceName: string | null;
+  onSignOut: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -116,6 +138,14 @@ function UserMenu({ username, onSignOut }: { username: string | null; onSignOut:
       </button>
       {open ? (
         <div className="user-menu-pop">
+          {workspaceName ? (
+            <div className="user-menu-section" data-testid="user-menu-workspace">
+              <span className="user-menu-heading">Workspace</span>
+              <span className="truncate" title={workspaceName}>
+                {workspaceName}
+              </span>
+            </div>
+          ) : null}
           <div className="user-menu-section">
             <span className="user-menu-heading">Theme</span>
             <ThemeControl />
@@ -140,7 +170,7 @@ function UserMenu({ username, onSignOut }: { username: string | null; onSignOut:
  * navigating closes it); the shell stays keyboard navigable.
  */
 export default function Layout() {
-  const { checking, signedIn, username, demoMode, signOut } = useAuth();
+  const { checking, signedIn, username, demoMode, workspaceName, operator, signOut } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false); // S11.5: collapse the whole sidebar to icons (desktop)
   const location = useLocation();
@@ -168,7 +198,11 @@ export default function Layout() {
           <BrandMark />
           <span className="brand">SecScan</span>
         </div>
-        <SignInGate />
+        {location.pathname === SIGNUP_PATH ? (
+          <SignUpPage />
+        ) : (
+          <SignInGate />
+        )}
       </main>
     );
   }
@@ -181,7 +215,7 @@ export default function Layout() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <CommandPalette />
+      <CommandPalette operator={operator} />
       {demoMode ? (
         <div className="demo-ribbon" role="status">
           DEMO MODE — do not use real credentials or private repositories
@@ -222,9 +256,10 @@ export default function Layout() {
             {NAV_GROUPS.map((g) => (
               <NavGroup key={g.label} group={g} />
             ))}
+            {operator ? <NavGroup group={OPERATOR_GROUP} /> : null}
           </nav>
           <div className="sidebar-footer">
-            <UserMenu username={username} onSignOut={signOut} />
+            <UserMenu username={username} workspaceName={workspaceName} onSignOut={signOut} />
             <button
               type="button"
               className="sidebar-collapse"

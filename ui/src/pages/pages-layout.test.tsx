@@ -12,6 +12,8 @@ import IgnoredPage from "./IgnoredPage";
 import SettingsPage from "./SettingsPage";
 import ConnectPage from "./ConnectPage";
 import SelectPage from "./SelectPage";
+import OperatorSignUpsPage from "./admin/OperatorSignUpsPage";
+import OperatorUsersPage from "./admin/OperatorUsersPage";
 
 // S11.2: the ONE page template is used by every routed page. Each page renders with a never-resolving fetch
 // (queries stay pending → the page shows its loading state), and must still mount PageLayout. This guards
@@ -46,6 +48,8 @@ const PAGES: [string, ReactElement, string, string][] = [
   ["Settings", <SettingsPage />, "/settings", "/settings"],
   ["Sources", <ConnectPage />, "/connect", "/connect"],
   ["Select", <SelectPage />, "/select", "/select"],
+  ["Operator sign-ups", <OperatorSignUpsPage />, "/admin/sign-ups", "/admin/sign-ups"],
+  ["Operator users", <OperatorUsersPage />, "/admin/users", "/admin/users"],
 ];
 
 describe("every routed page renders the shared PageLayout", () => {

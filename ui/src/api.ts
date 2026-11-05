@@ -369,6 +369,45 @@ export class ApiError extends Error {
   }
 }
 
+/** A 429 (login, sign-up or any API call): how long to wait, from Retry-After (seconds), when the server says. */
+export class RateLimitedError extends ApiError {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number | null,
+  ) {
+    super(message, "RATE_LIMITED");
+  }
+}
+
+/** M8.10 login: the password was right but the sign-up is still waiting for the operator (403 ACCOUNT_PENDING). */
+export class AccountPendingError extends ApiError {
+  constructor() {
+    super("This account is waiting for approval.", "ACCOUNT_PENDING");
+  }
+}
+
+/** M8.10 login: the password was right but the account is disabled (403 ACCOUNT_INACTIVE). */
+export class AccountInactiveError extends ApiError {
+  constructor() {
+    super("This account is not active.", "ACCOUNT_INACTIVE");
+  }
+}
+
+function retryAfterSeconds(res: Response): number | null {
+  const v = res.headers.get("Retry-After");
+  const n = v === null ? NaN : Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+async function errorBody(res: Response): Promise<{ message?: string; error?: string } | null> {
+  try {
+    const text = await res.text();
+    return text ? (JSON.parse(text) as { message?: string; error?: string }) : null;
+  } catch {
+    return null;
+  }
+}
+
 // D-092: the browser authenticates with a server session cookie (HttpOnly, set by the server at /auth/login),
 // never an Authorization header — the SPA never constructs one. The only credential material the SPA holds is
 // the CSRF token (a session synchronizer token returned by /auth/login and /auth/session), kept in memory and
@@ -377,6 +416,10 @@ export interface SessionInfo {
   username: string;
   demoMode: boolean;
   csrfToken: string;
+  /** M8.10: the signed-in user's own workspace (shown in the user menu). */
+  workspaceName: string;
+  /** M8.10 (D-094): the platform operator — only they see the Operator section; the API enforces it. */
+  operator: boolean;
 }
 
 let csrfToken: string | null = null;
@@ -402,12 +445,56 @@ export async function login(username: string, password: string): Promise<Session
   if (res.status === 401) {
     throw new AuthRequiredError("Wrong email or password");
   }
+  if (res.status === 429) {
+    throw new RateLimitedError("Too many sign-in attempts.", retryAfterSeconds(res));
+  }
+  if (res.status === 403) {
+    // M8.10: a 403 only ever follows a CORRECT password (wrong passwords are 401), so this reveals nothing to
+    // someone who does not hold the password.
+    const code = (await errorBody(res))?.error ?? null;
+    if (code === "ACCOUNT_PENDING") throw new AccountPendingError();
+    if (code === "ACCOUNT_INACTIVE") throw new AccountInactiveError();
+  }
   if (!res.ok) {
     throw new ApiError(`Sign-in failed (${res.status})`, null);
   }
   const info = (await res.json()) as SessionInfo;
   csrfToken = info.csrfToken;
   return info;
+}
+
+/** M8.10 sign-up request (D-093). */
+export interface SignUpRequest {
+  email: string;
+  password: string;
+  workspaceName: string;
+}
+
+/** The single answer to every well-formed sign-up — the same whether or not the email is known (D-098). */
+export interface SignUpAccepted {
+  status: "RECEIVED";
+  message: string;
+}
+
+/**
+ * Public self sign-up (no session; CSRF-exempt on the server, so no token is sent). Always resolves the same
+ * 202 body for a well-formed request; 400 is a format error only; 429 carries Retry-After.
+ */
+export async function signUp(req: SignUpRequest): Promise<SignUpAccepted> {
+  const res = await fetch("/api/v1/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ ...req, email: req.email.trim(), workspaceName: req.workspaceName.trim() }),
+  });
+  if (res.status === 202) {
+    return (await res.json()) as SignUpAccepted;
+  }
+  const data = await errorBody(res);
+  if (res.status === 429) {
+    throw new RateLimitedError(data?.message ?? "Too many sign-up attempts.", retryAfterSeconds(res));
+  }
+  throw new ApiError(data?.message ?? `Sign-up failed (${res.status})`, data?.error ?? null);
 }
 
 /** Reads the current session on load (a refresh stays signed in). Returns null when not signed in (401). */
@@ -483,9 +570,37 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     const message = data?.message ?? `Request failed (${res.status})`;
+    if (res.status === 429) {
+      throw new RateLimitedError(message, retryAfterSeconds(res));
+    }
     throw new ApiError(message, data?.error ?? null);
   }
   return data as T;
+}
+
+// --- M8.10 operator API (D-094: account metadata only; /api/v1/admin/** is operator-only on the server) ---
+export type SignupStatus = "pending" | "approved" | "rejected";
+
+export interface SignupRequestView {
+  id: string;
+  email: string;
+  workspaceName: string;
+  status: SignupStatus;
+  createdAt: string;
+  decidedAt: string | null;
+  workspaceId: string | null;
+}
+
+export type AccountStatus = "active" | "disabled";
+
+export interface UserAdminView {
+  id: string;
+  email: string;
+  status: AccountStatus;
+  workspaceName: string;
+  operator: boolean;
+  createdAt: string;
+  statusChangedAt: string | null;
 }
 
 export const api = {
@@ -586,6 +701,26 @@ export const api = {
   getWorkspaceSettings: () => request<WorkspaceSettings>("GET", "/api/v1/workspace/settings"),
   putWorkspaceSettings: (body: WorkspaceSettings) =>
     request<WorkspaceSettings>("PUT", "/api/v1/workspace/settings", body),
+
+  // --- M8.10 operator (the session's CSRF token is echoed by request() on the POSTs) ---
+  listSignUps: (status: SignupStatus, page: number, size: number) =>
+    request<Paged<SignupRequestView>>(
+      "GET",
+      `/api/v1/admin/sign-ups?status=${encodeURIComponent(status)}&page=${page}&size=${size}`,
+    ),
+  approveSignUp: (id: string) =>
+    request<SignupRequestView>("POST", `/api/v1/admin/sign-ups/${encodeURIComponent(id)}/approve`, {}),
+  rejectSignUp: (id: string) =>
+    request<SignupRequestView>("POST", `/api/v1/admin/sign-ups/${encodeURIComponent(id)}/reject`, {}),
+  listUsers: (status: AccountStatus | null, page: number, size: number) =>
+    request<Paged<UserAdminView>>(
+      "GET",
+      `/api/v1/admin/users?${status ? `status=${encodeURIComponent(status)}&` : ""}page=${page}&size=${size}`,
+    ),
+  disableUser: (id: string) =>
+    request<UserAdminView>("POST", `/api/v1/admin/users/${encodeURIComponent(id)}/disable`, {}),
+  enableUser: (id: string) =>
+    request<UserAdminView>("POST", `/api/v1/admin/users/${encodeURIComponent(id)}/enable`, {}),
 };
 
 // Builds the repositories-list query string from a validated params object. `search` is user text, so it is

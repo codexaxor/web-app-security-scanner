@@ -309,6 +309,10 @@
 @media (max-width: 1024px) {
   .app {
     grid-template-columns: 1fr;
+    /* M8.10 self-review D-1: on a page shorter than the viewport the implicit rows (app bar, content) shared the
+     * min-height: 100vh slack, so the app bar stretched into a tall empty band (M8.11 Settings 390 showed it
+     * too). Pack the rows at the top instead. */
+    align-content: start;
   }
   .appbar {
     display: flex;
@@ -382,11 +386,26 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
 }
-/* Reserved room for a future "Create account" link (M8.10). Empty today — keeps the card from reflowing when
- * the link lands. */
+/* The room M8.11 reserved under the form: M8.10's "Create account" link (and the sign-up page's way back). */
 .signin-footer {
   min-height: var(--sp-5);
   border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+/* M8.10 self-review D-2: a button that acts as a link in the card footer reads like the footer's real links
+ * (normal weight, footer size) instead of the bold .btn-link default. */
+.signin-footer .btn-link {
+  font-weight: inherit;
+  font-size: inherit;
+}
+/* M8.10 sign-up / awaiting-approval cards reuse the sign-in card; a field hint sits under its input. */
+.signin-form .field-hint {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+.signin-form .signin-note {
+  margin: 0;
 }
 
 /* ---------- page header ---------- */
@@ -1903,6 +1922,17 @@ button.health-item {
 .cell-actions {
   text-align: right;
   white-space: nowrap;
+}
+/* M8.10 self-review D-3: a pair of row buttons (Approve / Reject) stays on one line, right-aligned. */
+.cell-actions .row {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+/* M8.10 operator tables: a long email / workspace name truncates (full value in the title tooltip) instead of
+ * forcing the table wider. */
+.op-ident {
+  display: block;
+  max-width: 32ch;
 }
 .rowmenu {
   position: relative;

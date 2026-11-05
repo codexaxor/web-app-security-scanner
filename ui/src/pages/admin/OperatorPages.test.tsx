@@ -1,17 +1,19 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../toast";
 import OperatorSignUpsPage from "./OperatorSignUpsPage";
 import OperatorUsersPage from "./OperatorUsersPage";
-import { operatorApi } from "../../api/signups";
+import { api, type SignupRequestView, type UserAdminView } from "../../api";
 
-vi.mock("../../api/signups", async (orig) => {
-  const real = await orig<typeof import("../../api/signups")>();
+vi.mock("../../api", async (orig) => {
+  const real = await orig<typeof import("../../api")>();
   return {
     ...real,
-    operatorApi: {
+    api: {
+      ...real.api,
       listSignUps: vi.fn(),
       approveSignUp: vi.fn(),
       rejectSignUp: vi.fn(),
@@ -24,100 +26,81 @@ vi.mock("../../api/signups", async (orig) => {
 
 afterEach(() => vi.clearAllMocks());
 
-function wrap(node: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderAt(el: ReactElement, path: string, entry: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider autoDismiss={false}>{node}</ToastProvider>
+    <QueryClientProvider client={qc}>
+      <ToastProvider autoDismiss={false}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path={path} element={el} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
 
-const paged = <T,>(content: T[]) => ({ content, page: 0, size: 50, totalElements: content.length, totalPages: 1 });
+const paged = <T,>(content: T[]) => ({ content, page: 0, size: 20, totalElements: content.length, totalPages: 1 });
+
+const pending: SignupRequestView = {
+  id: "s1",
+  email: "new@tenant.example",
+  workspaceName: "Tenant",
+  status: "pending",
+  createdAt: "2026-11-05T00:00:00Z",
+  decidedAt: null,
+  workspaceId: null,
+};
 
 describe("OperatorSignUpsPage (M8.10, D-094)", () => {
-  it("lists pending requests and approves one", async () => {
-    vi.mocked(operatorApi.listSignUps).mockResolvedValue(
-      paged([
-        {
-          id: "s1",
-          email: "new@tenant.example",
-          workspaceName: "Tenant",
-          status: "pending" as const,
-          createdAt: "2026-11-05T00:00:00Z",
-          decidedAt: null,
-          workspaceId: null,
-        },
-      ]),
-    );
-    vi.mocked(operatorApi.approveSignUp).mockResolvedValue({
-      id: "s1",
-      email: "new@tenant.example",
-      workspaceName: "Tenant",
-      status: "approved",
-      createdAt: "2026-11-05T00:00:00Z",
-      decidedAt: "2026-11-05T01:00:00Z",
-      workspaceId: "w1",
-    });
-    wrap(<OperatorSignUpsPage />);
+  it("lists pending sign-ups with the default page size 20 and approves one", async () => {
+    vi.mocked(api.listSignUps).mockResolvedValue(paged([pending]));
+    vi.mocked(api.approveSignUp).mockResolvedValue({ ...pending, status: "approved", workspaceId: "w1" });
+    renderAt(<OperatorSignUpsPage />, "/admin/sign-ups", "/admin/sign-ups");
 
     expect((await screen.findByTestId("signup-row")).textContent).toContain("new@tenant.example");
-    expect(operatorApi.listSignUps).toHaveBeenCalledWith("pending", 0, 50);
-    fireEvent.click(screen.getByText("Approve"));
-    await waitFor(() => expect(operatorApi.approveSignUp).toHaveBeenCalledWith("s1"));
-    expect(await screen.findByText("Approved new@tenant.example.")).toBeTruthy();
+    expect(api.listSignUps).toHaveBeenCalledWith("pending", 0, 20);
+    fireEvent.click(screen.getByRole("button", { name: "Approve new@tenant.example" }));
+    await waitFor(() => expect(api.approveSignUp).toHaveBeenCalledWith("s1"));
+    expect(await screen.findByText("Approved new@tenant.example.")).not.toBeNull();
   });
 
-  it("shows an empty state when nothing is pending", async () => {
-    vi.mocked(operatorApi.listSignUps).mockResolvedValue(paged([]));
-    wrap(<OperatorSignUpsPage />);
-    expect(await screen.findByTestId("signups-empty")).toBeTruthy();
+  it("reads the status filter from the URL and shows an empty state", async () => {
+    vi.mocked(api.listSignUps).mockResolvedValue(paged([]));
+    renderAt(<OperatorSignUpsPage />, "/admin/sign-ups", "/admin/sign-ups?status=rejected");
+    expect((await screen.findByTestId("signups-empty")).textContent).toContain("No rejected sign-ups");
+    expect(api.listSignUps).toHaveBeenCalledWith("rejected", 0, 20);
+  });
+
+  it("shows the server's 403 for a non-operator as an inline error (the API is the boundary)", async () => {
+    const { ApiError } = await import("../../api");
+    vi.mocked(api.listSignUps).mockRejectedValue(new ApiError("Forbidden", "FORBIDDEN"));
+    renderAt(<OperatorSignUpsPage />, "/admin/sign-ups", "/admin/sign-ups");
+    expect((await screen.findByRole("alert")).textContent).toContain("Forbidden");
   });
 });
 
 describe("OperatorUsersPage (M8.10, D-094)", () => {
-  const users = [
-    {
-      id: "op",
-      email: "op@x.example",
-      status: "active" as const,
-      workspaceName: "Default",
-      operator: true,
-      createdAt: "2026-01-01T00:00:00Z",
-      statusChangedAt: null,
-    },
-    {
-      id: "u1",
-      email: "user@tenant.example",
-      status: "active" as const,
-      workspaceName: "Tenant",
-      operator: false,
-      createdAt: "2026-11-05T00:00:00Z",
-      statusChangedAt: null,
-    },
-    {
-      id: "u2",
-      email: "gone@tenant.example",
-      status: "disabled" as const,
-      workspaceName: "Tenant",
-      operator: false,
-      createdAt: "2026-11-05T00:00:00Z",
-      statusChangedAt: "2026-11-05T02:00:00Z",
-    },
+  const users: UserAdminView[] = [
+    { id: "op", email: "op@x.example", status: "active", workspaceName: "Default", operator: true, createdAt: "2026-01-01T00:00:00Z", statusChangedAt: null },
+    { id: "u1", email: "user@tenant.example", status: "active", workspaceName: "Tenant", operator: false, createdAt: "2026-11-05T00:00:00Z", statusChangedAt: null },
+    { id: "u2", email: "gone@tenant.example", status: "disabled", workspaceName: "Tenant", operator: false, createdAt: "2026-11-05T00:00:00Z", statusChangedAt: "2026-11-05T02:00:00Z" },
   ];
 
-  it("offers no disable for the operator, disable for active users and re-enable for disabled ones", async () => {
-    vi.mocked(operatorApi.listUsers).mockResolvedValue(paged(users));
-    vi.mocked(operatorApi.disableUser).mockResolvedValue({ ...users[1], status: "disabled" });
-    wrap(<OperatorUsersPage />);
+  it("offers no Disable for the operator, confirms before disabling, and offers Re-enable for disabled", async () => {
+    vi.mocked(api.listUsers).mockResolvedValue(paged(users));
+    vi.mocked(api.disableUser).mockResolvedValue({ ...users[1], status: "disabled" });
+    renderAt(<OperatorUsersPage />, "/admin/users", "/admin/users");
 
     const rows = await screen.findAllByTestId("user-row");
-    expect(rows[0].querySelector("button")).toBeNull();
-    expect(rows[1].textContent).toContain("Disable");
-    expect(rows[2].textContent).toContain("Re-enable");
+    expect(within(rows[0]).queryByRole("button")).toBeNull();
+    expect(within(rows[2]).getByRole("button", { name: "Re-enable gone@tenant.example" })).not.toBeNull();
 
-    fireEvent.click(screen.getByText("Disable"));
-    await waitFor(() => expect(operatorApi.disableUser).toHaveBeenCalledWith("u1"));
-    expect(operatorApi.listUsers).toHaveBeenCalledWith(null, 0, 50);
+    fireEvent.click(within(rows[1]).getByRole("button", { name: "Disable user@tenant.example" }));
+    expect(api.disableUser).not.toHaveBeenCalled(); // a confirm dialog first
+    fireEvent.click(await screen.findByRole("button", { name: "Disable account" }));
+    await waitFor(() => expect(api.disableUser).toHaveBeenCalledWith("u1"));
+    expect(api.listUsers).toHaveBeenCalledWith(null, 0, 20);
   });
 });
