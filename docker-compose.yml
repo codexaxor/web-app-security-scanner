@@ -42,6 +42,9 @@ services:
       SECSCAN_DEMO_MODE: ${SECSCAN_DEMO_MODE:-false}
       SECSCAN_DEMO_USERNAME: ${SECSCAN_DEMO_USERNAME:-admin}
       SECSCAN_DEMO_PASSWORD: ${SECSCAN_DEMO_PASSWORD:-}
+      # D-098 client IP: X-Forwarded-For is honoured only from these peers (the ui nginx lives on the compose
+      # network below). Defaults to that network's subnet; the app's own default (outside compose) is loopback.
+      SECSCAN_TRUSTED_PROXIES: ${SECSCAN_TRUSTED_PROXIES:-${SECSCAN_COMPOSE_SUBNET:-10.203.0.0/24}}
     ports:
       # Loopback only (local dev); do not expose the API to the network.
       - "127.0.0.1:8080:8080"
@@ -101,6 +104,14 @@ services:
       - "127.0.0.1:5173:80"
     depends_on:
       - api
+
+networks:
+  default:
+    # M8.10 (D-098): a pinned subnet so SECSCAN_TRUSTED_PROXIES can name it. Override with SECSCAN_COMPOSE_SUBNET
+    # if it clashes with a local/VPN route. The smoke (10.203.1.0/24) and e2e (10.203.2.0/24) stacks use their own.
+    ipam:
+      config:
+        - subnet: ${SECSCAN_COMPOSE_SUBNET:-10.203.0.0/24}
 
 volumes:
   postgres-data:
