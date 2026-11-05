@@ -55,6 +55,16 @@ public class ApiExceptionHandler {
                 .body(new ApiError("CONNECTION_TOKEN_MISSING", e.getMessage()));
     }
 
+    /**
+     * M8.10 S12: a stored token that cannot be decrypted (rotated key, damaged value) is a typed, actionable 409 —
+     * "re-enter the token for this source" — never a 500, and never the ciphertext or the cipher's cause.
+     */
+    @ExceptionHandler(com.company.secscan.source.UnreadableCredentialException.class)
+    public ResponseEntity<ApiError> onUnreadableCredential(com.company.secscan.source.UnreadableCredentialException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError(com.company.secscan.source.UnreadableCredentialException.CODE, e.getMessage()));
+    }
+
     /** Provider-neutral source errors (GitHub/public adapters) → the same {error,message} body (M8.7). */
     @ExceptionHandler(com.company.secscan.source.ProviderException.class)
     public ResponseEntity<ApiError> onProvider(com.company.secscan.source.ProviderException e) {

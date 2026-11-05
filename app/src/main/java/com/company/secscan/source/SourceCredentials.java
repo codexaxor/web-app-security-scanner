@@ -17,6 +17,8 @@ import org.springframework.stereotype.Component;
  *   <li>{@code credential_kind='token'} with a present ciphertext → the decrypted token.</li>
  *   <li>{@code credential_kind='token'} with a blank/missing ciphertext → {@link MissingCredentialException}
  *       (a broken connection needing a new token), never anonymous (change 2).</li>
+ *   <li>{@code credential_kind='token'} with a ciphertext that cannot be decrypted (rotated key, damaged value) →
+ *       {@link UnreadableCredentialException} (M8.10 S12): the token must be re-entered.</li>
  * </ul>
  *
  * Available to both the api and the worker (a plain {@code @Component} over {@link TokenCipherHolder}).
@@ -43,6 +45,14 @@ public class SourceCredentials {
         if (ciphertext == null || ciphertext.isBlank()) {
             throw new MissingCredentialException();
         }
-        return cipher.require().decrypt(ciphertext);
+        // A missing SECSCAN_ENCRYPTION_KEY stays a configuration error (require() throws before any decrypt).
+        com.company.secscan.crypto.TokenCipher c = cipher.require();
+        try {
+            return c.decrypt(ciphertext);
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // Wrong key (rotated) or a damaged value: the connection needs its token re-entered (M8.10 S12). The
+            // cause is dropped on purpose — it can only describe ciphertext/key, which must never be echoed.
+            throw new UnreadableCredentialException();
+        }
     }
 }

@@ -63,4 +63,28 @@ class SourceCredentialsTest {
         assertThatThrownBy(() -> credentials.tokenFor(tokenRepo(null)))
                 .isInstanceOf(MissingCredentialException.class);
     }
+
+    @Test
+    void aCiphertextThatCannotBeDecryptedIsAnUnreadableCredentialWithoutTheCause() {
+        // M8.10 S12: TokenCipher reports a wrong key / tampered value / bad base64 as IllegalStateException.
+        when(cipher.decrypt("rotated")).thenThrow(new IllegalStateException("Decryption failed (wrong key …)"));
+        assertThatThrownBy(() -> credentials.tokenFor(tokenRepo("rotated")))
+                .isInstanceOf(UnreadableCredentialException.class)
+                .hasMessageContaining("Re-enter the token for this source")
+                .hasNoCause();
+    }
+
+    @Test
+    void aRealValueFromAnotherKeyIsUnreadable() {
+        // End to end with real ciphers: encrypted under key A, read with key B (a rotated SECSCAN_ENCRYPTION_KEY).
+        byte[] a = new byte[32];
+        byte[] b = new byte[32];
+        b[0] = 1;
+        String ct = TokenCipher.fromBase64Key(java.util.Base64.getEncoder().encodeToString(a)).encrypt("glpat-x");
+        SourceCredentials rotated = new SourceCredentials(TokenCipherHolder.of(
+                TokenCipher.fromBase64Key(java.util.Base64.getEncoder().encodeToString(b))));
+        assertThatThrownBy(() -> rotated.tokenFor(tokenRepo(ct))).isInstanceOf(UnreadableCredentialException.class);
+        assertThatThrownBy(() -> rotated.tokenFor(tokenRepo("%%%not-base64%%%")))
+                .isInstanceOf(UnreadableCredentialException.class);
+    }
 }

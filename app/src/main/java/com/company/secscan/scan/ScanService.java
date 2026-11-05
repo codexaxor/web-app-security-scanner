@@ -114,6 +114,8 @@ public class ScanService {
             }
             return new BranchResolution(current != null ? current : repo.getDefaultBranch(), false);
         } catch (RuntimeException e) {
+            // Best-effort refresh: a missing (M8.8) or unreadable (M8.10 S12) token is tolerated here exactly like a
+            // provider error — the scan is queued and the worker then fails it with the typed code.
             log.warn("Could not refresh the default branch for repository {} at enqueue ({}); scanning the last "
                     + "known default.", repo.getId(), e.getClass().getSimpleName());
             return new BranchResolution(repo.getDefaultBranch(), true);

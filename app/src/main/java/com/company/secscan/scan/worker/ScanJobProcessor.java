@@ -140,6 +140,11 @@ public class ScanJobProcessor {
             state.failPermanently(workspaceId, jobId, scan.getId(), "CONNECTION_TOKEN_MISSING",
                     "Connection needs a new token.");
             return;
+        } catch (com.company.secscan.source.UnreadableCredentialException e) {
+            // M8.10 S12: rotated key / damaged ciphertext — permanent (a retry cannot fix it), reconcile nothing.
+            state.failPermanently(workspaceId, jobId, scan.getId(),
+                    com.company.secscan.source.UnreadableCredentialException.CODE, e.getMessage());
+            return;
         }
 
         ScanWorkspace ws;
