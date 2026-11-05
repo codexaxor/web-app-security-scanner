@@ -61,7 +61,7 @@ class SensitivityRescoreIT extends AbstractGitLabIT {
         assertThat(scoreBefore).isEqualTo(80);
         long eventsBefore = events.count();
 
-        service.patch(Workspace.DEFAULT_ID, repo.getId(), "high", null, null);
+        service.patch(Workspace.DEFAULT_ID, repo.getId(), "high", null, null, null);
 
         SubIssue after = subIssues.findById(subId).orElseThrow();
         assertThat(after.getScore()).isEqualTo(scoreBefore + 5);         // sensitivity high +5
@@ -79,7 +79,7 @@ class SensitivityRescoreIT extends AbstractGitLabIT {
                 List.of("Java"))); // default sensitivity = normal
         // no-op change to the same value → still 0 triage_event, scores untouched
         long eventsBefore = events.count();
-        service.patch(Workspace.DEFAULT_ID, repo.getId(), "normal", null, null);
+        service.patch(Workspace.DEFAULT_ID, repo.getId(), "normal", null, null, null);
         assertThat(events.count()).isEqualTo(eventsBefore);
     }
 }

@@ -81,18 +81,18 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repoB.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token"); // open
 
         // Focus view: solved is never shown, so repoA has just its one open secret group.
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, null, null, "focus", null, false, 0,
                 50).content()).hasSize(1);
         // Filter by type.
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "secret", null, "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "secret", null, null, null, "focus", null, false, 0,
                 50).content()).hasSize(1);
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "sast", null, "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "sast", null, null, null, "focus", null, false, 0,
                 50).content()).isEmpty();
         // No repo filter: both repos' OPEN groups (solved excluded) = 2.
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, null, null, null, "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, null, null, null, null, null, "focus", null, false, 0,
                 50).totalElements()).isEqualTo(2);
         // repositoryPath is populated on each row (OD-14 item 3).
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, null, null, "focus", null, false, 0,
                 50).content().get(0)
                 .repositoryPath()).isEqualTo("svc/a");
     }
@@ -103,13 +103,13 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repo.getId(), "sast", "sast|csrf", "Spring CSRF Disabled");
         seedGroup(repo.getId(), "sast", "sast|xxe", "XML External Entity");
         // M8.6 repo Issues-tab search (title/subtitle ILIKE), case-insensitive.
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "csrf", "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "csrf", null, "focus", null, false, 0,
                 50).content())
                 .hasSize(1);
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "ENTITY", "focus", null, false,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "ENTITY", null, "focus", null, false,
                 0, 50).content())
                 .hasSize(1);
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "nomatch", "focus", null, false,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "nomatch", null, "focus", null, false,
                 0, 50).content())
                 .isEmpty();
     }
@@ -121,15 +121,15 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repo.getId(), "sast", "sast|und", "user_id leaked");
         seedGroup(repo.getId(), "sast", "sast|plain", "clean title");
         // "%" is a literal, not "match everything": only the title that contains a percent sign matches.
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "%", "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "%", null, "focus", null, false, 0,
                 50).content())
                 .extracting(IssueGroupView::title).containsExactly("50% off coupon");
         // "_" is a literal, not "match any single character".
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "_", "focus", null, false, 0,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "_", null, "focus", null, false, 0,
                 50).content())
                 .extracting(IssueGroupView::title).containsExactly("user_id leaked");
         // A term that embeds a percent still matches case-insensitively, anchored to the literal "%".
-        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "50% OFF", "focus", null, false,
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "50% OFF", null, "focus", null, false,
                 0, 50).content())
                 .extracting(IssueGroupView::title).containsExactly("50% off coupon");
     }
@@ -168,7 +168,7 @@ class IssueApiIT extends AbstractGitLabIT {
         for (int i = 0; i < 5; i++) {
             seedGroup(repo.getId(), "secret", "secret|rule-" + i, "Exposed rule-" + i);
         }
-        var firstPage = service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "focus", null, false, 0, 2);
+        var firstPage = service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, null, null, "focus", null, false, 0, 2);
         assertThat(firstPage.content()).hasSize(2);
         assertThat(firstPage.totalElements()).isEqualTo(5);
         assertThat(firstPage.totalPages()).isEqualTo(3);

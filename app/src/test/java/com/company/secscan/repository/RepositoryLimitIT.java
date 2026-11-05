@@ -106,13 +106,13 @@ class RepositoryLimitIT extends AbstractGitLabIT {
         List<Repository> filler = fill(DEFAULT, 25, 1);
         Repository inactive = filler.get(25);
 
-        assertThatThrownBy(() -> repositoryService.patch(DEFAULT, inactive.getId(), null, null, true))
+        assertThatThrownBy(() -> repositoryService.patch(DEFAULT, inactive.getId(), null, null, true, null))
                 .isInstanceOfSatisfying(ApiErrorException.class,
                         e -> assertThat(e.code()).isEqualTo(RepositoryLimitGuard.CODE));
         assertThat(repositories.findById(inactive.getId()).orElseThrow().isActive()).isFalse();
 
-        repositoryService.patch(DEFAULT, filler.get(0).getId(), null, null, false);       // free a slot
-        assertThat(repositoryService.patch(DEFAULT, inactive.getId(), null, null, true).active()).isTrue();
+        repositoryService.patch(DEFAULT, filler.get(0).getId(), null, null, false, null);       // free a slot
+        assertThat(repositoryService.patch(DEFAULT, inactive.getId(), null, null, true, null).active()).isTrue();
     }
 
     @Test

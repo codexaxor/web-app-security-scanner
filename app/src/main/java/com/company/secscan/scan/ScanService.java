@@ -64,7 +64,7 @@ public class ScanService {
      * method level so the enqueue race can be caught and recovered (see {@link ScanEnqueuer}).
      */
     public ScanView startManual(UUID workspaceId, UUID repositoryId) {
-        Repository repo = requireScannable(workspaceId, repositoryId);
+        Repository repo = requireScannable(workspaceId, repositoryId, true);
         Optional<ScanView> inFlight = inFlight(workspaceId, repositoryId).map(ScanView::of);
         if (inFlight.isPresent()) {
             return inFlight.get();
@@ -198,10 +198,6 @@ public class ScanService {
     private Optional<Scan> inFlight(UUID workspaceId, UUID repositoryId) {
         return scans.findByWorkspaceIdAndRepositoryIdAndStatusIn(workspaceId, repositoryId, IN_FLIGHT)
                 .stream().findFirst();
-    }
-
-    private Repository requireScannable(UUID workspaceId, UUID repositoryId) {
-        return requireScannable(workspaceId, repositoryId, true);
     }
 
     private Repository requireScannable(UUID workspaceId, UUID repositoryId, boolean requireActive) {

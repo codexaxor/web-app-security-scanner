@@ -417,12 +417,6 @@ public class RepositoryService {
      * {@code inactive_reason=DEACTIVATED_BY_USER}; reactivating succeeds only for a user-deactivated repo that
      * still has a connection, else 409. A repository outside the workspace → 404.
      */
-    /** Settings patch with no scan-branch change (convenience for callers that only touch other fields). */
-    public RepositoryView patch(UUID workspaceId, UUID repositoryId, String sensitivity, Boolean includeDevDeps,
-            Boolean active) {
-        return patch(workspaceId, repositoryId, sensitivity, includeDevDeps, active, null);
-    }
-
     /**
      * SF-2: no GitLab I/O inside a transaction. Phase 1 (no tx) parses + validates the scan-branch change,
      * including the authoritative GitLab existence check; Phase 2 is a short write transaction that re-checks

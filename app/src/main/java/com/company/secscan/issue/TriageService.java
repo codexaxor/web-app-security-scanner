@@ -166,11 +166,6 @@ public class TriageService {
                 .map(IgnoreRuleView::of));
     }
 
-    @Transactional(readOnly = true)
-    public PagedResponse<IgnoredItemView> listIgnored(UUID workspaceId, int page, int size) {
-        return listIgnored(workspaceId, page, size, null);
-    }
-
     /** The Ignored view, optionally filtered to one reason code (e.g. {@code LOW_EPSS}); counts stay server-side. */
     public PagedResponse<IgnoredItemView> listIgnored(UUID workspaceId, int page, int size, String reason) {
         PageRequest pr = PageRequest.of(Math.max(0, page), Math.max(1, size));

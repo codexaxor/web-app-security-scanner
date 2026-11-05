@@ -46,7 +46,7 @@ class SastIgnoreChurnIT extends TriageSeedSupport {
         assertThat(openForRuleFile).isEmpty();
 
         // GET /ignored carries the finding's line so the Ignored view can show file:line (M8 S10b/S10d).
-        var ignored = triage.listIgnored(Workspace.DEFAULT_ID, 0, 50);
+        var ignored = triage.listIgnored(Workspace.DEFAULT_ID, 0, 50, null);
         assertThat(ignored.content()).anySatisfy(it -> {
             assertThat(it.filePath()).isEqualTo("src/Security.java");
             assertThat(it.line()).isEqualTo(10);

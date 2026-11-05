@@ -60,26 +60,11 @@ public class IssueService {
         this.connections = connections;
     }
 
-    /** The Feed (OD-14 item 3): view (focus/all), optional band, type and repository filters, includeInactive. */
-    @Transactional(readOnly = true)
-    public PagedResponse<IssueGroupView> listGroups(UUID workspaceId, UUID repositoryId, String type, String category,
-            String view,
-                                                    String band, boolean includeInactive, int page, int size) {
-        return listGroups(workspaceId, repositoryId, type, category, null, null, view, band, includeInactive, page,
-                size);
-    }
-
-    /** As above, plus an optional free-text {@code search} on the group title/subtitle (M8.6 repo Issues tab). */
-    @Transactional(readOnly = true)
-    public PagedResponse<IssueGroupView> listGroups(UUID workspaceId, UUID repositoryId, String type, String category,
-            String search,
-                                                    String view, String band, boolean includeInactive, int page,
-                                                    int size) {
-        return listGroups(workspaceId, repositoryId, type, category, search, null, view, band, includeInactive, page,
-                size);
-    }
-
-    /** As above, plus the SF-1 provider filter (gitlab|github; validated whitelist, workspace-scoped). */
+    /**
+     * The Feed (OD-14 item 3): view (focus/all), optional band, type, category, repository, free-text
+     * {@code search} (M8.6) and SF-1 provider filter (gitlab|github; validated whitelist), includeInactive.
+     * One signature only (M8.10): nullable filters are passed explicitly.
+     */
     @Transactional(readOnly = true)
     public PagedResponse<IssueGroupView> listGroups(UUID workspaceId, UUID repositoryId, String type, String category,
             String search,
