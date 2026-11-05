@@ -147,6 +147,28 @@ logs a WARN at every startup, and shows a red **DEMO MODE** ribbon in the UI. Wh
 identifier without `@` is refused (so a leftover demo user cannot sign in), and the 12-char password rule stays
 for every real user. **Never enable demo mode on a shared/production host.**
 
+**Workspaces, sign-up and the operator (M8.10, D-093–D-098).** Every account belongs to exactly one workspace,
+and every API call acts only on the signed-in user's workspace (another tenant's ids answer **404**). Anyone can
+request an account at `POST /api/v1/auth/signup` (`email`, `password` ≥ 12 chars, `workspaceName`); the answer is
+always the same `202` (no account enumeration) and sign-up is rate-limited per IP. The request waits for the
+**operator** — the earliest bootstrap admin (one operator per installation, never a second one silently) — who
+approves, rejects, disables or re-enables accounts under `/api/v1/admin/**` (operator-only). The operator sees
+account metadata only, never another tenant's business data. Login answers `401` for a wrong password, `403
+ACCOUNT_PENDING` / `403 ACCOUNT_INACTIVE` for a correct password on a pending or disabled account, and `429` +
+`Retry-After` after too many failures (per account+IP 5, per IP 20, per account 50 within 15 min; JSON login and
+Basic alike). Fair use per workspace: **one running scan** (further scans queue) and **25 active repositories**
+(`secscan.fair-use.max-repositories`; `409 REPOSITORY_LIMIT_REACHED`).
+
+The client IP for those limits honours `X-Forwarded-For` only from `SECSCAN_TRUSTED_PROXIES` (default: loopback
+only). In compose the ui nginx overwrites that header with its direct peer, and the stack runs on a pinned subnet
+(`SECSCAN_COMPOSE_SUBNET`, default `10.203.0.0/24`; smoke `10.203.1.0/24`, e2e `10.203.2.0/24`) that compose
+trusts by default. Change it only if it clashes with a local/VPN route. **After upgrading to this version, run
+`docker compose down` once (without `-v` — keep `postgres-data`) and `docker network rm
+web-app-security-scanner_default`, so the network is recreated with the pinned subnet.**
+
+Demo mode is unchanged by tenancy: the demo user lives in the Default workspace (where all pre-M8.10 data
+lives), is never the operator and has no operator API; it sees Default's data like any Default member.
+
 For the host dev loop the worker runs as your own user, so the work root just needs to exist and be writable by you.
 
 ## Contributing
