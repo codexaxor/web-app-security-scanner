@@ -119,7 +119,7 @@ public class ReScoreService {
             if (c.unmappedSecretRule() != null) {
                 unmapped.add(c.unmappedSecretRule());
             }
-            subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()),
+            subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()),
                     c.inKev(), c.epss());
             touchedGroups.add(sub.getGroupId());
         }
@@ -151,7 +151,7 @@ public class ReScoreService {
         String sensitivity = repositories.findByIdAndWorkspaceId(sub.getRepositoryId(), workspaceId)
                 .map(Repository::getSensitivity).orElse("normal");
         Computation c = scorer.compute(sub, sensitivity, epssEnabled);
-        subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()), c.inKev(),
+        subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()), c.inKev(),
                 c.epss());
         if (c.unmappedSecretRule() != null) {
             log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
@@ -176,7 +176,7 @@ public class ReScoreService {
             }
             // Column-scoped UPDATE guarded by status='open' — never a full save, so a row reconcile has solved
             // since we read it is skipped (B1). No triage_event, no status/fingerprint change.
-            subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()),
+            subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()),
                     c.inKev(), c.epss());
             touchedGroups.add(sub.getGroupId());
         }
