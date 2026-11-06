@@ -16,9 +16,10 @@ If the spec, this file and a decision disagree, stop and ask.
 - One Spring Boot codebase, two profiles:
   - `api`: REST for the UI, scheduler, GitLab commit polling, KEV/EPSS/EOL sync, re-score jobs.
   - `worker`: claims `scan_job` rows, launches one disposable scanner container per scan, parses, enriches,
-    scores and reconciles findings. On startup and every 10 min a reaper (`ScanReaper`, D-102) removes scan
-    leftovers a crash left behind — containers labelled `secscan.instance=<SECSCAN_INSTANCE_ID>` and scan dirs —
-    that are not held by a live scan; it never changes job/scan/finding state.
+    scores and reconciles findings. Once before its first claim and then every 10 min a reaper (`ScanReaper`,
+    D-102) removes scan leftovers a crash left behind — containers labelled
+    `secscan.instance=<SECSCAN_INSTANCE_ID>` and scan dirs under its own `<workRoot>/<instanceId>/` — that are
+    not held by a live scan; it never changes job/scan/finding state.
 - PostgreSQL is both the database and the job queue (`SELECT … FOR UPDATE SKIP LOCKED`). No Redis, no broker.
 - Scanner = separate Docker image (`scanner-image/`) with git, OSV-Scanner, Betterleaks, Opengrep, Checkov. Writes
   JSON/SARIF to `/out`, destroyed after every scan. Only `/out` and logs leave it.
