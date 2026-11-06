@@ -152,7 +152,7 @@ class ReconcileLifecycleIT extends AbstractScanWorkerIT {
     }
 
     private void runScan(UUID repoId) {
-        ScanView scan = scanService.startManual(repoId);
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repoId);
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

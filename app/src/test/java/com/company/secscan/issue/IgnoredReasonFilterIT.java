@@ -3,6 +3,7 @@ package com.company.secscan.issue;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.secscan.issue.api.IgnoredItemView;
+import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,8 +34,8 @@ class IgnoredReasonFilterIT extends TriageSeedSupport {
         dev.ignore("DEV_DEPENDENCY", null);
         subIssues.save(dev);
 
-        var all = triage.listIgnored(0, 50, null);
-        var lowEpss = triage.listIgnored(0, 50, "LOW_EPSS");
+        var all = triage.listIgnored(Workspace.DEFAULT_ID, 0, 50, null);
+        var lowEpss = triage.listIgnored(Workspace.DEFAULT_ID, 0, 50, "LOW_EPSS");
 
         assertThat(all.totalElements()).isEqualTo(2);
         assertThat(lowEpss.totalElements()).isEqualTo(1); // exact server-side count

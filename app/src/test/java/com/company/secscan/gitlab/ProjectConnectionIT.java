@@ -58,7 +58,7 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     void createResolvesAndStoresTheProject() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubProject(ENCODED);
 
-        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        ConnectionTestResult r = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
 
         assertThat(r.ok()).isTrue();
         assertThat(r.targetType()).isEqualTo("project");
@@ -87,7 +87,7 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     void projectNotFoundIsReported() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubProjectStatus(ENCODED, 404);
 
-        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        ConnectionTestResult r = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.PROJECT_NOT_FOUND.name());
@@ -97,7 +97,7 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     void missingScopeIsReported() {
         gitlab.stubVersion().stubTokenSelf("token-self-missing-scope.json").stubProject(ENCODED);
 
-        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        ConnectionTestResult r = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.MISSING_SCOPES.name());
@@ -107,7 +107,7 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     void expiredTokenIsReported() {
         gitlab.stubVersion().stubTokenSelf("token-self-expired.json").stubProject(ENCODED);
 
-        ConnectionTestResult r = service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        ConnectionTestResult r = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
 
         assertThat(r.ok()).isFalse();
         assertThat(r.errorCode()).isEqualTo(GitLabError.TOKEN_EXPIRED.name());
@@ -117,15 +117,16 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     void listsAndSelectsTheSingleProject() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubProject(ENCODED)
                 .stubLanguages(PROJECT_ID, "{\"Java\":100.0}");
-        service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
         UUID connId = projectConnectionId();
 
-        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 50);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(Workspace.DEFAULT_ID, connId, 0, 50);
         assertThat(page.totalElements()).isEqualTo(1);
         assertThat(page.content().get(0).gitlabProjectId()).isEqualTo(PROJECT_ID);
         assertThat(page.content().get(0).selectable()).isTrue();
 
-        List<RepositoryView> selected = repositoryService.select(connId, List.of(PROJECT_ID)).repositories();
+        List<RepositoryView> selected = repositoryService.select(Workspace.DEFAULT_ID, connId,
+                List.of(PROJECT_ID)).repositories();
         assertThat(selected).singleElement()
                 .satisfies(v -> {
                     assertThat(v.gitlabProjectId()).isEqualTo(PROJECT_ID);
@@ -138,10 +139,10 @@ class ProjectConnectionIT extends AbstractGitLabIT {
     @Test
     void cannotSelectAProjectNotExposedByTheConnection() {
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubProject(ENCODED);
-        service.create(gitlab.baseUrl(), TOKEN, "project", PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PATH);
         UUID connId = projectConnectionId();
 
-        assertThatThrownBy(() -> repositoryService.select(connId, List.of(999L)))
+        assertThatThrownBy(() -> repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(999L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("not reachable through this connection");
         assertThat(repositories.findByWorkspaceId(Workspace.DEFAULT_ID)).isEmpty();

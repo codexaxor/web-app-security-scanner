@@ -8,7 +8,6 @@ import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
-import com.company.secscan.workspace.Workspace;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,9 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
  * with {@code BRANCH_CHANGED} ({@link TriageApplier}); this pass is the retroactive, re-runnable cleanup and
  * writes {@code SOLVED_NOT_DETECTED} against that latest scan.
  *
- * <p>Acts ONLY on the default (authenticated user's) workspace — {@code Workspace.DEFAULT_ID}, like every service
- * today (N-6: there is one workspace in the MVP). It is NOT a cross-workspace sweep; admin endpoints are ungated
- * (OD-9). {@code dryRun} (the endpoint default) computes and returns the candidates without changing anything.
+ * <p>An operator maintenance pass (M8.10: {@code /api/v1/admin/**} is operator-only, D-094) that acts ONLY on the
+ * caller's own workspace (the operator's: Default) — never across tenants, so it neither reveals nor changes another
+ * workspace's findings (D-094). Every query is scoped by that workspace's id (domain rule 1). {@code dryRun} (the
+ * endpoint default) computes and returns the candidates without changing anything.
  * Idempotent: a real run solves each candidate (status ignored → solved) and writes a {@code triage_event}
  * (actor system); a second run finds nothing new because the rows are now solved. A failed or non-authoritative
  * scanner retires nothing (domain rule 3); a secret not hashed with the current fingerprint key id is skipped
@@ -45,7 +45,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class IgnoredOrphanRetirer {
 
     private static final Logger log = LoggerFactory.getLogger(IgnoredOrphanRetirer.class);
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
 
     private final RepositoryRepository repositories;
     private final ScanRepository scans;
@@ -80,15 +79,24 @@ public class IgnoredOrphanRetirer {
     public record RetireResult(boolean dryRun, int candidates, int retired, List<Candidate> candidateList) {
     }
 
+    /**
+     * Runs the pass for ONE workspace — the caller's own (D-094 amended in the M8.10 review: operator maintenance
+     * acts on the operator's own workspace only, never on another tenant's findings). Every query is scoped by
+     * {@code workspaceId}.
+     */
     @Transactional
-    public RetireResult retire(boolean dryRun) {
+    public RetireResult retire(UUID workspaceId, boolean dryRun) {
+        return retireWorkspace(workspaceId, dryRun);
+    }
+
+    private RetireResult retireWorkspace(UUID workspaceId, boolean dryRun) {
         List<Candidate> candidates = new ArrayList<>();
         Set<UUID> touched = new HashSet<>();
         int retired = 0;
-        List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(WORKSPACE);
+        List<IgnoreRule> rules = ignoreRules.findByWorkspaceId(workspaceId);
         String currentKeyId = fingerprinter.isConfigured() ? fingerprinter.require().keyId() : null;
 
-        for (Repository repo : repositories.findByWorkspaceId(WORKSPACE)) {
+        for (Repository repo : repositories.findByWorkspaceId(workspaceId)) {
             String effectiveBranch = repo.effectiveBranch();
             if (effectiveBranch == null) {
                 continue; // no branch known yet — nothing to compare against
@@ -98,7 +106,7 @@ public class IgnoredOrphanRetirer {
             // branch) must retire nothing, rather than close findings against a branch we no longer track.
             Optional<Scan> latestOpt = scans
                     .findFirstByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullOrderByCreatedAtDesc(
-                            WORKSPACE, repo.getId());
+                            workspaceId, repo.getId());
             if (latestOpt.isEmpty()) {
                 continue;
             }
@@ -107,7 +115,7 @@ public class IgnoredOrphanRetirer {
                 continue; // latest scan is on a different branch than the one now tracked — skip (S-1)
             }
             Set<String> authoritative = new HashSet<>();
-            for (ScanTask t : tasks.findByWorkspaceIdAndScanId(WORKSPACE, latest.getId())) {
+            for (ScanTask t : tasks.findByWorkspaceIdAndScanId(workspaceId, latest.getId())) {
                 if (t.succeeded() && t.closesFindings()) {
                     authoritative.add(t.getScanner());
                 }
@@ -115,9 +123,9 @@ public class IgnoredOrphanRetirer {
             if (authoritative.isEmpty()) {
                 continue; // no authoritative scanner in the latest scan → close nothing (domain rule 3)
             }
-            Map<UUID, String> groupKeyById = groupKeys(repo.getId());
+            Map<UUID, String> groupKeyById = groupKeys(workspaceId, repo.getId());
 
-            for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, repo.getId())) {
+            for (SubIssue sub : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, repo.getId())) {
                 if (!SubIssue.STATUS_IGNORED.equals(sub.getStatus())) {
                     continue;
                 }
@@ -144,10 +152,10 @@ public class IgnoredOrphanRetirer {
                     // N-1/B-2: a column-scoped UPDATE guarded by status='ignored' (clears the ignore markers too).
                     // A concurrent reconcile that already changed the row makes this a no-op (0 rows) — then no
                     // event is written and it is not counted as retired.
-                    if (subIssues.solveIgnoredOrphanIfStillIgnored(sub.getId(), WORKSPACE) == 0) {
+                    if (subIssues.solveIgnoredOrphanIfStillIgnored(sub.getId(), workspaceId) == 0) {
                         continue;
                     }
-                    events.save(TriageEvent.system(WORKSPACE, sub.getId(), SubIssue.STATUS_IGNORED,
+                    events.save(TriageEvent.system(workspaceId, sub.getId(), SubIssue.STATUS_IGNORED,
                             SubIssue.STATUS_SOLVED, TriageEvent.REASON_SOLVED_NOT_DETECTED, latest.getId()));
                     touched.add(sub.getGroupId());
                     retired++;
@@ -158,7 +166,7 @@ public class IgnoredOrphanRetirer {
         if (!dryRun && !touched.isEmpty()) {
             Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
             for (UUID groupId : touched) {
-                rollup.recompute(WORKSPACE, groupId, fixConfig);
+                rollup.recompute(workspaceId, groupId, fixConfig);
             }
             log.info("OD-19 retire pass solved {} stale ignored orphan(s) across {} group(s).",
                     retired, touched.size());
@@ -166,9 +174,9 @@ public class IgnoredOrphanRetirer {
         return new RetireResult(dryRun, candidates.size(), retired, candidates);
     }
 
-    private Map<UUID, String> groupKeys(UUID repositoryId) {
+    private Map<UUID, String> groupKeys(UUID workspaceId, UUID repositoryId) {
         Map<UUID, String> out = new HashMap<>();
-        for (IssueGroup g : groups.findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId)) {
+        for (IssueGroup g : groups.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId)) {
             out.put(g.getId(), g.getGroupKey());
         }
         return out;

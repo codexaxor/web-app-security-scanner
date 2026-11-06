@@ -85,7 +85,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
     @Test
     void successPersistsTheSecretFindingAndCompletesTheScan() {
         Repository repo = seedRepository();
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
@@ -116,7 +116,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
             ScanLaunchStub.writeScannerFailure(spec.outDir(), "deadbeefcommit");
             return new ScannerLauncher.LaunchResult(20, false, "gitleaks: unexpected error");
         }).when(launcher).run(any());
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
 
         UUID jobId = claimer.claimBatch(10).get(0);
         processor.process(jobId);
@@ -131,7 +131,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
 
     @Test
     void aLeasedJobIsNotClaimedAgain() {
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
 
         assertThat(claimer.claimBatch(10)).hasSize(1);
         assertThat(claimer.claimBatch(10)).isEmpty();
@@ -143,7 +143,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
         // doReturn (not when/thenReturn) so the @BeforeEach answer is not re-invoked during re-stubbing.
         Mockito.doReturn(new ScannerLauncher.LaunchResult(null, true, "timed out"))
                 .when(launcher).run(any());
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
 
         UUID jobId = claimer.claimBatch(10).get(0);
         processor.process(jobId);
@@ -156,7 +156,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
 
     @Test
     void aJobFailsAfterMaxAttempts() {
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
         ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
         for (int i = 0; i < ScanJob.MAX_ATTEMPTS; i++) {
             job.lease("worker");
@@ -173,7 +173,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
     void aMissingScannerImageFailsTheScanWithoutRetry() {
         // A configuration error (image missing) must fail once, not burn 3 attempts.
         Mockito.doThrow(new NotFoundException("no such image")).when(launcher).run(any());
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
 
         UUID jobId = claimer.claimBatch(10).get(0);
         processor.process(jobId);
@@ -186,7 +186,7 @@ class ScanQueueIT extends AbstractScanWorkerIT {
 
     @Test
     void aStaleLeaseIsReclaimed() {
-        ScanView scan = scanService.startManual(seedRepository().getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, seedRepository().getId());
         UUID jobId = claimer.claimBatch(10).get(0);
 
         // Negative age makes the just-taken lease count as expired for the sweep.

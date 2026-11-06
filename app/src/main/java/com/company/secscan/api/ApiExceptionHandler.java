@@ -22,6 +22,16 @@ public class ApiExceptionHandler {
     public record ApiError(String error, String message) {
     }
 
+    /** A coded error (M8.10): {@code {error: code, message}} plus {@code Retry-After} when given (429). */
+    @ExceptionHandler(ApiErrorException.class)
+    public ResponseEntity<ApiError> onApiError(ApiErrorException e) {
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(e.status());
+        if (e.retryAfterSeconds() != null) {
+            builder.header(org.springframework.http.HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSeconds()));
+        }
+        return builder.body(new ApiError(e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(EncryptionNotConfiguredException.class)
     public ResponseEntity<ApiError> onEncryption(EncryptionNotConfiguredException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -43,6 +53,16 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> onMissingCredential(com.company.secscan.source.MissingCredentialException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiError("CONNECTION_TOKEN_MISSING", e.getMessage()));
+    }
+
+    /**
+     * M8.10 S12: a stored token that cannot be decrypted (rotated key, damaged value) is a typed, actionable 409 —
+     * "re-enter the token for this source" — never a 500, and never the ciphertext or the cipher's cause.
+     */
+    @ExceptionHandler(com.company.secscan.source.UnreadableCredentialException.class)
+    public ResponseEntity<ApiError> onUnreadableCredential(com.company.secscan.source.UnreadableCredentialException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError(com.company.secscan.source.UnreadableCredentialException.CODE, e.getMessage()));
     }
 
     /** Provider-neutral source errors (GitHub/public adapters) → the same {error,message} body (M8.7). */

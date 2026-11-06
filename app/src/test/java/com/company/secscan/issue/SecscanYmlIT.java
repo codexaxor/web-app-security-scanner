@@ -174,7 +174,7 @@ class SecscanYmlIT extends AbstractScanWorkerIT {
 
         IgnoreRule secscanRule = ignoreRules.findByWorkspaceIdAndRepositoryIdAndCreatedBy(
                 WORKSPACE, repo, IgnoreRule.CREATED_BY_SECSCAN_YML).get(0);
-        assertThatThrownBy(() -> triage.removeRule(secscanRule.getId()))
+        assertThatThrownBy(() -> triage.removeRule(Workspace.DEFAULT_ID, secscanRule.getId()))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .satisfies(e -> assertThat(((org.springframework.web.server.ResponseStatusException) e)
                         .getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT));

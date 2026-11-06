@@ -108,7 +108,7 @@ class ReScoreConcurrencyIT {
         // The column-scoped UPDATE must skip the now-solved row (status guard) — no write, 0 rows affected.
         // Wrapped in a transaction because the @Modifying query flushes (a direct call has no ambient tx).
         int rows = new TransactionTemplate(txManager).execute(s ->
-                subIssues.updateScoreColumnsIfOpen(subId, 100, "[{\"code\":\"on_kev\",\"detail\":\"x\","
+                subIssues.updateScoreColumnsIfOpen(subId, WORKSPACE, 100, "[{\"code\":\"on_kev\",\"detail\":\"x\","
                         + "\"delta\":5}]", true, null));
         assertThat(rows).isZero();
 
@@ -121,6 +121,31 @@ class ReScoreConcurrencyIT {
         assertThat(after.isInKev()).isFalse();                      // NOT flipped on
         assertThat(after.getSolvedAt()).isEqualTo(solvedAt);        // solved_at untouched
         assertThat(events.count()).isZero();                        // no triage_event ever
+    }
+
+    /** M8.10 review SF-2 (domain rule 1): the column-scoped score UPDATE is also scoped by workspace_id. */
+    @Test
+    void theScoreUpdateTouchesNothingOutsideTheGivenWorkspace() {
+        UUID repoId = seedRepo();
+        IssueGroup group = groups.save(new IssueGroup(WORKSPACE, repoId, "sca",
+                Fingerprints.groupKey("sca", "Maven/org.example:scoped"), "org.example:scoped", null));
+        SubIssue sub = new SubIssue(WORKSPACE, group.getId(), repoId, "sca", "sca",
+                Fingerprints.sca("org.example:scoped", CVE, "pom.xml"), null);
+        sub.setVulnId(CVE);
+        sub.setToolSeverity("9.8");
+        sub.setCveAliases(List.of(CVE));
+        scorer.score(sub, "normal");
+        UUID subId = subIssues.save(sub).getId();
+        TransactionTemplate tx = new TransactionTemplate(txManager);
+
+        int foreign = tx.execute(s -> subIssues.updateScoreColumnsIfOpen(subId, UUID.randomUUID(), 1, "[]", true,
+                null));
+        assertThat(foreign).as("another workspace id updates nothing").isZero();
+        assertThat(subIssues.findById(subId).orElseThrow().getScore()).isEqualTo(98);
+
+        int own = tx.execute(s -> subIssues.updateScoreColumnsIfOpen(subId, WORKSPACE, 1, "[]", true, null));
+        assertThat(own).isEqualTo(1);
+        assertThat(subIssues.findById(subId).orElseThrow().getScore()).isEqualTo(1);
     }
 
     private UUID seedRepo() {

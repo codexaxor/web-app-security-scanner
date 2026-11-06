@@ -10,7 +10,6 @@ import com.company.secscan.gitlab.dto.GitLabVersion;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryEventRecorder;
 import com.company.secscan.repository.RepositoryRepository;
-import com.company.secscan.workspace.Workspace;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -34,7 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class GitLabConnectionService {
 
     private static final Logger log = LoggerFactory.getLogger(GitLabConnectionService.class);
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
 
     static final List<String> REQUIRED_SCOPES = List.of("read_api", "read_repository");
     static final int EXPIRY_WARN_DAYS = 14;
@@ -76,7 +74,7 @@ public class GitLabConnectionService {
      * transaction: {@code saveAndFlush} must surface a unique-index violation here (a concurrent duplicate
      * create) so it maps to {@code CONNECTION_EXISTS} rather than failing at an outer commit.
      */
-    public ConnectionTestResult create(String baseUrl, String token, String targetType, String path) {
+    public ConnectionTestResult create(UUID workspaceId, String baseUrl, String token, String targetType, String path) {
         Resolved r;
         try {
             r = resolve(baseUrl, token, targetType, path);
@@ -88,18 +86,18 @@ public class GitLabConnectionService {
         String host = com.company.secscan.source.SourceHosts.authorityOf(baseUrl);
         Optional<GitlabConnection> duplicate = r.isGroup()
                 ? connections.findByWorkspaceIdAndProviderAndHostAndGitlabGroupId(
-                        WORKSPACE, GitlabConnection.PROVIDER_GITLAB, host, r.id())
+                        workspaceId, GitlabConnection.PROVIDER_GITLAB, host, r.id())
                 : connections.findByWorkspaceIdAndProviderAndHostAndGitlabProjectId(
-                        WORKSPACE, GitlabConnection.PROVIDER_GITLAB, host, r.id());
+                        workspaceId, GitlabConnection.PROVIDER_GITLAB, host, r.id());
         if (duplicate.isPresent()) {
             return alreadyConnected(r);
         }
         String ciphertext = cipher.require().encrypt(token);
         String scopes = String.join(",", r.tokenInfo().scopes());
         GitlabConnection connection = r.isGroup()
-                ? GitlabConnection.forGroup(WORKSPACE, baseUrl, r.path(), r.id(), ciphertext, scopes,
+                ? GitlabConnection.forGroup(workspaceId, baseUrl, r.path(), r.id(), ciphertext, scopes,
                         r.tokenInfo().expiresAt())
-                : GitlabConnection.forProject(WORKSPACE, baseUrl, r.path(), r.id(), ciphertext, scopes,
+                : GitlabConnection.forProject(workspaceId, baseUrl, r.path(), r.id(), ciphertext, scopes,
                         r.tokenInfo().expiresAt());
         try {
             connections.saveAndFlush(connection);
@@ -125,9 +123,9 @@ public class GitLabConnectionService {
      * a transaction holding a DB connection. It reads the target in its own short tx, verifies over the network
      * with no tx held, then commits the rotation via {@link ConnectionTokenWriter} in a second short write tx.
      */
-    public ConnectionTestResult update(UUID connectionId, String baseUrl, String token, String path) {
+    public ConnectionTestResult update(UUID workspaceId, UUID connectionId, String baseUrl, String token, String path) {
         // Read tx #1 (Spring Data default): capture the connection's current target.
-        GitlabConnection existing = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+        GitlabConnection existing = connections.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
                         "No such connection in this workspace."));
         // M8.8 item 7: a public connection has no stored token — rotating one is meaningless and is refused.
@@ -154,19 +152,19 @@ public class GitLabConnectionService {
 
         // Write tx #2 (short): persist the rotated token.
         String ciphertext = cipher.require().encrypt(token);
-        tokenWriter.rotate(connectionId, WORKSPACE, baseUrl, ciphertext,
+        tokenWriter.rotate(connectionId, workspaceId, baseUrl, ciphertext,
                 String.join(",", r.tokenInfo().scopes()), r.tokenInfo().expiresAt());
         return toResult(r);
     }
 
     @Transactional(readOnly = true)
-    public List<GitlabConnection> list() {
-        return connections.findByWorkspaceId(WORKSPACE);
+    public List<GitlabConnection> list(UUID workspaceId) {
+        return connections.findByWorkspaceId(workspaceId);
     }
 
     @Transactional(readOnly = true)
-    public GitlabConnection require(UUID connectionId) {
-        return connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+    public GitlabConnection require(UUID workspaceId, UUID connectionId) {
+        return connections.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
                         "No such connection in this workspace."));
     }
@@ -177,16 +175,16 @@ public class GitLabConnectionService {
      * (D-020). The connection row (and its token ciphertext) is then deleted.
      */
     @Transactional
-    public ConnectionRemovalResult delete(UUID connectionId) {
-        GitlabConnection conn = connections.findByIdAndWorkspaceId(connectionId, WORKSPACE)
+    public ConnectionRemovalResult delete(UUID workspaceId, UUID connectionId) {
+        GitlabConnection conn = connections.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new GitLabException(GitLabError.CONNECTION_NOT_FOUND,
                         "No such connection in this workspace."));
-        List<GitlabConnection> others = new ArrayList<>(connections.findByWorkspaceId(WORKSPACE));
+        List<GitlabConnection> others = new ArrayList<>(connections.findByWorkspaceId(workspaceId));
         others.removeIf(c -> c.getId().equals(conn.getId()));
 
         int reassigned = 0;
         int deactivated = 0;
-        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(WORKSPACE, conn.getId())) {
+        for (Repository repo : repositories.findByWorkspaceIdAndConnectionId(workspaceId, conn.getId())) {
             Optional<GitlabConnection> target = pickReassignTarget(repo, others);
             if (target.isPresent()) {
                 repo.reassignTo(target.get().getId());

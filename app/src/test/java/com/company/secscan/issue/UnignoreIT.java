@@ -2,6 +2,7 @@ package com.company.secscan.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,10 +24,10 @@ class UnignoreIT extends TriageSeedSupport {
         UUID scan = seedScan(repo);
         seedSca(scan, repo, "CVE-2022-42889", "org.apache.commons:commons-text", "pom.xml");
         reconcile.reconcile(scan, WORKSPACE);
-        var rule = triage.ignoreSubIssue(byVuln(repo, "CVE-2022-42889").getId(), "temp");
+        var rule = triage.ignoreSubIssue(Workspace.DEFAULT_ID, byVuln(repo, "CVE-2022-42889").getId(), "temp");
         assertThat(byVuln(repo, "CVE-2022-42889").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
 
-        triage.removeRule(rule.id());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.id());
 
         SubIssue restored = byVuln(repo, "CVE-2022-42889");
         assertThat(restored.getStatus()).isEqualTo(SubIssue.STATUS_OPEN); // still present in the latest scan
@@ -41,7 +42,7 @@ class UnignoreIT extends TriageSeedSupport {
         UUID scan1 = seedScan(repo);
         seedSca(scan1, repo, "CVE-2022-42889", "org.apache.commons:commons-text", "pom.xml");
         reconcile.reconcile(scan1, WORKSPACE);
-        var rule = triage.ignoreSubIssue(byVuln(repo, "CVE-2022-42889").getId(), "temp");
+        var rule = triage.ignoreSubIssue(Workspace.DEFAULT_ID, byVuln(repo, "CVE-2022-42889").getId(), "temp");
 
         // Scan 2: SCA succeeds (closes findings) but the finding is GONE. It stays ignored (hard rule 6).
         UUID scan2 = seedScan(repo);
@@ -49,7 +50,7 @@ class UnignoreIT extends TriageSeedSupport {
         assertThat(byVuln(repo, "CVE-2022-42889").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
 
         // Unignore now: the SCA scanner was authoritative and the finding is absent -> solved.
-        triage.removeRule(rule.id());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.id());
         assertThat(byVuln(repo, "CVE-2022-42889").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
     }
 
@@ -60,14 +61,14 @@ class UnignoreIT extends TriageSeedSupport {
         UUID scan1 = seedScan(repo);
         seedSast(scan1, repo, "opengrep-rules.custom.x", "A.java", "h1");
         reconcile.reconcile(scan1, WORKSPACE);
-        var rule = triage.ignoreSubIssue(byFile(repo, "A.java").getId(), "temp");
+        var rule = triage.ignoreSubIssue(Workspace.DEFAULT_ID, byFile(repo, "A.java").getId(), "temp");
 
         // Scan 2: SAST FAILED (closes nothing) and the finding is absent. Its scanner did not succeed, so on
         // unignore it must return to OPEN, never solved (failed/absent scanner closes nothing, change #4).
         UUID scan2 = seedScan(repo, true, false); // sca ok, sast failed
         reconcile.reconcile(scan2, WORKSPACE);
 
-        triage.removeRule(rule.id());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.id());
         SubIssue restored = byFile(repo, "A.java");
         assertThat(restored.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
         assertUnignoredEvent(restored);

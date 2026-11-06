@@ -54,17 +54,19 @@ class FeedCategoryFilterIT extends AbstractGitLabIT {
         scans.save(scan);
         reconcile.reconcile(scan.getId(), WORKSPACE);
 
-        assertThat(issues.listGroups(null, null, null, "all", null, false, 0, 50).totalElements()).isEqualTo(2);
+        assertThat(issues.listGroups(Workspace.DEFAULT_ID, null, null, null, null, null, "all", null, false, 0,
+                50).totalElements()).isEqualTo(2);
 
-        var maven = issues.listGroups(null, null, "Maven", "all", null, false, 0, 50);
+        var maven = issues.listGroups(Workspace.DEFAULT_ID, null, null, "Maven", null, null, "all", null, false, 0, 50);
         assertThat(maven.content()).extracting(IssueGroupView::type).containsExactly("sca");
         assertThat(maven.content()).extracting(IssueGroupView::level2Category).containsExactly("Maven");
 
-        var terraform = issues.listGroups(null, null, "Terraform", "all", null, false, 0, 50);
+        var terraform = issues.listGroups(Workspace.DEFAULT_ID, null, null, "Terraform", null, null, "all", null, false, 0, 50);
         assertThat(terraform.content()).extracting(IssueGroupView::type).containsExactly("iac");
         assertThat(terraform.content()).extracting(IssueGroupView::level2Category).containsExactly("Terraform");
 
-        assertThat(issues.listGroups(null, null, "Nonexistent", "all", null, false, 0, 50).totalElements())
+        assertThat(issues.listGroups(Workspace.DEFAULT_ID, null, null, "Nonexistent", null, null, "all", null, false, 0,
+                50).totalElements())
                 .isZero();
     }
 }

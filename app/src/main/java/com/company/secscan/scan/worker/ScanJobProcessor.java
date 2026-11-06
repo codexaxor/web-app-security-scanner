@@ -140,6 +140,11 @@ public class ScanJobProcessor {
             state.failPermanently(workspaceId, jobId, scan.getId(), "CONNECTION_TOKEN_MISSING",
                     "Connection needs a new token.");
             return;
+        } catch (com.company.secscan.source.UnreadableCredentialException e) {
+            // M8.10 S12: rotated key / damaged ciphertext — permanent (a retry cannot fix it), reconcile nothing.
+            state.failPermanently(workspaceId, jobId, scan.getId(),
+                    com.company.secscan.source.UnreadableCredentialException.CODE, e.getMessage());
+            return;
         }
 
         ScanWorkspace ws;
@@ -235,11 +240,11 @@ public class ScanJobProcessor {
         }
         try {
             client.projectLanguages(conn.getBaseUrl(), token, repo.getGitlabProjectId());
-            guard.confirm(conn.getId());
+            guard.confirm(workspaceId, conn.getId());
             return true;
         } catch (GitLabException e) {
             if (accessDenied(e.getError())) {
-                guard.deactivate(conn.getId());
+                guard.deactivate(workspaceId, conn.getId());
                 state.resolveNoAccess(workspaceId, jobId, scanId,
                         "connection cannot reach repository: " + e.getError());
             } else {

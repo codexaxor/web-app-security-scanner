@@ -1,6 +1,7 @@
 package com.company.secscan.source;
 
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.gitlab.api.ConnectionView;
 import com.company.secscan.repository.RepositoryService;
 import com.company.secscan.repository.api.RepositoryView;
@@ -46,33 +47,38 @@ public class SourceController {
     }
 
     @PostMapping("/github/owner")
-    public ConnectionView addGitHubOwner(@Valid @RequestBody AddGitHubOwnerRequest req) {
-        return ConnectionView.of(sources.createGitHubOwner(req.ownerLogin(), req.token()));
+    public ConnectionView addGitHubOwner(@CurrentWorkspace UUID workspaceId,
+            @Valid @RequestBody AddGitHubOwnerRequest req) {
+        return ConnectionView.of(sources.createGitHubOwner(workspaceId, req.ownerLogin(), req.token()));
     }
 
     @PostMapping("/github/repo")
-    public ConnectionView addGitHubRepo(@Valid @RequestBody AddGitHubRepoRequest req) {
-        return ConnectionView.of(sources.createGitHubRepo(req.fullName(), req.token()));
+    public ConnectionView addGitHubRepo(@CurrentWorkspace UUID workspaceId,
+            @Valid @RequestBody AddGitHubRepoRequest req) {
+        return ConnectionView.of(sources.createGitHubRepo(workspaceId, req.fullName(), req.token()));
     }
 
     @PostMapping("/public")
-    public ConnectionView addPublicRepo(@Valid @RequestBody AddPublicRepoRequest req) {
-        return ConnectionView.of(sources.createPublicRepo(req.url()));
+    public ConnectionView addPublicRepo(@CurrentWorkspace UUID workspaceId,
+            @Valid @RequestBody AddPublicRepoRequest req) {
+        return ConnectionView.of(sources.createPublicRepo(workspaceId, req.url()));
     }
 
     /** One page of a connection's selectable repositories (GitHub owner / single repo / public). */
     @GetMapping("/connections/{id}/repositories")
-    public PagedResponse<SourceRepo> repositories(
+    public PagedResponse<SourceRepo> repositories(@CurrentWorkspace UUID workspaceId,
             @PathVariable UUID id,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return repositoryService.listSourceRepositories(id, search, page, size);
+        return repositoryService.listSourceRepositories(workspaceId, id, search, page, size);
     }
 
     /** Selects repositories by the provider's id through a GitHub/public connection. */
     @PostMapping("/connections/{id}/select")
-    public List<RepositoryView> select(@PathVariable UUID id, @RequestBody SelectSourceRequest req) {
-        return repositoryService.selectSource(id, req.providerRepoIds() == null ? List.of() : req.providerRepoIds());
+    public List<RepositoryView> select(@CurrentWorkspace UUID workspaceId, @PathVariable UUID id,
+            @RequestBody SelectSourceRequest req) {
+        return repositoryService.selectSource(workspaceId, id,
+                req.providerRepoIds() == null ? List.of() : req.providerRepoIds());
     }
 }

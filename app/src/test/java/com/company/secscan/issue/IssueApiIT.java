@@ -81,14 +81,19 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repoB.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token"); // open
 
         // Focus view: solved is never shown, so repoA has just its one open secret group.
-        assertThat(service.listGroups(repoA.getId(), null, null, "focus", null, false, 0, 50).content()).hasSize(1);
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, null, null, "focus", null, false, 0,
+                50).content()).hasSize(1);
         // Filter by type.
-        assertThat(service.listGroups(repoA.getId(), "secret", null, "focus", null, false, 0, 50).content()).hasSize(1);
-        assertThat(service.listGroups(repoA.getId(), "sast", null, "focus", null, false, 0, 50).content()).isEmpty();
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "secret", null, null, null, "focus", null, false, 0,
+                50).content()).hasSize(1);
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), "sast", null, null, null, "focus", null, false, 0,
+                50).content()).isEmpty();
         // No repo filter: both repos' OPEN groups (solved excluded) = 2.
-        assertThat(service.listGroups(null, null, null, "focus", null, false, 0, 50).totalElements()).isEqualTo(2);
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, null, null, null, null, null, "focus", null, false, 0,
+                50).totalElements()).isEqualTo(2);
         // repositoryPath is populated on each row (OD-14 item 3).
-        assertThat(service.listGroups(repoA.getId(), null, null, "focus", null, false, 0, 50).content().get(0)
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repoA.getId(), null, null, null, null, "focus", null, false, 0,
+                50).content().get(0)
                 .repositoryPath()).isEqualTo("svc/a");
     }
 
@@ -98,11 +103,14 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repo.getId(), "sast", "sast|csrf", "Spring CSRF Disabled");
         seedGroup(repo.getId(), "sast", "sast|xxe", "XML External Entity");
         // M8.6 repo Issues-tab search (title/subtitle ILIKE), case-insensitive.
-        assertThat(service.listGroups(repo.getId(), null, null, "csrf", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "csrf", null, "focus", null, false, 0,
+                50).content())
                 .hasSize(1);
-        assertThat(service.listGroups(repo.getId(), null, null, "ENTITY", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "ENTITY", null, "focus", null, false,
+                0, 50).content())
                 .hasSize(1);
-        assertThat(service.listGroups(repo.getId(), null, null, "nomatch", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "nomatch", null, "focus", null, false,
+                0, 50).content())
                 .isEmpty();
     }
 
@@ -113,13 +121,16 @@ class IssueApiIT extends AbstractGitLabIT {
         seedGroup(repo.getId(), "sast", "sast|und", "user_id leaked");
         seedGroup(repo.getId(), "sast", "sast|plain", "clean title");
         // "%" is a literal, not "match everything": only the title that contains a percent sign matches.
-        assertThat(service.listGroups(repo.getId(), null, null, "%", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "%", null, "focus", null, false, 0,
+                50).content())
                 .extracting(IssueGroupView::title).containsExactly("50% off coupon");
         // "_" is a literal, not "match any single character".
-        assertThat(service.listGroups(repo.getId(), null, null, "_", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "_", null, "focus", null, false, 0,
+                50).content())
                 .extracting(IssueGroupView::title).containsExactly("user_id leaked");
         // A term that embeds a percent still matches case-insensitively, anchored to the literal "%".
-        assertThat(service.listGroups(repo.getId(), null, null, "50% OFF", "focus", null, false, 0, 50).content())
+        assertThat(service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, "50% OFF", null, "focus", null, false,
+                0, 50).content())
                 .extracting(IssueGroupView::title).containsExactly("50% off coupon");
     }
 
@@ -129,7 +140,7 @@ class IssueApiIT extends AbstractGitLabIT {
         seedCategorizedGroup(repo.getId(), "sast|c1", "A", "SQL injection");
         seedCategorizedGroup(repo.getId(), "sast|c2", "B", "SQL injection");
         seedCategorizedGroup(repo.getId(), "sast|c3", "C", "Path traversal");
-        var cats = service.listCategories(repo.getId(), "focus", false);
+        var cats = service.listCategories(Workspace.DEFAULT_ID, repo.getId(), "focus", false);
         assertThat(cats).extracting(IssueService.CategoryCount::category)
                 .containsExactly("SQL injection", "Path traversal"); // ordered by count desc
         assertThat(cats.get(0).count()).isEqualTo(2);
@@ -145,7 +156,7 @@ class IssueApiIT extends AbstractGitLabIT {
         SubIssue s = new SubIssue(WORKSPACE, g.getId(), repo.getId(), "sast", "sast", "fp-link", scan.getId());
         s.setFilePath("src/App.java");
         subIssues.save(s);
-        SubIssueView view = service.listSubIssues(g.getId(), 0, 50).content().get(0);
+        SubIssueView view = service.listSubIssues(Workspace.DEFAULT_ID, g.getId(), 0, 50).content().get(0);
         // D-084: host = the connection's authority; commitSha = the last-seen scan's commit.
         assertThat(view.host()).isEqualTo("localhost");
         assertThat(view.commitSha()).isEqualTo("a".repeat(40));
@@ -157,7 +168,7 @@ class IssueApiIT extends AbstractGitLabIT {
         for (int i = 0; i < 5; i++) {
             seedGroup(repo.getId(), "secret", "secret|rule-" + i, "Exposed rule-" + i);
         }
-        var firstPage = service.listGroups(repo.getId(), null, null, "focus", null, false, 0, 2);
+        var firstPage = service.listGroups(Workspace.DEFAULT_ID, repo.getId(), null, null, null, null, "focus", null, false, 0, 2);
         assertThat(firstPage.content()).hasSize(2);
         assertThat(firstPage.totalElements()).isEqualTo(5);
         assertThat(firstPage.totalPages()).isEqualTo(3);
@@ -165,7 +176,7 @@ class IssueApiIT extends AbstractGitLabIT {
 
     @Test
     void listSubIssuesReturns404ForAnUnknownGroup() {
-        assertThatThrownBy(() -> service.listSubIssues(UUID.randomUUID(), 0, 50))
+        assertThatThrownBy(() -> service.listSubIssues(Workspace.DEFAULT_ID, UUID.randomUUID(), 0, 50))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("No such issue group");
     }
@@ -193,7 +204,7 @@ class IssueApiIT extends AbstractGitLabIT {
                 new ScoreLine("clamp", "Clamped to the 1–100 range (was 103)", -3)));
         subIssues.save(s);
 
-        SubIssueView v = service.listSubIssues(group.getId(), 0, 50).content().get(0);
+        SubIssueView v = service.listSubIssues(Workspace.DEFAULT_ID, group.getId(), 0, 50).content().get(0);
         assertThat(v.score()).isEqualTo(100);
         assertThat(v.band()).isEqualTo("critical");
         assertThat(v.inKev()).isTrue();
@@ -215,7 +226,7 @@ class IssueApiIT extends AbstractGitLabIT {
         IssueGroup group = seedGroup(repo.getId(), "secret", "secret|aws-access-token", "Exposed aws-access-token");
         seedSecretSub(group, repo.getId(), "fp-secret-1");
 
-        List<SubIssueView> views = service.listSubIssues(group.getId(), 0, 50).content();
+        List<SubIssueView> views = service.listSubIssues(Workspace.DEFAULT_ID, group.getId(), 0, 50).content();
         assertThat(views).singleElement().satisfies(v -> assertThat(v.secretPreview()).isEqualTo("AKIA"));
 
         // The serialized JSON must not carry the stored HMAC hash or the key id (plan addition 6).

@@ -43,8 +43,8 @@ class CrossHostIdentityIT extends AbstractGitLabIT {
     void setUp() {
         hostA = stubbedHost();
         hostB = stubbedHost();
-        connectionService.create(hostA.baseUrl(), TOKEN, "project", PATH);
-        connectionService.create(hostB.baseUrl(), TOKEN, "project", PATH);
+        connectionService.create(Workspace.DEFAULT_ID, hostA.baseUrl(), TOKEN, "project", PATH);
+        connectionService.create(Workspace.DEFAULT_ID, hostB.baseUrl(), TOKEN, "project", PATH);
     }
 
     @AfterEach
@@ -74,8 +74,8 @@ class CrossHostIdentityIT extends AbstractGitLabIT {
         // Both hosts have a connection to "project 102"; neither create was rejected as a duplicate.
         assertThat(connections.findByWorkspaceId(Workspace.DEFAULT_ID)).hasSize(2);
 
-        repositoryService.select(projectConnId(hostA), List.of(PROJECT_ID));
-        repositoryService.select(projectConnId(hostB), List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, projectConnId(hostA), List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, projectConnId(hostB), List.of(PROJECT_ID));
 
         List<Repository> stored = repositories.findByWorkspaceId(Workspace.DEFAULT_ID);
         assertThat(stored).hasSize(2);

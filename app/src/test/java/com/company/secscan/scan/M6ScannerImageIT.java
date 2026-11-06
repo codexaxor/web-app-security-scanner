@@ -79,7 +79,7 @@ class M6ScannerImageIT extends AbstractScanWorkerIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 606L, "svc/iac", "main",
                 List.of("HCL")));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

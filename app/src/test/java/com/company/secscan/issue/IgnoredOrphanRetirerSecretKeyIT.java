@@ -73,12 +73,12 @@ class IgnoredOrphanRetirerSecretKeyIT extends AbstractGitLabIT {
         task.setClosesFindings(true);
         tasks.save(task);
 
-        IgnoredOrphanRetirer.RetireResult dry = retirer.retire(true);
+        IgnoredOrphanRetirer.RetireResult dry = retirer.retire(WORKSPACE, true);
         assertThat(dry.candidates()).isEqualTo(1);
         assertThat(dry.candidateList()).singleElement()
                 .satisfies(c -> assertThat(c.subIssueId()).isEqualTo(live.getId()));
 
-        assertThat(retirer.retire(false).retired()).isEqualTo(1);
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isEqualTo(1);
         assertThat(subIssues.findById(stale.getId()).orElseThrow().getStatus())
                 .isEqualTo(SubIssue.STATUS_IGNORED);   // frozen key → preserved
         assertThat(subIssues.findById(live.getId()).orElseThrow().getStatus())

@@ -57,10 +57,10 @@ class SubIssuePanelIT extends AbstractGitLabIT {
         events.save(TriageEvent.system(WORKSPACE, s.getId(), null, "open", null, null));
         events.save(TriageEvent.user(WORKSPACE, s.getId(), "open", "ignored", null));
 
-        var page = service.subIssueEvents(s.getId(), 0, 50);
+        var page = service.subIssueEvents(Workspace.DEFAULT_ID, s.getId(), 0, 50);
         assertThat(page.content()).extracting(TriageEventView::toStatus).containsExactly("ignored", "open");
 
-        assertThatThrownBy(() -> service.subIssueEvents(UUID.randomUUID(), 0, 50))
+        assertThatThrownBy(() -> service.subIssueEvents(Workspace.DEFAULT_ID, UUID.randomUUID(), 0, 50))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
@@ -78,7 +78,7 @@ class SubIssuePanelIT extends AbstractGitLabIT {
         ignored.ignore("IGNORE_RULE", null);                                  // not open → excluded
         subIssues.save(ignored);
 
-        assertThat(service.getGroup(g.getId()).fixedVersions())
+        assertThat(service.getGroup(Workspace.DEFAULT_ID, g.getId()).fixedVersions())
                 .containsExactlyInAnyOrder("1.0.1", "2.0.0");
     }
 
@@ -89,7 +89,7 @@ class SubIssuePanelIT extends AbstractGitLabIT {
         subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-a", "3.1.4"));
         subIssues.save(fixedVersionSub(g.getId(), repoId, "fp-b", "3.1.4"));
 
-        assertThat(service.getGroup(g.getId()).fixedVersions()).containsExactly("3.1.4");
+        assertThat(service.getGroup(Workspace.DEFAULT_ID, g.getId()).fixedVersions()).containsExactly("3.1.4");
     }
 
     private SubIssue fixedVersionSub(UUID groupId, UUID repoId, String fp, String fixedVersion) {
@@ -115,7 +115,7 @@ class SubIssuePanelIT extends AbstractGitLabIT {
 
         subIssues.save(new SubIssue(WORKSPACE, g.getId(), repoId, "sca", "sca", "fp-open", null)); // open
 
-        List<SubIssueView> views = service.listSubIssues(g.getId(), 0, 50).content();
+        List<SubIssueView> views = service.listSubIssues(Workspace.DEFAULT_ID, g.getId(), 0, 50).content();
         SubIssueView heldView = views.stream().filter(v -> "fp-held".equals(v.ruleReason()) || v.ignoreRuleId() != null)
                 .findFirst().orElseThrow();
         assertThat(heldView.ignoreRuleId()).isEqualTo(rule.getId());

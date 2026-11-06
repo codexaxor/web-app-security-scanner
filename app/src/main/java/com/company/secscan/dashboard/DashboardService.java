@@ -13,7 +13,6 @@ import com.company.secscan.repository.RepositoryRepository;
 import com.company.secscan.repository.RepositorySummaryService;
 import com.company.secscan.repository.RepositorySummaryService.RepositorySummary;
 import com.company.secscan.scan.Scan;
-import com.company.secscan.workspace.Workspace;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DashboardService {
 
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
     private static final Set<String> UNHEALTHY = Set.of(Scan.STATUS_PARTIAL, Scan.STATUS_FAILED);
 
     private final IssueGroupRepository groups;
@@ -47,35 +45,35 @@ public class DashboardService {
     }
 
     @Transactional(readOnly = true)
-    public DashboardSummaryView summary(boolean includeInactive) {
-        Object[] gb = first(groups.bandCounts(WORKSPACE, null, null, List.of(IssueGroup.STATUS_OPEN),
+    public DashboardSummaryView summary(UUID workspaceId, boolean includeInactive) {
+        Object[] gb = first(groups.bandCounts(workspaceId, null, null, List.of(IssueGroup.STATUS_OPEN),
                 includeInactive));
         BandCounts groupBands = new BandCounts(lng(gb[0]), lng(gb[1]), lng(gb[2]), lng(gb[3]));
         long totalGroups = lng(gb[4]);
 
-        Object[] sb = first(subIssues.openBandCounts(WORKSPACE, includeInactive));
+        Object[] sb = first(subIssues.openBandCounts(workspaceId, includeInactive));
         BandCounts findingBands = new BandCounts(lng(sb[0]), lng(sb[1]), lng(sb[2]), lng(sb[3]));
         long totalFindings = lng(sb[4]);
 
-        List<TypeCount> byType = subIssues.openCountsByType(WORKSPACE, includeInactive).stream()
+        List<TypeCount> byType = subIssues.openCountsByType(workspaceId, includeInactive).stream()
                 .map(r -> new TypeCount((String) r[0], lng(r[1]))).toList();
 
-        ScanHealth scanHealth = scanHealth();
+        ScanHealth scanHealth = scanHealth(workspaceId);
         InactiveLine inactive = new InactiveLine(
-                repositories.countByWorkspaceIdAndActive(WORKSPACE, false),
-                subIssues.countOpenInInactiveRepos(WORKSPACE));
+                repositories.countByWorkspaceIdAndActive(workspaceId, false),
+                subIssues.countOpenInInactiveRepos(workspaceId));
 
         return new DashboardSummaryView(groupBands, totalGroups, findingBands, totalFindings, byType,
                 scanHealth, inactive);
     }
 
     /** Active repositories whose last scan is partial/failed or raised warnings. */
-    private ScanHealth scanHealth() {
-        Map<UUID, RepositorySummary> rollups = summaries.summariesByRepo(WORKSPACE);
+    private ScanHealth scanHealth(UUID workspaceId) {
+        Map<UUID, RepositorySummary> rollups = summaries.summariesByRepo(workspaceId);
         List<RepoHealth> unhealthy = new ArrayList<>();
         long failedPartial = 0;
         long withWarnings = 0;
-        for (Repository repo : repositories.findByWorkspaceId(WORKSPACE)) {
+        for (Repository repo : repositories.findByWorkspaceId(workspaceId)) {
             if (!repo.isActive()) {
                 continue;
             }

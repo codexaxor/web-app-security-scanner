@@ -11,7 +11,6 @@ import com.company.secscan.source.github.GitHubClient;
 import com.company.secscan.source.github.GitHubProvider;
 import com.company.secscan.source.github.dto.GitHubRepo;
 import com.company.secscan.source.gitlab.GitLabProvider;
-import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -26,7 +25,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class SourceConnectionService {
 
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
 
     private final GitlabConnectionRepository connections;
     private final TokenCipherHolder cipher;
@@ -51,30 +49,30 @@ public class SourceConnectionService {
     }
 
     /** Connects a GitHub owner (user/org); the fine-grained PAT must see it. Rejects a duplicate in this workspace. */
-    public GitlabConnection createGitHubOwner(String ownerLogin, String token) {
+    public GitlabConnection createGitHubOwner(UUID workspaceId, String ownerLogin, String token) {
         hostPolicy.requireAllowed(gitHubBase);
         gitHub.currentUser(gitHubBase, token);                 // verifies the token (401 → ProviderException)
         gitHub.owner(gitHubBase, token, ownerLogin);           // confirms the owner is visible (404 → NOT_FOUND)
         requireNotConnected(connections.findByWorkspaceIdAndProviderAndHostAndOwnerLogin(
-                WORKSPACE, GitlabConnection.PROVIDER_GITHUB, gitHubHost, ownerLogin), "owner " + ownerLogin);
+                workspaceId, GitlabConnection.PROVIDER_GITHUB, gitHubHost, ownerLogin), "owner " + ownerLogin);
         String ciphertext = cipher.require().encrypt(token);
-        return save(GitlabConnection.forGitHubOwner(WORKSPACE, gitHubBase, ownerLogin, ciphertext, null, null));
+        return save(GitlabConnection.forGitHubOwner(workspaceId, gitHubBase, ownerLogin, ciphertext, null, null));
     }
 
     /** Connects a single GitHub repository ({@code owner/name}); resolves its stable numeric id for identity. */
-    public GitlabConnection createGitHubRepo(String fullName, String token) {
+    public GitlabConnection createGitHubRepo(UUID workspaceId, String fullName, String token) {
         hostPolicy.requireAllowed(gitHubBase);
         GitHubRepo repo = gitHub.repoByFullName(gitHubBase, token, fullName);   // verifies + resolves id
         String providerRepoId = Long.toString(repo.id());
         requireNotConnected(connections.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
-                WORKSPACE, GitlabConnection.PROVIDER_GITHUB, gitHubHost, providerRepoId), "repository " + fullName);
+                workspaceId, GitlabConnection.PROVIDER_GITHUB, gitHubHost, providerRepoId), "repository " + fullName);
         String ciphertext = cipher.require().encrypt(token);
-        return save(GitlabConnection.forSingleRepo(WORKSPACE, gitHubBase, GitlabConnection.PROVIDER_GITHUB,
+        return save(GitlabConnection.forSingleRepo(workspaceId, gitHubBase, GitlabConnection.PROVIDER_GITHUB,
                 GitlabConnection.CREDENTIAL_TOKEN, providerRepoId, repo.fullName(), ciphertext, null, null));
     }
 
     /** Adds a public repository by URL (anonymous clone; credential_kind 'none'). Host must be allowlisted. */
-    public GitlabConnection createPublicRepo(String url) {
+    public GitlabConnection createPublicRepo(UUID workspaceId, String url) {
         PublicRepoUrl parsed;
         try {
             parsed = PublicRepoUrl.parse(url);
@@ -95,8 +93,8 @@ public class SourceConnectionService {
             fullName = project.pathWithNamespace();
         }
         requireNotConnected(connections.findByWorkspaceIdAndProviderAndHostAndProviderRepoId(
-                WORKSPACE, parsed.provider(), parsed.host(), providerRepoId), "public repository " + fullName);
-        return save(GitlabConnection.forSingleRepo(WORKSPACE, parsed.baseUrl(), parsed.provider(),
+                workspaceId, parsed.provider(), parsed.host(), providerRepoId), "public repository " + fullName);
+        return save(GitlabConnection.forSingleRepo(workspaceId, parsed.baseUrl(), parsed.provider(),
                 GitlabConnection.CREDENTIAL_NONE, providerRepoId, fullName, null, null, null));
     }
 

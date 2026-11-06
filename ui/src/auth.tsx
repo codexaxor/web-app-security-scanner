@@ -15,6 +15,10 @@ interface AuthCtx {
   signedIn: boolean;
   username: string | null;
   demoMode: boolean;
+  /** M8.10: the signed-in user's workspace name (user menu). */
+  workspaceName: string | null;
+  /** M8.10 (D-094): show the Operator section. UI-only convenience — the API enforces operator-only. */
+  operator: boolean;
   signIn: (info: SessionInfo) => void;
   signOut: () => void;
 }
@@ -74,6 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signedIn: session !== null,
     username: session?.username ?? null,
     demoMode: session?.demoMode ?? false,
+    workspaceName: session?.workspaceName ?? null,
+    operator: session?.operator === true,
     signIn: (info: SessionInfo) => setSession(info),
     signOut,
   };

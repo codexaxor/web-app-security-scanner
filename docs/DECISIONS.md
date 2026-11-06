@@ -14,6 +14,26 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-100 Unreadable stored token (2026-11-06, accepted)
+Context: M8.10 S12. A stored source token that cannot be decrypted — the `SECSCAN_ENCRYPTION_KEY` was rotated,
+or the ciphertext is damaged/not base64 — surfaced as a generic 500 in the api and a retried failure in the worker.
+The token itself is fine to re-enter; nothing else is wrong.
+Decision: `SourceCredentials.tokenFor` (the single decrypt path) maps a decrypt failure to
+`UnreadableCredentialException` (cause dropped — it can only describe key/ciphertext, never echoed); a MISSING key
+stays a configuration error.
+ - **API:** every decrypting API path answers **409 `CONNECTION_TOKEN_UNREADABLE`** ("… Re-enter the token for
+   this source."): GitLab project listing + select, provider-neutral repository listing + select, the branch
+   picker and the scan-branch PATCH.
+ - **Worker:** the scan **fails permanently** with that code (job `failed`, not retried) and **closes nothing**
+   (no reconcile; domain rule 3).
+ - **`POST /repositories/{id}/scans` still answers 202**: enqueueing does not need the token (its decrypt is only
+   the best-effort default-branch refresh, which already tolerates a missing token and provider errors); the
+   queued scan then fails in the worker with the code above.
+Consequences: a key rotation shows as an actionable 409 per source instead of 500s. **Revisit** the scan-start
+202 with a pre-check once the e2e seed holds a REAL ciphertext (today's seeded placeholder ciphertext would turn
+the existing `repositories.spec.ts` polling test red) — deferred item "pre-check token at scan start (needs
+real-ciphertext seed)". Proven by `UnreadableTokenApiIT`, `UnreadableTokenScanIT`, `SourceCredentialsTest`.
+
 ## D-099 Theme persistence: narrow localStorage allowlist (amends D-067(e)) (2026-11-05, accepted)
 Context: M8.11 makes the light/dark theme a user choice (light default, dark via a toggle) that must be
 remembered across reloads. D-067(e)'s security guard FAILS on `localStorage` anywhere in `ui/src` (no
@@ -40,6 +60,87 @@ persistence ships now, scoped to this carve-out, and does not wait for M10 user 
 Addendum (M8.11 review N-4): dark exists ONLY as the explicit `[data-theme="dark"]` token set — `tokens.css`
 has no `@media (prefers-color-scheme)` block, so the OS setting is never followed and first paint is light
 (asserted in `contrast.test.ts`).
+
+## D-098 M8.10 tenancy mechanics: pre-tenant signup_request, login status, rate limits, client IP (2026-11-05, accepted)
+Context: D-093 needs pending sign-ups that have no workspace yet, a login that reveals account state only to the
+password holder, brute-force limits (pulled forward from M10, see D-092) and a trustworthy client IP behind nginx.
+Decision:
+ - **`signup_request` is its own pre-tenant table** (V23): id, email (lowercase), password_hash (bcrypt, cleared
+   once decided), requested_workspace_name, status `pending|approved|rejected`, created_at, decided_at,
+   decided_by → app_user, workspace_id (set only on approval, for traceability). Why its own table: a pending
+   sign-up is not yet a tenant member, so putting it in `app_user` would force `app_user.workspace_id` nullable and
+   weaken domain rule 1 for every user query; keeping it apart leaves `app_user.workspace_id NOT NULL` and makes the
+   only workspace-agnostic access a small, operator/login-only table. It is added to the CLAUDE.md rule-1
+   exception list. `app_user` only gains `status` (`active|disabled`, default active), `is_operator`,
+   `status_changed_at`, `status_changed_by`; at most one operator (partial unique index).
+ - **Approve** = one DB transaction: create the workspace, create the active `app_user` (hash moved from the
+   request), mark the request approved. **Reject** clears the hash; a rejected email may sign up again. Email is
+   unique across `app_user` ∪ pending `signup_request`: an advisory xact lock per lowercased email in the sign-up
+   and approve transactions + `uq_app_user_email_lower` + a partial unique index on pending requests.
+ - **Login** (JSON session and HTTP Basic share one AuthenticationManager): wrong password → 401 as today; the
+   correct password for a pending request → 403 `ACCOUNT_PENDING`; the correct password for a disabled user → 403
+   `ACCOUNT_INACTIVE` (Basic: generic 401). Status is checked after the password. A per-request check reloads the
+   principal's status by id, so disabling ends live sessions on the next request.
+ - **Rate limits** (in-memory sliding window, bounded maps, single api instance, no new dependency): login
+   failures per (account, IP) 5 / 15 min, per IP 20 / 15 min, per account 50 / 15 min → 429 + Retry-After;
+   sign-up per IP 5 / 15 min. Covers JSON login and Basic.
+ - **Client IP**: `SECSCAN_TRUSTED_PROXIES` (CIDR list, default loopback only; compose sets its network).
+   `X-Forwarded-For` is honoured only when the direct peer is trusted; `ui/nginx.conf` overwrites it with
+   `$remote_addr` (M8.10 owns that file).
+Consequences: new workspace-agnostic accesses, all documented in CLAUDE.md rule 1: signup_request queries
+(sign-up, login pending check, operator list/approve/reject), the per-request user status reload by id, the
+operator's user list, the fair-use claim subquery. Multi-instance api needs a shared limiter (with ShedLock, M9).
+A per-account limit lets a third party slow a known account's logins (accepted: 50/15 min is high; per-pair 5).
+
+## D-097 Fair use per workspace (2026-11-05, accepted)
+Context: self sign-up (D-093) lets anyone create a workspace; one tenant must not monopolise the worker or grow
+without bound.
+Decision: per workspace at most **1 running scan** — further scans wait in the queue (never rejected); the claimer
+serialises claims with a transaction advisory lock and claims at most the oldest queued job of a workspace that
+has no running job. At most **25 active repositories** per workspace (every workspace incl. Default; configurable
+`secscan.fair-use.*`); adding or reactivating past the limit → **409 `REPOSITORY_LIMIT_REACHED`**, a batch that
+would exceed it is refused whole; existing repositories above the limit are kept. The whole-batch check runs
+before any write; every transaction that activates a row re-checks under the workspace row lock. Two concurrent
+selection requests can therefore leave a batch **partly applied** (the later rows get 409), but a workspace never
+exceeds 25 active repositories.
+Consequences: a tenant with many queued scans does not delay others; Default (today's data) is subject to the
+same limits.
+
+## D-096 External tenants: preconditions before the first one goes live (2026-11-05, accepted)
+Context: D-093 allows anyone to sign up, so external (non-company) tenants are possible by design.
+Decision: external tenants are allowed by design. **Before the first EXTERNAL tenant goes live:** (1) Opengrep
+rule-pack licence re-check (SPEC "SAST rule licensing"), (2) scanner egress restriction, (3) written acceptance of
+the Docker-socket risk (D-026). Self-managed source hosts stay on the operator allowlist — the SSRF guard (D-018,
+D-090) is unchanged; tenants cannot add hosts.
+Consequences: M8.10 ships the mechanism; going live externally is a separate, gated operator step.
+Addendum (2026-11-06, M8.10 review N-5): gate item **(4) volume caps** — before the first external tenant, add a
+cap on PENDING sign-ups (global, so a distributed sign-up flood cannot fill the operator queue; the per-IP limit
+alone does not stop it) and a cap on connections per workspace (fair use limits active repositories only, D-097).
+Not built in M8.10.
+
+## D-095 UI theme: light default + dark toggle (2026-11-05, accepted; record only)
+Context: the M8.11 UI redesign.
+Decision: light theme by default with a dark-mode toggle. Built by M8.11, not M8.10.
+Consequences: none for M8.10; its new pages use the shared tokens once M8.11 merges.
+
+## D-094 Two admin levels: platform operator and workspace owner (resolves OD-9) (2026-11-05, accepted)
+Context: OD-9 left `/api/v1/admin/**` callable by any authenticated user; self sign-up (D-093) makes that unsafe.
+Decision: the **platform operator** (the existing bootstrap admin; `app_user.is_operator`, at most one) approves,
+rejects, disables and re-enables sign-ups/users and is the **ONLY** one allowed on `/api/v1/admin/**` (non-operator
+→ 403). The **workspace owner** is the person who signed up, with full rights inside their own workspace only.
+The operator has **no read access to other tenants' data**: their own data is the Default workspace; the operator
+API exposes only sign-up/user metadata (email, status, workspace name, dates), never another workspace's
+repositories, findings or settings. The V23 backfill and AdminBootstrap promote an operator only when none exists.
+Consequences: OD-9 resolved. The demo user (D-091) is never operator, so it loses `/admin/**`.
+Addendum (2026-11-06, M8.10 review B-1): **operator maintenance acts on the operator's own workspace only.** `POST /api/v1/admin/maintenance/retire-ignored-orphans` takes its workspace from the principal (`@CurrentWorkspace`, i.e. Default for the operator); it never lists or changes another tenant's findings. The earlier all-workspaces retire loop (and its CLAUDE.md rule-1 exception) is removed. Tenants have no retire endpoint of their own yet. Global intel sync and the re-score sweep stay platform-wide (they touch shared intel tables and return counts only). Proven by `IgnoredOrphanRetirerWorkspaceScopeIT`.
+
+## D-093 Tenancy by self sign-up (2026-11-05, accepted)
+Context: SecScan was single-tenant (Default workspace, D-011) on a tenant-ready schema (D-001).
+Decision: anyone can sign up; an **approved** sign-up gets its own private workspace (no invites, no members).
+Pending or rejected accounts cannot log in. Existing users and data stay in the Default workspace. The workspace
+is created at approval, not at sign-up.
+Consequences: every request path takes its workspace from the authenticated principal; no `Workspace.DEFAULT_ID`
+in request paths; tenant isolation is proven per endpoint (404 on another tenant's ids).
 
 ## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
 Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
@@ -1508,7 +1609,7 @@ Decision: `workspace_id` on every business table from day one.
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
 - OD-5 Hosting for the worker — decided at the container spike (D-082)
 - OD-6 Product name
-- OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+- OD-9 — RESOLVED by D-094 (M8.10: `/api/v1/admin/**` is operator-only). Admin intel endpoints were unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).

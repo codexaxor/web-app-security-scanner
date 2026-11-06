@@ -17,6 +17,12 @@ const PAGES: { label: string; to: string; icon: IconName }[] = [
   { label: "Workspace settings", to: "/settings", icon: "settings" },
 ];
 
+// M8.10: listed only for the operator (the same condition as the sidebar's Operator section).
+const OPERATOR_PAGES: { label: string; to: string; icon: IconName }[] = [
+  { label: "Sign-ups", to: "/admin/sign-ups", icon: "inbox" },
+  { label: "Users", to: "/admin/users", icon: "users" },
+];
+
 const REPO_PAGE_SIZE = 6;
 // The repository search hits the server; wait this long after the last keystroke before sending it (N-2).
 // Page matches are filtered client-side on every keystroke and stay instant.
@@ -35,7 +41,7 @@ type Item = { key: string; label: string; sublabel?: string; to: string; icon: I
  * close (Esc, Enter, backdrop, Ctrl+K) focus returns to the element that opened the palette; if a navigation
  * removed that element, it goes to the main landmark instead of being lost on <body>.
  */
-export default function CommandPalette() {
+export default function CommandPalette({ operator = false }: { operator?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -121,7 +127,7 @@ export default function CommandPalette() {
 
   const items: Item[] = useMemo(() => {
     const ql = search.toLowerCase();
-    const pages: Item[] = PAGES.filter((p) => !ql || p.label.toLowerCase().includes(ql)).map((p) => ({
+    const pages: Item[] = (operator ? [...PAGES, ...OPERATOR_PAGES] : PAGES).filter((p) => !ql || p.label.toLowerCase().includes(ql)).map((p) => ({
       key: "page:" + p.to,
       label: p.label,
       to: p.to,
@@ -148,7 +154,7 @@ export default function CommandPalette() {
           ]
         : [];
     return [...pages, ...repos, ...more];
-  }, [search, repoQuery.data]);
+  }, [search, repoQuery.data, operator]);
 
   const activeIndex = items.length ? Math.min(active, items.length - 1) : 0;
 

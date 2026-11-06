@@ -80,7 +80,8 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
    - the `scan_job` claim (`claimable`, `SELECT … FOR UPDATE SKIP LOCKED`) — the queue is drained across all
      workspaces; the claimed row's `workspace_id` then scopes the rest of that scan. The worker's follow-up
      re-read of that same claimed job by id (`ScanJobProcessor.process` via `ScanJobRepository.findById`) is
-     part of this trust root and is likewise unscoped.
+     part of this trust root and is likewise unscoped. Its D-097 fair-use subqueries (skip a workspace that
+     already has a running job; at most the oldest queued job per workspace) are part of the same claim.
    - the stale-lease sweep (`staleLeases`) — reclaims hung leases across all workspaces; each reclaimed job's
      `workspace_id` scopes its own state change.
    - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`, the D-053 EOL
@@ -92,6 +93,18 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
      scoping. The intel sync and the re-score sweep (`ReScoreService`, driven by `WorkspaceRepository.findAll`)
      are system maintenance jobs that run across all workspaces; the sweep then loads each workspace's own
      open sub-issues, so every sub-issue/repository/group query stays scoped by the row's own `workspace_id`.
+   - M8.10 tenancy (D-093/D-094/D-098):
+     - `signup_request` is a **pre-tenant** table (a pending sign-up belongs to no workspace yet), read only by
+       sign-up, the login pending-check (`SignupRequestRepository.findByEmailAndStatus`) and the operator API.
+     - the per-request account check reloads the principal's own row by id (`ActiveAccountFilter` via
+       `AppUserRepository.findById`) — part of the authentication trust root, like the login lookup.
+     - the single-operator guard `AppUserRepository.existsByOperatorTrue` (the operator is a platform role).
+     - the operator's account list (`AppUserRepository.findAllByOrderByCreatedAtAscIdAsc` /
+       `findByStatusOrderByCreatedAtAscIdAsc`) and disable/enable by id — account metadata only (D-094: the
+       operator has no read access to other tenants' business data).
+     - request paths take their workspace ONLY from the authenticated principal (`@CurrentWorkspace`);
+       `Workspace.DEFAULT_ID` appears only in its declaration and the admin/demo bootstraps
+       (`DefaultWorkspaceUsageGuardTest`).
 2. `issue_group` (what users triage) vs `sub_issue` (one finding, stable fingerprint = SHA-256 of fields joined
    with `|`):
    - SCA: package + vuln id (CVE, else GHSA/OSV) + manifest path

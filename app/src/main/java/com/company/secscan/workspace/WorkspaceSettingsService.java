@@ -153,11 +153,9 @@ public class WorkspaceSettingsService {
         }
         Map<UUID, String> out = new HashMap<>();
         // Workspace-scoped (domain rule 1): never let a cross-tenant group key leak into a resolution.
-        groups.findAllById(ids).forEach(g -> {
-            if (workspaceId.equals(g.getWorkspaceId())) {
-                out.put(g.getId(), g.getGroupKey());
-            }
-        });
+        if (!ids.isEmpty()) {
+            groups.findByWorkspaceIdAndIdIn(workspaceId, ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        }
         return out;
     }
 

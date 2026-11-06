@@ -48,14 +48,14 @@ class RepositorySettingsIT extends AbstractGitLabIT {
     @Test
     void rejectsAnUnknownSensitivityWith400() {
         Repository repo = seedRepo(9101L);
-        assertThatThrownBy(() -> service.patch(repo.getId(), "paranoid", null, null))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), "paranoid", null, null, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 
     @Test
     void returns404ForARepositoryOutsideTheWorkspace() {
-        assertThatThrownBy(() -> service.patch(UUID.randomUUID(), "high", null, null))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, UUID.randomUUID(), "high", null, null, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
@@ -63,11 +63,11 @@ class RepositorySettingsIT extends AbstractGitLabIT {
     @Test
     void deactivateThenReactivateRoundTrip() {
         Repository repo = seedRepo(9102L);
-        RepositoryView off = service.patch(repo.getId(), null, null, false);
+        RepositoryView off = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, false, null);
         assertThat(off.active()).isFalse();
         assertThat(off.inactiveReason()).isEqualTo("DEACTIVATED_BY_USER");
 
-        RepositoryView on = service.patch(repo.getId(), null, null, true);
+        RepositoryView on = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, true, null);
         assertThat(on.active()).isTrue();
         assertThat(on.inactiveReason()).isNull();
     }
@@ -79,7 +79,7 @@ class RepositorySettingsIT extends AbstractGitLabIT {
         repo.detachAndDeactivate("NO_ACCESSIBLE_CONNECTION");
         repositories.save(repo);
 
-        assertThatThrownBy(() -> service.patch(repo.getId(), null, null, true))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, true, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
 
@@ -92,10 +92,10 @@ class RepositorySettingsIT extends AbstractGitLabIT {
     @Test
     void scanOnAnInactiveRepositoryIsRejectedWith409AndCreatesNoScan() {
         Repository repo = seedRepo(9104L);
-        service.patch(repo.getId(), null, null, false); // deactivate
+        service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, false, null); // deactivate
         long before = scans.count();
 
-        assertThatThrownBy(() -> scanService.startManual(repo.getId()))
+        assertThatThrownBy(() -> scanService.startManual(Workspace.DEFAULT_ID, repo.getId()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
 
@@ -106,7 +106,7 @@ class RepositorySettingsIT extends AbstractGitLabIT {
     void changingIncludeDevDepsSavesButWritesNoTriageEvent() {
         Repository repo = seedRepo(9105L);
         long before = events.count();
-        RepositoryView v = service.patch(repo.getId(), null, true, null);
+        RepositoryView v = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, true, null, null);
         assertThat(v.includeDevDeps()).isTrue();
         assertThat(repositories.findById(repo.getId()).orElseThrow().isIncludeDevDeps()).isTrue();
         assertThat(events.count()).isEqualTo(before); // no API-time triage (D-063 carve-out not widened)

@@ -163,8 +163,9 @@ public interface SubIssueRepository extends JpaRepository<SubIssue, UUID> {
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "update sub_issue set score = :score, score_breakdown = cast(:breakdown as jsonb), "
-            + "in_kev = :inKev, epss = :epss where id = :id and status = 'open'", nativeQuery = true)
-    int updateScoreColumnsIfOpen(@Param("id") UUID id, @Param("score") Integer score,
+            + "in_kev = :inKev, epss = :epss where id = :id and workspace_id = :ws and status = 'open'",
+            nativeQuery = true)
+    int updateScoreColumnsIfOpen(@Param("id") UUID id, @Param("ws") UUID ws, @Param("score") Integer score,
                                  @Param("breakdown") String breakdown, @Param("inKev") boolean inKev,
                                  @Param("epss") BigDecimal epss);
 

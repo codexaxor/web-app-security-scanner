@@ -91,7 +91,7 @@ class BranchCloneScanIT extends AbstractScanWorkerIT {
         repo.setScanBranch("dev");                         // scan dev, not the default main
         repositories.save(repo);
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         assertThat(scan.branch()).isEqualTo("dev");
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);

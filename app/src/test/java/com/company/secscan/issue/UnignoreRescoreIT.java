@@ -71,13 +71,13 @@ class UnignoreRescoreIT extends AbstractGitLabIT {
         assertThat(before.isInKev()).isFalse();
 
         // Ignore the finding, then — while it is ignored — the CVE lands on CISA KEV.
-        var rule = triage.ignoreSubIssue(before.getId(), "accepted for now");
+        var rule = triage.ignoreSubIssue(Workspace.DEFAULT_ID, before.getId(), "accepted for now");
         assertThat(subIssues.findById(before.getId()).orElseThrow().getStatus())
                 .isEqualTo(SubIssue.STATUS_IGNORED);
         kevEntries.save(new KevEntry(CVE, "Log4Shell-adjacent", null));
 
         // Unignore → reopened to open AND re-scored immediately: now on KEV (+5), with no rescan.
-        triage.removeRule(rule.id());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.id());
 
         SubIssue after = subIssues.findById(before.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);

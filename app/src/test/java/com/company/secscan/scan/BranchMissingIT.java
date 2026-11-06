@@ -74,7 +74,7 @@ class BranchMissingIT extends AbstractScanWorkerIT {
     }
 
     private Scan runAndGet(Repository repo) {
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

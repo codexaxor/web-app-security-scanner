@@ -1,7 +1,6 @@
 package com.company.secscan.scan;
 
 import com.company.secscan.repository.RepositoryRepository;
-import com.company.secscan.workspace.Workspace;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 class ScanEnqueuer {
 
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
 
     private final ScanRepository scans;
     private final ScanJobRepository jobs;
@@ -28,9 +26,9 @@ class ScanEnqueuer {
     }
 
     @Transactional
-    Scan enqueueManual(UUID repositoryId, String branch) {
-        Scan scan = scans.saveAndFlush(Scan.manual(WORKSPACE, repositoryId, branch));
-        jobs.saveAndFlush(new ScanJob(WORKSPACE, scan.getId()));
+    Scan enqueueManual(UUID workspaceId, UUID repositoryId, String branch) {
+        Scan scan = scans.saveAndFlush(Scan.manual(workspaceId, repositoryId, branch));
+        jobs.saveAndFlush(new ScanJob(workspaceId, scan.getId()));
         return scan;
     }
 
@@ -40,7 +38,7 @@ class ScanEnqueuer {
      * that was read before the enqueue-time GitLab call (which could clobber a concurrent settings PATCH).
      */
     @Transactional
-    void recordDefaultBranch(UUID repositoryId, String branch) {
-        repositories.updateDefaultBranch(WORKSPACE, repositoryId, branch);
+    void recordDefaultBranch(UUID workspaceId, UUID repositoryId, String branch) {
+        repositories.updateDefaultBranch(workspaceId, repositoryId, branch);
     }
 }

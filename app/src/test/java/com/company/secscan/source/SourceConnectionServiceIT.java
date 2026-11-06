@@ -52,7 +52,7 @@ class SourceConnectionServiceIT extends AbstractGitLabIT {
     @Test
     void createsAGitHubOwnerConnectionWithAnEncryptedToken() {
         gh.stubUser("octo", "User").stubOwner("octo", "Organization");
-        GitlabConnection c = serviceFor(gh.baseUrl()).createGitHubOwner("octo", TOKEN);
+        GitlabConnection c = serviceFor(gh.baseUrl()).createGitHubOwner(Workspace.DEFAULT_ID, "octo", TOKEN);
         assertThat(c.getProvider()).isEqualTo("github");
         assertThat(c.getTargetType()).isEqualTo("owner");
         assertThat(c.getCredentialKind()).isEqualTo("token");
@@ -68,7 +68,7 @@ class SourceConnectionServiceIT extends AbstractGitLabIT {
                         com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo("/repos/octo/app"))
                 .willReturn(com.github.tomakehurst.wiremock.client.WireMock.aResponse().withStatus(200)
                         .withHeader("Content-Type", "application/json").withBody(REPO_JSON)));
-        GitlabConnection c = serviceFor(gh.baseUrl()).createGitHubRepo("octo/app", TOKEN);
+        GitlabConnection c = serviceFor(gh.baseUrl()).createGitHubRepo(Workspace.DEFAULT_ID, "octo/app", TOKEN);
         assertThat(c.getProvider()).isEqualTo("github");
         assertThat(c.getTargetType()).isEqualTo("repo");
         assertThat(c.getProviderRepoId()).isEqualTo("123");
@@ -82,8 +82,8 @@ class SourceConnectionServiceIT extends AbstractGitLabIT {
                 .willReturn(com.github.tomakehurst.wiremock.client.WireMock.aResponse().withStatus(200)
                         .withHeader("Content-Type", "application/json").withBody(REPO_JSON)));
         SourceConnectionService service = serviceFor(gh.baseUrl());
-        service.createGitHubRepo("octo/app", TOKEN);
-        assertThatThrownBy(() -> service.createGitHubRepo("octo/app", TOKEN))
+        service.createGitHubRepo(Workspace.DEFAULT_ID, "octo/app", TOKEN);
+        assertThatThrownBy(() -> service.createGitHubRepo(Workspace.DEFAULT_ID, "octo/app", TOKEN))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("already connected");
     }
@@ -94,7 +94,7 @@ class SourceConnectionServiceIT extends AbstractGitLabIT {
         try {
             gitlab.stubProject("group%2Fproj");   // GET /projects/<encoded path> → project.json (id 102)
             String url = gitlab.baseUrl() + "/group/proj";
-            GitlabConnection c = serviceFor(gh.baseUrl()).createPublicRepo(url);
+            GitlabConnection c = serviceFor(gh.baseUrl()).createPublicRepo(Workspace.DEFAULT_ID, url);
             assertThat(c.getProvider()).isEqualTo("gitlab");
             assertThat(c.getTargetType()).isEqualTo("repo");
             assertThat(c.getCredentialKind()).isEqualTo("none");

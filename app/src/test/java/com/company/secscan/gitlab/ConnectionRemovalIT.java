@@ -76,13 +76,14 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
 
     @Test
     void removingAConnectionReassignsToAGroupThatStillExposesTheProject() {
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID groupConn = groupConnId();
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID)); // owned by the project connection
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn,
+                List.of(PROJECT_ID)); // owned by the project connection
 
-        ConnectionRemovalResult result = service.delete(projectConn);
+        ConnectionRemovalResult result = service.delete(Workspace.DEFAULT_ID, projectConn);
 
         assertThat(result.reassigned()).isEqualTo(1);
         assertThat(result.deactivated()).isZero();
@@ -95,11 +96,11 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
 
     @Test
     void removingTheOnlyConnectionDeactivatesTheRepository() {
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
 
-        ConnectionRemovalResult result = service.delete(projectConn);
+        ConnectionRemovalResult result = service.delete(Workspace.DEFAULT_ID, projectConn);
 
         assertThat(result.reassigned()).isZero();
         assertThat(result.deactivated()).isEqualTo(1);
@@ -110,16 +111,16 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
 
     @Test
     void provisionalReassignmentIsConfirmedWhenTheNewConnectionWorks() {
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID groupConn = groupConnId();
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
-        service.delete(projectConn);
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
+        service.delete(Workspace.DEFAULT_ID, projectConn);
         assertThat(onlyRepo().isProvisional()).isTrue();
 
         // Using the group connection succeeds → the reassignment is confirmed.
-        repositoryService.listProjects(groupConn, 0, 50);
+        repositoryService.listProjects(Workspace.DEFAULT_ID, groupConn, 0, 50);
 
         Repository repo = onlyRepo();
         assertThat(repo.isProvisional()).isFalse();
@@ -128,16 +129,16 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
 
     @Test
     void provisionalReassignmentIsDeactivatedWhenTheNewConnectionCannotReachIt() {
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID groupConn = groupConnId();
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
-        service.delete(projectConn);
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
+        service.delete(Workspace.DEFAULT_ID, projectConn);
 
         // The group connection can no longer list its projects (token no longer authorized).
         gitlab.stubProjectsStatus(GROUP_ID, 401);
-        assertThatThrownBy(() -> repositoryService.listProjects(groupConn, 0, 50))
+        assertThatThrownBy(() -> repositoryService.listProjects(Workspace.DEFAULT_ID, groupConn, 0, 50))
                 .isInstanceOf(GitLabException.class);
 
         Repository repo = onlyRepo();
@@ -148,18 +149,18 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
     @Test
     void reselectingADeactivatedRepositoryReattachesItToTheSelectingConnection() {
         // Select via a project connection, then remove it with no replacement -> repo detached + inactive.
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
-        service.delete(projectConn);
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
+        service.delete(Workspace.DEFAULT_ID, projectConn);
         Repository detached = onlyRepo();
         assertThat(detached.isActive()).isFalse();
         assertThat(detached.getConnectionId()).isNull();
 
         // A new group connection exposes the project; selecting it reattaches the row (not a new one).
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
         UUID groupConn = groupConnId();
-        repositoryService.select(groupConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, groupConn, List.of(PROJECT_ID));
 
         Repository repo = onlyRepo();
         assertThat(repo.isActive()).isTrue();
@@ -178,7 +179,7 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
         UUID c = insertGroupConnection(42L, "services", Instant.now());
         insertActiveRepository(a, PROJECT_ID, "services/ib-keycloak");
 
-        var result = service.delete(a);
+        var result = service.delete(Workspace.DEFAULT_ID, a);
 
         assertThat(result.reassigned()).isEqualTo(1);
         Repository repo = onlyRepo();
@@ -190,20 +191,20 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
     void aNonOwnerReselectKeepsTheProvisionalFlagAndTheOwnerClearsIt() {
         // Select via a project connection, then remove it so the repo is reassigned to the group connection and
         // left provisional (owned by the group, reassigned_at set).
-        service.create(gitlab.baseUrl(), TOKEN, "group", "services");
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID groupConn = groupConnId();
         UUID projectConn = projectConnId();
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
-        service.delete(projectConn);
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
+        service.delete(Workspace.DEFAULT_ID, projectConn);
         assertThat(onlyRepo().isProvisional()).isTrue();
         assertThat(onlyRepo().getConnectionId()).isEqualTo(groupConn);
 
         // A different (non-owner) connection to the same project selects it: ownership and the provisional flag
         // must be left intact (first-wins dedup; only the owner resolves its own provisional state).
-        service.create(gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
+        service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", PROJECT_PATH);
         UUID newProjectConn = projectConnId();
-        repositoryService.select(newProjectConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, newProjectConn, List.of(PROJECT_ID));
 
         Repository afterNonOwner = onlyRepo();
         assertThat(afterNonOwner.getConnectionId()).isEqualTo(groupConn); // owner unchanged
@@ -211,14 +212,14 @@ class ConnectionRemovalIT extends AbstractGitLabIT {
         assertThat(afterNonOwner.isActive()).isTrue();
 
         // The owner (group) re-selecting it confirms the reassignment and clears the flag.
-        repositoryService.select(groupConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, groupConn, List.of(PROJECT_ID));
         assertThat(onlyRepo().isProvisional()).isFalse();
         assertThat(onlyRepo().getConnectionId()).isEqualTo(groupConn);
     }
 
     @Test
     void deletingAMissingConnectionIsRejected() {
-        assertThatThrownBy(() -> service.delete(UUID.randomUUID()))
+        assertThatThrownBy(() -> service.delete(Workspace.DEFAULT_ID, UUID.randomUUID()))
                 .isInstanceOf(GitLabException.class)
                 .extracting(e -> ((GitLabException) e).getError())
                 .isEqualTo(GitLabError.CONNECTION_NOT_FOUND);

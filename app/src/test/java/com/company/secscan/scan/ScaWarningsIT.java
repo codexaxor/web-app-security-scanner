@@ -98,7 +98,7 @@ class ScaWarningsIT extends AbstractScanWorkerIT {
                 Fingerprints.sca("foo", "CVE-2020-1", "pom.xml"), null);
         open = subIssues.save(open);
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
@@ -146,7 +146,7 @@ class ScaWarningsIT extends AbstractScanWorkerIT {
         Repository repository = repositories.save(new Repository(WORKSPACE, conn.getId(), 203L, "svc/nuget",
                 "main", List.of("C#")));
 
-        ScanView scan = scanService.startManual(repository.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repository.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
@@ -175,7 +175,7 @@ class ScaWarningsIT extends AbstractScanWorkerIT {
         Repository repository = repositories.save(new Repository(WORKSPACE, conn.getId(), 204L, "svc/priv",
                 "main", List.of("Java")));
 
-        ScanView scan = scanService.startManual(repository.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repository.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

@@ -60,7 +60,7 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
         Repository repo = seedRepo(7101L);
         gitlab.stubBranch(7101L, "dev", BRANCH_JSON);
 
-        var view = service.patch(repo.getId(), null, null, null, TextNode.valueOf("dev"));
+        var view = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null, TextNode.valueOf("dev"));
 
         assertThat(view.scanBranch()).isEqualTo("dev");
         assertThat(view.effectiveBranch()).isEqualTo("dev");
@@ -72,7 +72,8 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
         Repository repo = seedRepo(7102L);
         gitlab.stubBranchStatus(7102L, "nope", 404);
 
-        assertThatThrownBy(() -> service.patch(repo.getId(), null, null, null, TextNode.valueOf("nope")))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null,
+                TextNode.valueOf("nope")))
                 .isInstanceOf(GitLabException.class)
                 .satisfies(e -> assertThat(((GitLabException) e).getError().name()).isEqualTo("BRANCH_NOT_FOUND"));
     }
@@ -81,7 +82,8 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
     void rejectsAnInvalidBranchNameWithoutCallingGitLab() {
         Repository repo = seedRepo(7103L);
         // No GitLab stub: an invalid ref name must be refused before any network call.
-        assertThatThrownBy(() -> service.patch(repo.getId(), null, null, null, TextNode.valueOf("-bad")))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null,
+                TextNode.valueOf("-bad")))
                 .isInstanceOf(GitLabException.class)
                 .satisfies(e -> assertThat(((GitLabException) e).getError().name()).isEqualTo("BRANCH_NOT_FOUND"));
     }
@@ -90,9 +92,9 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
     void nullResetsToTheDefaultBranch() {
         Repository repo = seedRepo(7104L);
         gitlab.stubBranch(7104L, "dev", BRANCH_JSON);
-        service.patch(repo.getId(), null, null, null, TextNode.valueOf("dev"));
+        service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null, TextNode.valueOf("dev"));
 
-        var view = service.patch(repo.getId(), null, null, null, NullNode.getInstance());
+        var view = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null, NullNode.getInstance());
 
         assertThat(view.scanBranch()).isNull();
         assertThat(view.effectiveBranch()).isEqualTo("main");   // falls back to the GitLab default
@@ -101,7 +103,8 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
     @Test
     void returns404ForARepositoryOutsideTheWorkspace() {
         seedRepo(7105L);  // starts a GitLab mock so @AfterEach can stop it
-        assertThatThrownBy(() -> service.patch(UUID.randomUUID(), null, null, null, TextNode.valueOf("dev")))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, UUID.randomUUID(), null, null, null,
+                TextNode.valueOf("dev")))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
@@ -112,7 +115,8 @@ class RepositoryScanBranchIT extends AbstractGitLabIT {
         repo.deactivate("DEACTIVATED_BY_USER");
         repositories.save(repo);
 
-        assertThatThrownBy(() -> service.patch(repo.getId(), null, null, null, TextNode.valueOf("dev")))
+        assertThatThrownBy(() -> service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null,
+                TextNode.valueOf("dev")))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
     }

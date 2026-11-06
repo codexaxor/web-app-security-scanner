@@ -50,18 +50,18 @@ class ScanWarningsApiIT extends AbstractGitLabIT {
                     "MISSING_GRADLE_LOCKFILE", "Missing Gradle lockfile " + i, "build.gradle"));
         }
 
-        PagedResponse<ScanWarningView> firstPage = service.listWarnings(scan.getId(), 0, 2);
+        PagedResponse<ScanWarningView> firstPage = service.listWarnings(Workspace.DEFAULT_ID, scan.getId(), 0, 2);
         assertThat(firstPage.content()).hasSize(2);
         assertThat(firstPage.totalElements()).isEqualTo(3);
         assertThat(firstPage.content().get(0).code()).isEqualTo("MISSING_GRADLE_LOCKFILE");
 
-        PagedResponse<ScanView> all = service.listAll(0, 50);
+        PagedResponse<ScanView> all = service.listAll(Workspace.DEFAULT_ID, 0, 50);
         assertThat(all.content()).extracting(ScanView::id).contains(scan.getId());
     }
 
     @Test
     void warningsForAnUnknownScanReturn404() {
-        assertThatThrownBy(() -> service.listWarnings(UUID.randomUUID(), 0, 50))
+        assertThatThrownBy(() -> service.listWarnings(Workspace.DEFAULT_ID, UUID.randomUUID(), 0, 50))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }

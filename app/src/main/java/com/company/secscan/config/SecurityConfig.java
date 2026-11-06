@@ -1,5 +1,6 @@
 package com.company.secscan.config;
 
+import com.company.secscan.auth.SecscanPrincipal;
 import com.company.secscan.auth.SessionTimeoutFilter;
 import java.time.Duration;
 import java.util.Set;
@@ -17,7 +18,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -25,6 +25,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -53,7 +54,10 @@ public class SecurityConfig {
 
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "TRACE", "OPTIONS");
     private static final RequestMatcher LOGIN = new AntPathRequestMatcher("/api/v1/auth/login", "POST");
+    /** D-093: public self sign-up — unauthenticated and CSRF-exempt like login (it carries no session). */
+    private static final RequestMatcher SIGNUP = new AntPathRequestMatcher("/api/v1/auth/signup", "POST");
     private static final String[] PUBLIC_PATHS = {"/actuator/health", "/actuator/health/**"};
+    private static final String ADMIN_PATHS = "/api/v1/admin/**";
 
     // D-092 lifetimes: idle (refreshed by any request, incl. the status-poll) and the absolute cap (login-age).
     private static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
@@ -72,11 +76,19 @@ public class SecurityConfig {
     }
 
     @Bean
-    AuthenticationManager authenticationManager(UserDetailsService userDetailsService, PasswordEncoder encoder) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
-        provider.setPasswordEncoder(encoder);
-        return new ProviderManager(provider);
+    AuthenticationManager authenticationManager(UserDetailsService userDetailsService, PasswordEncoder encoder,
+                                                com.company.secscan.signup.SignupRequestRepository signups,
+                                                com.company.secscan.auth.RateLimits limits,
+                                                com.company.secscan.auth.ClientIpResolver clientIp) {
+        // D-098: one provider for the JSON login AND Basic — rate limits, status after the password, pending check.
+        return new ProviderManager(new com.company.secscan.auth.SecscanAuthenticationProvider(
+                userDetailsService, encoder, signups, limits, clientIp));
+    }
+
+    /** D-098: a disabled user's live session/Basic request is refused on the next request (JSON 401). */
+    private static com.company.secscan.auth.ActiveAccountFilter activeAccountFilter(
+            com.company.secscan.user.AppUserRepository users) {
+        return new com.company.secscan.auth.ActiveAccountFilter(users, jsonUnauthorizedEntryPoint());
     }
 
     /** The hardened session cookie (D-092): HttpOnly + Secure (overridable only for the e2e host) + SameSite=Strict. */
@@ -98,17 +110,21 @@ public class SecurityConfig {
 
     @Bean
     @Order(1)
-    SecurityFilterChain basicAuthChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain basicAuthChain(HttpSecurity http, com.company.secscan.user.AppUserRepository users,
+                                       AuthenticationManager authenticationManager) throws Exception {
         AuthenticationEntryPoint jsonUnauthorized = jsonUnauthorizedEntryPoint();
         http
                 .securityMatcher(SecurityConfig::isHttpBasic)
+                .authenticationManager(authenticationManager)   // D-098: same provider as the JSON login
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .requestMatchers(ADMIN_PATHS).hasAuthority(SecscanPrincipal.ROLE_OPERATOR)   // D-094
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(csrf -> csrf.disable())
                 .exceptionHandling(e -> e.authenticationEntryPoint(jsonUnauthorized))
-                .httpBasic(basic -> basic.authenticationEntryPoint(jsonUnauthorized));
+                .httpBasic(basic -> basic.authenticationEntryPoint(jsonUnauthorized))
+                .addFilterBefore(activeAccountFilter(users), AuthorizationFilter.class);
         return http.build();
     }
 
@@ -116,14 +132,20 @@ public class SecurityConfig {
     @Order(2)
     SecurityFilterChain browserChain(HttpSecurity http,
                                      SecurityContextRepository contextRepository,
-                                     CsrfTokenRepository csrfTokenRepository) throws Exception {
+                                     CsrfTokenRepository csrfTokenRepository,
+                                     com.company.secscan.user.AppUserRepository users,
+                                     AuthenticationManager authenticationManager) throws Exception {
         AuthenticationEntryPoint jsonUnauthorized = jsonUnauthorizedEntryPoint();
         http
+                .authenticationManager(authenticationManager)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         // Sign-in is reachable while unauthenticated; everything else (incl. /auth/session and
                         // /auth/logout) requires authentication.
                         .requestMatchers(LOGIN).permitAll()
+                        .requestMatchers(SIGNUP).permitAll()
+                        // D-094: /api/v1/admin/** is the platform operator's alone (resolves OD-9).
+                        .requestMatchers(ADMIN_PATHS).hasAuthority(SecscanPrincipal.ROLE_OPERATOR)
                         .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 // Nit: no saved-request cache (it would create a session for an anonymous request).
@@ -144,16 +166,19 @@ public class SecurityConfig {
                 // Enforce idle/absolute session lifetimes before the context is loaded (an expired session is
                 // invalidated → the request is anonymous → JSON 401).
                 .addFilterBefore(new SessionTimeoutFilter(IDLE_TIMEOUT, ABSOLUTE_TIMEOUT),
-                        SecurityContextHolderFilter.class);
+                        SecurityContextHolderFilter.class)
+                .addFilterBefore(activeAccountFilter(users), AuthorizationFilter.class);
         return http.build();
     }
 
     /**
      * CSRF is required for an unsafe method on the browser chain, except {@code POST /auth/login} (the token is
-     * issued by it). Safe methods are already excluded here; HTTP Basic never reaches this chain.
+     * issued by it) and {@code POST /auth/signup} (public, sessionless, JSON-only). Safe methods are already
+     * excluded here; HTTP Basic never reaches this chain.
      */
     private static RequestMatcher csrfRequiredMatcher() {
-        return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request);
+        return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request)
+                && !SIGNUP.matches(request);
     }
 
     /** Access denied → 401 JSON when the caller is unauthenticated (no/expired session), else the default 403. */
@@ -181,6 +206,15 @@ public class SecurityConfig {
 
     private static AuthenticationEntryPoint jsonUnauthorizedEntryPoint() {
         return (request, response, authException) -> {
+            if (authException instanceof com.company.secscan.auth.LoginRateLimitedException limited) {
+                // D-098: a rate-limited Basic attempt → 429 + Retry-After (no password was checked).
+                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                response.setHeader("Retry-After", Long.toString(limited.retryAfterSeconds()));
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"error\":\"RATE_LIMITED\",\"message\":\"Too many failed sign-in "
+                        + "attempts. Try again later.\"}");
+                return;
+            }
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"error\":\"UNAUTHORIZED\",\"message\":\"Authentication required.\"}");

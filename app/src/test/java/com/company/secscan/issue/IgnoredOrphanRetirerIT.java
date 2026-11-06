@@ -119,7 +119,7 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         UUID latest = scans.findFirstByWorkspaceIdAndRepositoryIdAndReconciledAtIsNotNullOrderByCreatedAtDesc(
                 WORKSPACE, repo.getId()).orElseThrow().getId();
 
-        IgnoredOrphanRetirer.RetireResult dry = retirer.retire(true);
+        IgnoredOrphanRetirer.RetireResult dry = retirer.retire(WORKSPACE, true);
         assertThat(dry.dryRun()).isTrue();
         assertThat(dry.candidates()).isEqualTo(1);
         assertThat(dry.retired()).isZero();
@@ -129,7 +129,7 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         });
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED); // unchanged
 
-        IgnoredOrphanRetirer.RetireResult run = retirer.retire(false);
+        IgnoredOrphanRetirer.RetireResult run = retirer.retire(WORKSPACE, false);
         assertThat(run.retired()).isEqualTo(1);
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
         assertThat(subFor(repo, "CVE-100").getIgnoredByRuleId()).isNull();  // B-2: markers cleared
@@ -142,9 +142,9 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
     @Test
     void secondRunRetiresNothing() {
         seedOrphan(6102L, "CVE-100");
-        assertThat(retirer.retire(false).retired()).isEqualTo(1);
-        assertThat(retirer.retire(false).retired()).isZero();
-        assertThat(retirer.retire(true).candidates()).isZero();
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isEqualTo(1);
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isZero();
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();
     }
 
     @Test
@@ -158,8 +158,8 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         seedIgnoredSca(repo, "CVE-100", ruleId, null);
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
 
-        assertThat(retirer.retire(true).candidates()).isZero();
-        assertThat(retirer.retire(false).retired()).isZero();
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isZero();
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED); // preserved
     }
 
@@ -169,7 +169,7 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         reconciledScan(repo, "main", true, false);         // sca ok but no-packages (closes_findings=false)
         seedIgnoredSca(repo, "CVE-100", cveRule(repo, "CVE-100").getId(), null);
 
-        assertThat(retirer.retire(true).candidates()).isZero();            // not authoritative → nothing
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();            // not authoritative → nothing
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
     }
 
@@ -180,8 +180,8 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         reconciledScan(repo, "main", false, false);        // sca FAILED
         seedIgnoredSca(repo, "CVE-100", cveRule(repo, "CVE-100").getId(), null);
 
-        assertThat(retirer.retire(true).candidates()).isZero();
-        assertThat(retirer.retire(false).retired()).isZero();
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isZero();
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
     }
 
@@ -192,7 +192,7 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         // last_seen points AT the latest scan → still present → not an orphan.
         seedIgnoredSca(repo, "CVE-100", cveRule(repo, "CVE-100").getId(), latest.getId());
 
-        assertThat(retirer.retire(true).candidates()).isZero();            // present → not a candidate
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();            // present → not a candidate
     }
 
     @Test
@@ -204,8 +204,8 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         repositories.save(repo);
         assertThat(repo.effectiveBranch()).isEqualTo("dev");
 
-        assertThat(retirer.retire(true).candidates()).isZero();            // latest scan branch (main) != dev
-        assertThat(retirer.retire(false).retired()).isZero();
+        assertThat(retirer.retire(WORKSPACE, true).candidates()).isZero();            // latest scan branch (main) != dev
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isZero();
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
     }
 
@@ -217,13 +217,13 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         reconciledScan(repo, "main", true, true);
         IgnoreRule rule = cveRule(repo, "CVE-100");
         SubIssue seeded = seedIgnoredSca(repo, "CVE-100", rule.getId(), null);
-        assertThat(retirer.retire(false).retired()).isEqualTo(1);
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isEqualTo(1);
         UUID f = seeded.getId();
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
         assertThat(subFor(repo, "CVE-100").getIgnoredByRuleId()).isNull();   // cleared by solveIgnored
         long eventsBefore = events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, f).size();
 
-        triage.removeRule(rule.getId());
+        triage.removeRule(Workspace.DEFAULT_ID, rule.getId());
 
         assertThat(subFor(repo, "CVE-100").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);  // still solved
         assertThat(events.findByWorkspaceIdAndSubIssueIdOrderByAtAsc(WORKSPACE, f)).hasSize((int) eventsBefore);
@@ -237,8 +237,9 @@ class IgnoredOrphanRetirerIT extends AbstractGitLabIT {
         reconciledScan(repo, "main", true, true);
         IgnoreRule rule = cveRule(repo, "CVE-100");
         seedIgnoredSca(repo, "CVE-100", rule.getId(), null);
-        assertThat(retirer.retire(false).retired()).isEqualTo(1);
-        triage.removeRule(rule.getId());                                   // drop the rule so it won't re-ignore
+        assertThat(retirer.retire(WORKSPACE, false).retired()).isEqualTo(1);
+        triage.removeRule(Workspace.DEFAULT_ID,
+                rule.getId());                                   // drop the rule so it won't re-ignore
 
         reconcileScanWith(repo, "main", "CVE-100");                        // F re-detected on the same branch
 

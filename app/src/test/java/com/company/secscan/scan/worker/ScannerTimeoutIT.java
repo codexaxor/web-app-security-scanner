@@ -91,7 +91,7 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
         open.setRuleId("aws-access-token");
         open = subIssues.save(open);
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         ScanJob job = jobs.findByScanId(scan.id()).orElseThrow();
         for (int i = 0; i < ScanJob.MAX_ATTEMPTS; i++) {
             job.lease("worker");
@@ -124,7 +124,7 @@ class ScannerTimeoutIT extends AbstractScanWorkerIT {
         when(launcher.run(any())).thenReturn(new ScannerLauncher.LaunchResult(null, true, "stub log"));
         Repository repo = seedLocalRepo();
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10); // one lease, attempts = 1 (< MAX_ATTEMPTS)
         assertThat(claimed).hasSize(1);
 

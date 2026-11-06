@@ -1,6 +1,7 @@
 package com.company.secscan.scan;
 
 import com.company.secscan.api.PagedResponse;
+import com.company.secscan.auth.CurrentWorkspace;
 import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanView;
 import com.company.secscan.scan.api.ScanWarningView;
@@ -27,37 +28,37 @@ public class ScanController {
 
     /** Queues a manual scan (or returns the one already in flight for this repository). */
     @PostMapping("/repositories/{repositoryId}/scans")
-    public ResponseEntity<ScanView> start(@PathVariable UUID repositoryId) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startManual(repositoryId));
+    public ResponseEntity<ScanView> start(@CurrentWorkspace UUID workspaceId, @PathVariable UUID repositoryId) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startManual(workspaceId, repositoryId));
     }
 
     @GetMapping("/repositories/{repositoryId}/scans")
-    public PagedResponse<ScanView> list(
+    public PagedResponse<ScanView> list(@CurrentWorkspace UUID workspaceId, 
             @PathVariable UUID repositoryId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listForRepository(repositoryId, page, size);
+        return service.listForRepository(workspaceId, repositoryId, page, size);
     }
 
     @GetMapping("/scans/{scanId}")
-    public ScanDetailView get(@PathVariable UUID scanId) {
-        return service.get(scanId);
+    public ScanDetailView get(@CurrentWorkspace UUID workspaceId, @PathVariable UUID scanId) {
+        return service.get(workspaceId, scanId);
     }
 
     /** All scans in the workspace, newest first (OD-14 item 2). */
     @GetMapping("/scans")
-    public PagedResponse<ScanView> listAll(
+    public PagedResponse<ScanView> listAll(@CurrentWorkspace UUID workspaceId, 
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listAll(page, size);
+        return service.listAll(workspaceId, page, size);
     }
 
     /** One scan's scan-health warnings (OD-14 item 2). */
     @GetMapping("/scans/{scanId}/warnings")
-    public PagedResponse<ScanWarningView> warnings(
+    public PagedResponse<ScanWarningView> warnings(@CurrentWorkspace UUID workspaceId, 
             @PathVariable UUID scanId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return service.listWarnings(scanId, page, size);
+        return service.listWarnings(workspaceId, scanId, page, size);
     }
 }

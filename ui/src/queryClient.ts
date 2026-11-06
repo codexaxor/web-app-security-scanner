@@ -49,6 +49,12 @@ export const qk = {
   scanDetail: (scanId: string) => ["scan-detail", scanId] as const,
   issueCategories: (params: unknown) => ["issue-categories", params] as const,
   workspaceSettings: ["workspace-settings"] as const,
+  // M8.10 operator lists (sign-up requests, accounts) — one family, so a decision refreshes both. Not a
+  // MutationKind: operator actions touch account metadata only (D-094), never a tenant's issue/feed families,
+  // so the operator pages invalidate `adminAll` directly.
+  adminSignUps: (status: string, page: number, size: number) => ["admin", "sign-ups", status, page, size] as const,
+  adminUsers: (status: string, page: number, size: number) => ["admin", "users", status, page, size] as const,
+  adminAll: ["admin"] as const,
 };
 
 // --- Invalidation map -------------------------------------------------------------------------------

@@ -26,10 +26,27 @@ export type IconName =
   | "sast"
   | "secret"
   | "iac"
-  | "eol";
+  | "eol"
+  | "inbox"
+  | "users";
 
 // Each entry is the inner markup of a 24x24 viewBox, stroke = currentColor.
 const PATHS: Record<IconName, ReactElement> = {
+  // M8.10 operator section: sign-up requests (an inbox tray) and accounts (two people).
+  inbox: (
+    <>
+      <path d="M3 13l2.5-7.5A1 1 0 0 1 6.4 5h11.2a1 1 0 0 1 .9.5L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5Z" />
+      <path d="M3 13h5l1.5 2.5h5L16 13h5" />
+    </>
+  ),
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8" />
+      <path d="M18 14.3a6.5 6.5 0 0 1 3.5 5.7" />
+    </>
+  ),
   dashboard: (
     <>
       <rect x="3" y="3" width="7" height="9" rx="1" />
