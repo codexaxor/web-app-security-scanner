@@ -35,6 +35,7 @@ dependencies {
 //   - "live-opengrep" (real Opengrep SAST):    `./gradlew :app:test -PliveOpengrep --tests "*Opengrep*"`
 //   - "live-checkov"  (real Checkov IaC):      `./gradlew :app:test -PliveCheckov  --tests "*Checkov*"`
 //   - "live-eol"      (endoflife.date / EOL container): `./gradlew :app:test -PliveEol --tests "*Eol*"`
+//   - "live-reaper"   (real Docker daemon + scanner image): `./gradlew :app:test -PliveReaper --tests "*ScanReaperIT*"`
 // A test needing several tools carries several tags (e.g. M6ScannerImageIT is live-opengrep AND live-checkov),
 // so it runs only when ALL its flags are passed.
 tasks.withType<Test> {
@@ -53,6 +54,9 @@ tasks.withType<Test> {
         }
         if (!project.hasProperty("liveEol")) {
             excludeTags("live-eol")
+        }
+        if (!project.hasProperty("liveReaper")) {
+            excludeTags("live-reaper")
         }
     }
 }
