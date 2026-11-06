@@ -56,4 +56,31 @@ class ScanWorkspaceTest {
         assertThatThrownBy(() -> ScanWorkspace.instanceRoot(workRoot, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void replacesALeftoverDirOfADeadRunIncludingItsTokenFile(@TempDir Path workRoot) throws Exception {
+        Path leftover = Files.createDirectories(workRoot.resolve("inst-1").resolve("scan-x").resolve("out"))
+                .getParent();
+        Files.writeString(leftover.resolve("token"), "glpat-EXAMPLE-stale");
+        Files.writeString(leftover.resolve("out").resolve("result.json"), "{\"stale\":true}");
+
+        try (ScanWorkspace ws = ScanWorkspace.create(workRoot, "inst-1", "scan-x", true)) {
+            assertThat(ws.root()).isEqualTo(leftover.toAbsolutePath().normalize());
+            assertThat(Files.exists(ws.root().resolve("token"))).as("stale token gone").isFalse();
+            assertThat(Files.exists(ws.outDir().resolve("result.json"))).as("stale output gone").isFalse();
+            assertThat(Files.getPosixFilePermissions(ws.root()))
+                    .isEqualTo(PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void refusesAnExistingDirWhenNotAllowedToReplaceItAndLeavesItUntouched(@TempDir Path workRoot)
+            throws Exception {
+        Path held = Files.createDirectories(workRoot.resolve("inst-1").resolve("scan-y").resolve("out"));
+        Path marker = Files.writeString(held.resolve("partial.json"), "{}");
+
+        assertThatThrownBy(() -> ScanWorkspace.create(workRoot, "inst-1", "scan-y", false))
+                .isInstanceOf(ScanWorkspace.WorkspaceBusyException.class);
+        assertThat(marker).exists();
+    }
 }

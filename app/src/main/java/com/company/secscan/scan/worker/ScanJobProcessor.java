@@ -164,9 +164,26 @@ public class ScanJobProcessor {
         }
 
         ScanWorkspace ws;
+        String scanKey = scan.getId().toString();
         try {
-            ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), props.getInstanceId(),
-                    scan.getId().toString());
+            // Review S1: a dir left by an earlier, dead run of THIS scan (crash before the reaper ran) is replaced —
+            // but only if this run is the scan's sole holder, decided under ActiveScans' lock so neither the reaper
+            // nor a concurrent run of the same scan can interleave. A dir held by another live run is left alone.
+            ws = activeScans.underLock(() -> ScanWorkspace.create(Path.of(props.getWorkRoot()),
+                    props.getInstanceId(), scanKey, activeScans.holders(scanKey) == 1));
+        } catch (ScanWorkspace.WorkspaceBusyException e) {
+            state.failOrRequeue(workspaceId, jobId, scan.getId(), "scan workspace busy: " + e.getMessage());
+            return;
+        } catch (java.io.UncheckedIOException e) {
+            if (e.getCause() instanceof java.nio.file.FileAlreadyExistsException) {
+                // A leftover that could not be cleared (or a race): transient, never a permanent config failure.
+                state.failOrRequeue(workspaceId, jobId, scan.getId(),
+                        "scan workspace already exists and could not be replaced");
+                return;
+            }
+            state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",
+                    "scan work root not writable (" + props.getWorkRoot() + "): " + e.getMessage());
+            return;
         } catch (RuntimeException e) {
             // Config error (work root missing / not writable by the worker user): fail once, do not retry.
             state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",

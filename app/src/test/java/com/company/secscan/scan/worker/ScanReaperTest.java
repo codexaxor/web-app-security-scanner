@@ -257,6 +257,21 @@ class ScanReaperTest {
         assertThat(Files.isDirectory(oldLayout)).isTrue();
     }
 
+    // --- startup gate (review S1) ---------------------------------------------
+
+    @Test
+    void reapBeforeFirstClaimSweepsOnceThenIsANoOp() throws IOException {
+        Path first = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()));
+
+        reaper.reapBeforeFirstClaim();
+        assertThat(first).doesNotExist();
+
+        // A later leftover is the periodic sweep's job, not the per-poll startup gate's.
+        Path later = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()));
+        reaper.reapBeforeFirstClaim();
+        assertThat(later).isDirectory();
+    }
+
     // --- resilience ---------------------------------------------------------
 
     @Test

@@ -3,7 +3,9 @@ package com.company.secscan.scan.worker;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
@@ -46,7 +48,19 @@ public final class ScanWorkspace implements AutoCloseable {
         return workRoot.toAbsolutePath().normalize().resolve(instanceId);
     }
 
+    /** Creates a fresh workspace; an existing dir for this scan is NOT replaced ({@link WorkspaceBusyException}). */
     public static ScanWorkspace create(Path workRoot, String instanceId, String scanId) {
+        return create(workRoot, instanceId, scanId, false);
+    }
+
+    /**
+     * Creates {@code <workRoot>/<instanceId>/<scanId>}. If that dir already exists it is either a leftover of an
+     * earlier, dead run of this scan (a crash before the reaper got to it) or the dir of a run that is still live.
+     * With {@code replaceLeftover} (the caller has established, under {@link ActiveScans}' lock, that no other run
+     * holds this scan) the leftover — token file included — is deleted and the workspace re-created; otherwise
+     * {@link WorkspaceBusyException} is thrown and the existing dir is left untouched (review S1).
+     */
+    public static ScanWorkspace create(Path workRoot, String instanceId, String scanId, boolean replaceLeftover) {
         try {
             Path instanceRoot = instanceRoot(workRoot, instanceId);
             if (!Files.isDirectory(instanceRoot)) {
@@ -59,6 +73,20 @@ public final class ScanWorkspace implements AutoCloseable {
                 }
             }
             Path root = instanceRoot.resolve(scanId);
+            if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+                if (!replaceLeftover) {
+                    throw new WorkspaceBusyException();
+                }
+                try {
+                    deleteTree(root);
+                } catch (IOException e) {
+                    // Surfaced as "already exists": the caller treats it as transient, never a permanent failure.
+                    FileAlreadyExistsException busy = new FileAlreadyExistsException(scanId, null,
+                            "leftover scan workspace could not be removed");
+                    busy.initCause(e);
+                    throw busy;
+                }
+            }
             Files.createDirectory(root,
                     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
             Path outDir = Files.createDirectory(root.resolve("out"),
@@ -108,6 +136,27 @@ public final class ScanWorkspace implements AutoCloseable {
 
     public boolean ownedByRoot() {
         return ownerUserSpec().startsWith("0:");
+    }
+
+    /**
+     * Thrown when the scan's workspace dir already exists and may belong to a live run. Retryable — never a
+     * permanent configuration failure.
+     */
+    public static final class WorkspaceBusyException extends RuntimeException {
+        WorkspaceBusyException() {
+            super("scan workspace already exists (another run of this scan may be in progress)");
+        }
+    }
+
+    /** Deletes a tree deepest-first without following symlinks (a symlink is removed as a link). */
+    private static void deleteTree(Path root) throws IOException {
+        try (Stream<Path> walk = Files.walk(root)) {
+            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
+        }
     }
 
     @Override

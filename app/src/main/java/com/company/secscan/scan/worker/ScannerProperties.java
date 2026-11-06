@@ -45,10 +45,11 @@ public class ScannerProperties {
      * Sourced from {@code SECSCAN_INSTANCE_ID} (see application-worker.yml), default {@code "default"}.
      */
     private String instanceId = "default";
-    /** How often {@link ScanReaper} sweeps for leftovers (default every 10 minutes; configurable). */
+    /**
+     * How often {@link ScanReaper} sweeps for leftovers (default every 10 minutes; configurable). The startup sweep
+     * is not delayed: it runs synchronously before the first claim (review S1).
+     */
     private long reapIntervalMs = 600_000;
-    /** Delay before the first reap sweep after worker startup (the startup cleanup; configurable). */
-    private long reapInitialDelayMs = 10_000;
     /**
      * TEST-ONLY: allow cloning a repository over {@code file:///src} from a local path. Default false — in
      * production the worker clones only over https to an allowlisted host (D-018). The offline fixture ITs set
@@ -190,14 +191,6 @@ public class ScannerProperties {
 
     public void setReapIntervalMs(long reapIntervalMs) {
         this.reapIntervalMs = reapIntervalMs;
-    }
-
-    public long getReapInitialDelayMs() {
-        return reapInitialDelayMs;
-    }
-
-    public void setReapInitialDelayMs(long reapInitialDelayMs) {
-        this.reapInitialDelayMs = reapInitialDelayMs;
     }
 
     public boolean isAllowLocalFileClone() {

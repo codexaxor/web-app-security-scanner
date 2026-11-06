@@ -26,7 +26,8 @@ import org.springframework.stereotype.Component;
  * physical remains. It NEVER changes job/scan/finding state (a failed scanner still closes nothing) and logs
  * counts only — never a path (which could name a token file) and never token content.
  *
- * <p>Runs on worker startup and every {@code secscan.scanner.reap-interval-ms} (default 10 min). "Live" = a scan
+ * <p>Runs once synchronously before the worker's first claim ({@link #reapBeforeFirstClaim}) and then every
+ * {@code secscan.scanner.reap-interval-ms} (default 10 min). "Live" = a scan
  * id in this worker's {@link ActiveScans} set; everything else is a leftover. It only ever touches:
  * <ul>
  *   <li>containers carrying BOTH scanner labels for THIS instance ({@code secscan.component=scanner} AND
@@ -58,10 +59,28 @@ public class ScanReaper {
     public record ReapResult(int containersRemoved, int dirsRemoved) {
     }
 
+    private volatile boolean startupReapDone;
+
+    /**
+     * The periodic sweep. Its first tick is one interval after startup: the STARTUP sweep is not scheduled but run
+     * synchronously by {@link ScanPoller} through {@link #reapBeforeFirstClaim()}, so it is guaranteed to finish
+     * before this worker claims its first job (review S1).
+     */
     @Scheduled(fixedDelayString = "${secscan.scanner.reap-interval-ms:600000}",
-            initialDelayString = "${secscan.scanner.reap-initial-delay-ms:10000}")
+            initialDelayString = "${secscan.scanner.reap-interval-ms:600000}")
     public void reapScheduled() {
         reap();
+    }
+
+    /**
+     * Runs the startup sweep exactly once, synchronously; every later call returns immediately. {@link ScanPoller}
+     * calls this before each claim, so no job is claimed until crash leftovers from a previous run are gone.
+     */
+    public synchronized void reapBeforeFirstClaim() {
+        if (!startupReapDone) {
+            reap();
+            startupReapDone = true;
+        }
     }
 
     /** Reap leftover containers and dirs. Never throws — a reaper failure must not stop the worker. */
@@ -99,12 +118,15 @@ public class ScanReaper {
         int removed = 0;
         for (Container c : mine) {
             String scanId = c.getLabels() == null ? null : c.getLabels().get("secscan.scan");
-            if (scanId == null || activeScans.isActive(scanId)) {
-                continue; // no scan label (defensive) or a live scan — never touch
+            if (scanId == null) {
+                continue; // no scan label (defensive) — never touch
             }
             try {
-                docker.removeContainerCmd(c.getId()).withForce(true).exec();
-                removed++;
+                // Under ActiveScans' lock: skipped if live, and the scan cannot become live mid-removal.
+                if (activeScans.runIfInactive(scanId,
+                        () -> docker.removeContainerCmd(c.getId()).withForce(true).exec())) {
+                    removed++;
+                }
             } catch (RuntimeException e) {
                 log.warn("Scan reaper: could not remove a leftover container ({})", e.getClass().getSimpleName());
             }
@@ -134,8 +156,14 @@ public class ScanReaper {
         int removed = 0;
         try (DirectoryStream<Path> children = Files.newDirectoryStream(instanceRoot)) {
             for (Path child : children) {
-                if (shouldReapDir(instanceRoot, child) && deleteRecursively(child)) {
-                    removed++;
+                if (shouldReapDir(instanceRoot, child)) {
+                    // Under ActiveScans' lock: re-checked live, and the scan cannot become live mid-deletion.
+                    boolean[] gone = {false};
+                    activeScans.runIfInactive(child.getFileName().toString(),
+                            () -> gone[0] = deleteRecursively(child));
+                    if (gone[0]) {
+                        removed++;
+                    }
                 }
             }
         }

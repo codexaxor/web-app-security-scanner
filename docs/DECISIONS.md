@@ -18,8 +18,11 @@ Consequences: what this implies / what we gave up.
 Context: M8.13 fact-check (claim 6). After a worker crash/restart a scanner container and the per-scan host
 workspace dir (including its one-time token file) can linger; nothing reaped them — `ScanPoller`'s stale-lease
 sweep only requeues the DB job.
-Decision: a worker-side `ScanReaper` runs on startup and every `secscan.scanner.reap-interval-ms` (default
-10 min; first run after `reap-initial-delay-ms`, default 10 s). It:
+Decision: a worker-side `ScanReaper` runs once synchronously BEFORE the worker's first stale-lease sweep and
+claim (`ScanPoller` calls `reapBeforeFirstClaim()` at the top of each tick; only the first call sweeps), then
+every `secscan.scanner.reap-interval-ms` (default 10 min). If a requeued scan still meets its own dir from a dead
+run, `ScanWorkspace` replaces it when this run is the scan's only holder, else the job is retried
+(`failOrRequeue`) — an existing dir is never a permanent `WORK_ROOT_NOT_WRITABLE` failure. It:
  - **containers:** lists with a daemon-side filter on BOTH labels — `secscan.component=scanner` AND
    `secscan.instance=<own id>` — and force-removes those whose `secscan.scan` is not currently live; a
    different instance's or an unlabelled pre-change container is never returned, so never removed (pre-change
@@ -30,8 +33,10 @@ Decision: a worker-side `ScanReaper` runs on startup and every `secscan.scanner.
    and never leaving that sub-tree. Another instance's sub-tree, and old-layout `<workRoot>/<scanId>` dirs left
    from before this change, are never listed and so never touched (one-time manual cleanup, see the M8.14
    report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`).
- - **"Live"** = a scan id in this worker's in-memory `ActiveScans` set, marked by `ScanJobProcessor` BEFORE the
-   per-scan dir/container exists and cleared only AFTER both are gone — so an in-flight scan is never mistaken
+ - **"Live"** = a scan id in this worker's in-memory `ActiveScans` registry (reference-counted per scan id, so a
+   second concurrent run of one scan keeps it live), marked by `ScanJobProcessor` BEFORE the per-scan
+   dir/container exists and released only AFTER both are gone; the reaper deletes each leftover under the
+   registry's lock (`runIfInactive`), so a scan cannot become live mid-deletion — so an in-flight scan is never mistaken
    for a leftover, and a freshly (re)started worker (empty set) reaps every pre-existing leftover on the first
    tick.
  - **Ownership:** every scanner container is now also labelled `secscan.instance=<SECSCAN_INSTANCE_ID>`
