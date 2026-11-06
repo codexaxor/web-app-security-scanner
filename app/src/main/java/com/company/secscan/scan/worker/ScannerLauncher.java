@@ -47,7 +47,7 @@ public class ScannerLauncher {
                 .withHostConfig(ScannerContainerConfig.buildHostConfig(spec))
                 .withEnv(ScannerContainerConfig.buildEnv(spec))
                 .withUser(spec.runAsUser())
-                .withLabels(ScannerContainerConfig.labels(spec.scanId()))
+                .withLabels(ScannerContainerConfig.labels(spec.scanId(), spec.instanceId()))
                 .withNetworkDisabled(spec.networkDisabled())
                 .exec();
         String id = container.getId();

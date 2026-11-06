@@ -103,7 +103,9 @@ final class ScannerContainerConfig {
         return env;
     }
 
-    static Map<String, String> labels(String scanId) {
-        return Map.of("secscan.component", "scanner", "secscan.scan", scanId);
+    static Map<String, String> labels(String scanId, String instanceId) {
+        // component: identifies a scanner container; instance: which stack/worker owns it, so the reaper only
+        // ever reaps its own instance's leftovers (D-102); scan: the per-scan id (the reaper's live-set key).
+        return Map.of("secscan.component", "scanner", "secscan.instance", instanceId, "secscan.scan", scanId);
     }
 }

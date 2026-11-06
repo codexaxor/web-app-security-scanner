@@ -500,6 +500,29 @@ open-redirect rejection, no business-API calls on "/", sign-out → `/login` wit
 scroll at 1440/1280/390; `safeNextPath` is unit-tested against the open-redirect variants. See
 `docs/reports/M8.13.md`.
 
+## M8.14 Scan reaper
+
+**Scope (D-102; worker only).** After a worker crash/restart, a scanner container and the per-scan workspace dir
+(including its one-time token file) could linger; the stale-lease sweep only requeues the DB job. M8.14 adds a
+worker-side `ScanReaper` that removes those physical leftovers and nothing else:
+- every scanner container is labelled `secscan.instance=<SECSCAN_INSTANCE_ID>` (stable per stack: compose `dev`,
+  smoke `smoke`, Gradle ITs `it-<random>`); per-scan dirs live at `<workRoot>/<instanceId>/<scanId>`, so stacks
+  may share one work root;
+- the reaper removes only THIS instance's labelled containers and UUID-named dirs in ITS OWN sub-tree whose scan is
+  not live in this worker (`ActiveScans`, reference-counted, registered before the dir/container exists and
+  released after both are gone); symlinks are never followed;
+- it runs once synchronously before the worker's first claim, then every 10 min; a requeued scan that still meets
+  its own dead dir replaces it (sole holder) or is retried — never failed permanently;
+- it never changes job/scan/finding state and logs counts only; unlabelled pre-change containers and old-layout
+  `<workRoot>/<scanId>` dirs are never touched (manual one-time cleanup).
+No migration, API or UI change. Scanner container hardening unchanged (one label added).
+
+**Done when:** a leftover container + dir (with token file) of this instance are removed while a live scan's, another
+instance's and an unlabelled container are kept, against a real daemon (`ScanReaperIT`, `-PliveReaper`); the
+ordering, sub-tree isolation, live-span, stuck-dir and refcount behaviours are proven by `ScanReaperTest`,
+`ScanPollerTest`, `ScanJobProcessorLifecycleTest`, `ScanWorkspaceTest` and `ActiveScansTest` in the default build.
+See `docs/reports/M8.14.md`.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository

@@ -74,6 +74,10 @@ services:
       SECSCAN_FINGERPRINT_KEY: ${SECSCAN_FINGERPRINT_KEY:-}
       # Scan work root — see the bind below; MUST be the same absolute path on host and in the worker.
       SECSCAN_SCANNER_WORK_ROOT: ${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}
+      # D-102: ownership tag stamped on scanner containers AND the name of this worker's sub-tree of the work root
+      # (<workRoot>/<instanceId>/<scanId>); the reaper reaps ONLY this instance's leftovers. The smoke stack sets
+      # "smoke", so dev and smoke can share one work root and never reap each other.
+      SECSCAN_INSTANCE_ID: ${SECSCAN_INSTANCE_ID:-dev}
     # The worker runs non-web (no HTTP server), so it publishes no port.
     # NOTE: the scanner image must exist on the host daemon first:
     #   docker build -t secscan-scanner:8.21.2 scanner-image/

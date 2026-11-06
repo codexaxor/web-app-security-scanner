@@ -27,6 +27,7 @@ public class ScanPoller {
     private static final Logger log = LoggerFactory.getLogger(ScanPoller.class);
 
     private final ScanClaimer claimer;
+    private final ScanReaper reaper;
     private final ScanJobProcessor processor;
     private final ScannerEnvironmentCheck environment;
     private final ScannerProperties props;
@@ -34,7 +35,8 @@ public class ScanPoller {
     private final AtomicInteger active = new AtomicInteger();
 
     public ScanPoller(ScanClaimer claimer, ScanJobProcessor processor, ScannerEnvironmentCheck environment,
-                      ScannerProperties props) {
+                      ScannerProperties props, ScanReaper reaper) {
+        this.reaper = reaper;
         this.claimer = claimer;
         this.processor = processor;
         this.environment = environment;
@@ -49,6 +51,9 @@ public class ScanPoller {
             // The self-check (ScannerEnvironmentCheck) has logged why; don't claim jobs we can't run.
             return;
         }
+        // Review S1: crash leftovers of a previous run are reaped (once, synchronously) BEFORE this worker requeues
+        // or claims anything, so a requeued scan never meets its own stale dir/container. Never throws.
+        reaper.reapBeforeFirstClaim();
         try {
             claimer.sweepStaleLeases(props.getTimeout().plus(props.getLeaseMargin()));
         } catch (RuntimeException e) {

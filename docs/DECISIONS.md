@@ -44,6 +44,46 @@ Consequences: deep links survive sign-in; the homepage is cacheable static UI. H
 behaviour, not token limits (SecScan does not yet refuse over-scoped tokens — deferred, see the M8.13 register).
 (D-102 is taken on `feature/m8.14-scan-reaper` — scan leftovers reaper.)
 
+## D-102 Scan leftovers reaped on worker start + periodically (2026-11-07, accepted)
+Context: M8.13 fact-check (claim 6). After a worker crash/restart a scanner container and the per-scan host
+workspace dir (including its one-time token file) can linger; nothing reaped them — `ScanPoller`'s stale-lease
+sweep only requeues the DB job.
+Decision: a worker-side `ScanReaper` runs once synchronously BEFORE the worker's first stale-lease sweep and
+claim (`ScanPoller` calls `reapBeforeFirstClaim()` at the top of each tick; only the first call sweeps), then
+every `secscan.scanner.reap-interval-ms` (default 10 min). If a requeued scan still meets its own dir from a dead
+run, `ScanWorkspace` replaces it when this run is the scan's only holder, else the job is retried
+(`failOrRequeue`) — an existing dir is never a permanent `WORK_ROOT_NOT_WRITABLE` failure. It:
+ - **containers:** lists with a daemon-side filter on BOTH labels — `secscan.component=scanner` AND
+   `secscan.instance=<own id>` — and force-removes those whose `secscan.scan` is not currently live; a
+   different instance's or an unlabelled pre-change container is never returned, so never removed (pre-change
+   ones are counted only — INFO on the first sweep, DEBUG afterwards);
+ - **dirs:** per-scan dirs live at `<workRoot>/<instanceId>/<scanId>` (same absolute path on host and in the
+   worker, so D-022 holds; `ScanWorkspace` creates the instance sub-dir `0700` on demand). The reaper deletes
+   only UUID-named direct children of ITS OWN sub-tree `<workRoot>/<ownInstanceId>`, never following a symlink
+   and never leaving that sub-tree. Another instance's sub-tree, and old-layout `<workRoot>/<scanId>` dirs left
+   from before this change, are never listed and so never touched (one-time manual cleanup, see the M8.14
+   report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`). A leftover
+   that cannot be fully deleted (e.g. an unreadable sub-dir) is deleted as far as possible, counted
+   (`dirsFailed`, logged as a count) and skipped; the sweep always continues with the remaining leftovers.
+ - **"Live"** = a scan id in this worker's in-memory `ActiveScans` registry (reference-counted per scan id, so a
+   second concurrent run of one scan keeps it live), marked by `ScanJobProcessor` BEFORE the per-scan
+   dir/container exists and released only AFTER both are gone; the reaper deletes each leftover under the
+   registry's lock (`runIfInactive`), so a scan cannot become live mid-deletion — so an in-flight scan is never mistaken
+   for a leftover, and a freshly (re)started worker (empty set) reaps every pre-existing leftover on the first
+   tick.
+ - **Ownership:** every scanner container is now also labelled `secscan.instance=<SECSCAN_INSTANCE_ID>`
+   (`ScannerProperties`, stable across restarts, default `"default"`; docker-compose=`dev`, compose-smoke=`smoke`;
+   Gradle ITs use a random `it-<random>` per test JVM — `AbstractScanWorkerIT`, which every scanner-launching IT
+   extends, and `ScanReaperIT`). Stacks that share one work root (dev + smoke, or dev + a `bootRun` worker) are
+   safe because each instance only ever looks in its own sub-tree and its own labelled containers.
+ - It NEVER changes job/scan/finding state (the stale-lease sweep stays the only requeue path; a failed scanner
+   still closes nothing) and logs counts only — never a path (which could name a token file) and never token
+   content. A reaper failure is swallowed and never stops the worker.
+Consequences: assumes ONE worker per instance id — `ActiveScans` is process-local, so two workers sharing one
+instance id (and one daemon / work root) could reap each other's live containers and dirs. Revisit (a shared live-lease source) before
+running several workers with the same instance id. Proven by `ScanReaperTest` (default build) and `ScanReaperIT`
+(`-PliveReaper`, real daemon).
+
 ## D-101 Relaxed password minimum (temporary) (2026-11-06, accepted)
 Context: sign-up required min 12 chars (M8.10).
 Decision: sign-up password minimum = 2 characters; maximum unchanged (72 bytes, bcrypt); bcrypt, login rate

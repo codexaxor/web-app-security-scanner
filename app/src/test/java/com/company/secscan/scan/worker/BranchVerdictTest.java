@@ -28,7 +28,7 @@ class BranchVerdictTest {
     private final SourceProvider adapter = mock(SourceProvider.class);
     private final ProviderRegistry providers = mock(ProviderRegistry.class);
     private final ScanJobProcessor processor = new ScanJobProcessor(
-            null, null, null, null, null, null, null, null, null, null, null, null, providers);
+            null, null, null, null, null, null, null, null, null, null, null, null, providers, null);
 
     private static final Repository REPO = new Repository(
             Workspace.DEFAULT_ID, UUID.randomUUID(), 101L, "svc/app", "main", List.of());
