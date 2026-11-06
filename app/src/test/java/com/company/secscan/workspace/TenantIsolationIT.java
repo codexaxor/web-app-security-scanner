@@ -21,7 +21,9 @@ import com.company.secscan.scan.ScanWarningRepository;
 import com.company.secscan.support.AbstractApiServerIT;
 import com.company.secscan.support.HttpSession;
 import com.company.secscan.user.AppUser;
+import com.company.secscan.triage.ReasonCode;
 import com.company.secscan.user.AppUserRepository;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,8 +46,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * M8.10 item 7 (D-093): tenant isolation over real HTTP. Workspace A owns a connection, repository, scan (+ warning),
  * issue group, sub-issue, triage event and ignore rule. User B (workspace B), signed in by session, gets <b>404 —
  * never 403</b> — on EVERY endpoint that takes one of A's ids (reads AND mutations), sees none of A's data on every
- * list endpoint, and A's data is unchanged afterwards. User A gets through on the same reads (so the 404s are
- * isolation, not broken endpoints). {@link #CASES} is the authoritative per-endpoint list:
+ * list endpoint (incl. an IGNORED item, review SF-5), and A's data is unchanged afterwards. User A gets through on
+ * the same reads AND sees its own data there ({@link #OWN}: a marker of A's, or — for count-only endpoints — a body
+ * that differs from B's), so the 404s and empty lists are isolation, not broken endpoints. {@link #CASES} is the authoritative per-endpoint list:
  * {@code TenantIsolationCoverageIT} fails the build if a {@code /api/v1} mapping is neither covered here nor
  * explicitly {@link #EXEMPT}.
  */
@@ -64,7 +67,7 @@ class TenantIsolationIT extends AbstractApiServerIT {
     }
 
     /** A's ids. */
-    record Ids(UUID conn, UUID repo, UUID scan, UUID group, UUID sub, UUID rule) {
+    record Ids(UUID conn, UUID repo, UUID scan, UUID group, UUID sub, UUID rule, UUID ignoredSub, UUID event) {
     }
 
     static final List<Case> CASES = List.of(
@@ -141,6 +144,33 @@ class TenantIsolationIT extends AbstractApiServerIT {
             "POST /api/v1/sources/public", "creates a connection in the caller's workspace (@CurrentWorkspace)",
             "PUT /api/v1/workspace/settings", "writes only the caller's workspace — PrincipalWorkspaceResolutionIT");
 
+    /**
+     * What user A must SEE on each read (review SF-5): a marker of A's own data, or {@link #COUNTS_DIFFER_FROM_B}
+     * for count-only endpoints (A's body must differ from B's empty-workspace body).
+     */
+    static final Function<Ids, String> COUNTS_DIFFER_FROM_B = i -> null;
+    static final Map<String, Function<Ids, String>> OWN = new HashMap<>();
+
+    static {
+        OWN.put("GET /api/v1/repositories/{id}", i -> i.repo().toString());
+        OWN.put("GET /api/v1/repositories/{repositoryId}/scans", i -> i.scan().toString());
+        OWN.put("GET /api/v1/repositories", i -> i.repo().toString());
+        OWN.put("GET /api/v1/scans/{scanId}", i -> i.scan().toString());
+        OWN.put("GET /api/v1/scans/{scanId}/warnings", i -> "MISSING_GRADLE_LOCKFILE");
+        OWN.put("GET /api/v1/scans", i -> i.scan().toString());
+        OWN.put("GET /api/v1/issue-groups/{groupId}", i -> i.group().toString());
+        OWN.put("GET /api/v1/issue-groups/{groupId}/sub-issues", i -> i.sub().toString());
+        OWN.put("GET /api/v1/sub-issues/{subIssueId}/events", i -> i.event().toString());
+        OWN.put("GET /api/v1/issue-groups", i -> i.group().toString());
+        OWN.put("GET /api/v1/issue-groups/categories", i -> "tenant-a-category");
+        OWN.put("GET /api/v1/issue-groups/summary", COUNTS_DIFFER_FROM_B);
+        OWN.put("GET /api/v1/ignore-rules", i -> i.rule().toString());
+        OWN.put("GET /api/v1/ignored", i -> i.ignoredSub().toString());
+        OWN.put("GET /api/v1/gitlab/connections", i -> i.conn().toString());
+        OWN.put("GET /api/v1/dashboard/summary", COUNTS_DIFFER_FROM_B);
+        OWN.put("GET /api/v1/workspace/settings", i -> "\"epssAutoIgnoreEnabled\":true");
+    }
+
     static Set<String> coveredMappings() {
         return CASES.stream().map(Case::mapping).collect(Collectors.toSet());
     }
@@ -179,7 +209,11 @@ class TenantIsolationIT extends AbstractApiServerIT {
 
     @BeforeEach
     void seedTwoTenants() {
-        a = workspaces.save(new Workspace("Tenant A")).getId();
+        Workspace wa = new Workspace("Tenant A");
+        WorkspaceSettings aSettings = new WorkspaceSettings();
+        aSettings.setEpssAutoIgnoreEnabled(true);      // B keeps the default (false): A's settings marker
+        wa.setSettings(aSettings);
+        a = workspaces.save(wa).getId();
         UUID b = workspaces.save(new Workspace("Tenant B")).getId();
         String hash = encoder.encode(PASSWORD);
         users.save(new AppUser(a, "a@tenant.test", hash, "admin"));
@@ -194,13 +228,20 @@ class TenantIsolationIT extends AbstractApiServerIT {
         scan.finish(Scan.STATUS_COMPLETED);
         UUID scanId = scans.save(scan).getId();
         warnings.save(new ScanWarning(a, repo, scanId, "MISSING_GRADLE_LOCKFILE", "no lockfile", "build.gradle"));
-        UUID group = groups.save(new IssueGroup(a, repo, "secret", "secret|a-rule", "Tenant A secret group", null))
-                .getId();
+        IssueGroup aGroup = new IssueGroup(a, repo, "secret", "secret|a-rule", "Tenant A secret group", null);
+        aGroup.setLevel2Category("tenant-a-category");   // a marker for the categories endpoint (review SF-5)
+        UUID group = groups.save(aGroup).getId();
         UUID sub = subIssues.save(new SubIssue(a, group, repo, "secret", "secret", "fp-tenant-a", scanId)).getId();
-        events.save(TriageEvent.user(a, sub, "open", "open", null));
+        UUID event = events.save(TriageEvent.user(a, sub, "open", "open", null)).getId();
         UUID rule = rules.save(new IgnoreRule(a, IgnoreRule.SCOPE_CVE, repo, "CVE-2000-0001", "tenant-a-rule",
                 "user")).getId();
-        ids = new Ids(conn, repo, scanId, group, sub, rule);
+        // Review SF-5: an IGNORED item of A's, so the B-side /ignored check is not vacuous.
+        UUID ignoredGroup = groups.save(new IssueGroup(a, repo, "secret", "secret|a-ignored-rule",
+                "Tenant A ignored group", null)).getId();
+        SubIssue ignored = new SubIssue(a, ignoredGroup, repo, "secret", "secret", "fp-tenant-a-ignored", scanId);
+        ignored.ignore(ReasonCode.IGNORE_RULE.code(), rule);
+        UUID ignoredSub = subIssues.save(ignored).getId();
+        ids = new Ids(conn, repo, scanId, group, sub, rule, ignoredSub, event);
     }
 
     @AfterEach
@@ -225,23 +266,40 @@ class TenantIsolationIT extends AbstractApiServerIT {
     }
 
     @Test
-    void userAGetsThroughOnTheSameReads() {
+    void userAGetsThroughOnTheSameReadsAndSeesItsOwnData() {
         HttpSession owner = HttpSession.browser(rest, port, "a@tenant.test", PASSWORD);
+        HttpSession b = HttpSession.browser(rest, port, "b@tenant.test", PASSWORD);
         for (Case c : CASES) {
             if (c.kind() == Kind.BY_ID_MUTATION) {
                 continue;   // mutations / provider calls are not replayed as A
             }
-            assertThat(owner.get(c.path().apply(ids)).getStatusCode()).as("%s as A", c.mapping())
-                    .isEqualTo(HttpStatus.OK);
+            ResponseEntity<String> res = owner.get(c.path().apply(ids));
+            assertThat(res.getStatusCode()).as("%s as A", c.mapping()).isEqualTo(HttpStatus.OK);
+            Function<Ids, String> own = OWN.get(c.mapping());
+            assertThat(own).as("%s declares what A must see (OWN)", c.mapping()).isNotNull();
+            if (own == COUNTS_DIFFER_FROM_B) {
+                assertThat(res.getBody()).as("%s: A's counts differ from B's empty workspace", c.mapping())
+                        .isNotEqualTo(b.get(c.path().apply(ids)).getBody());
+            } else {
+                assertThat(res.getBody()).as("%s as A shows A's own data", c.mapping()).contains(own.apply(ids));
+            }
         }
+    }
+
+    @Test
+    void ownMarkersAreDeclaredForExactlyTheReadCases() {
+        Set<String> reads = CASES.stream().filter(c -> c.kind() != Kind.BY_ID_MUTATION).map(Case::mapping)
+                .collect(Collectors.toSet());
+        assertThat(OWN.keySet()).isEqualTo(reads);
     }
 
     @Test
     void userBSeesNoneOfAsDataOnAnyListEndpoint() {
         HttpSession b = HttpSession.browser(rest, port, "b@tenant.test", PASSWORD);
         List<String> markers = List.of(ids.conn().toString(), ids.repo().toString(), ids.scan().toString(),
-                ids.group().toString(), ids.sub().toString(), ids.rule().toString(), "a/app-secret-name",
-                "Tenant A secret group", "tenant-a-rule");
+                ids.group().toString(), ids.sub().toString(), ids.rule().toString(), ids.ignoredSub().toString(),
+                ids.event().toString(), "a/app-secret-name", "Tenant A secret group", "Tenant A ignored group",
+                "tenant-a-rule", "fp-tenant-a", "tenant-a-category");
         for (Case c : CASES) {
             if (c.kind() != Kind.LIST) {
                 continue;
@@ -268,6 +326,7 @@ class TenantIsolationIT extends AbstractApiServerIT {
         assertThat(connections.findById(ids.conn())).isPresent();
         assertThat(rules.findById(ids.rule())).isPresent();
         assertThat(subIssues.findById(ids.sub()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(subIssues.findById(ids.ignoredSub()).orElseThrow().getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
         assertThat(jdbc.queryForObject("select count(*) from scan where workspace_id = ?", Long.class, a))
                 .isEqualTo(1L);
         assertThat(jdbc.queryForObject("select count(*) from ignore_rule where workspace_id <> ?", Long.class, a))
