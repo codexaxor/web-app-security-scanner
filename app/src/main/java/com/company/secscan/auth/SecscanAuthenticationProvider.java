@@ -24,8 +24,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  *       when there is no pending request, so every failed login costs the same two hash checks (no timing
  *       oracle for "this email has a pending sign-up").</li>
  * </ol>
- * Login failures are rate limited per (account, IP), per IP and per account ({@link RateLimits}); a correct
- * password for a pending/disabled account is not a failure. The {@code signup_request} lookup is workspace-agnostic by design (pre-tenant, CLAUDE.md rule 1 / D-098).
+ * Login failures are rate limited per (account, IP), per IP and per account ({@link RateLimits}): a slot is
+ * reserved atomically before the password check and refunded on success or on a correct password for a
+ * pending/disabled account (neither is a failure). The {@code signup_request} lookup is workspace-agnostic by design (pre-tenant, CLAUDE.md rule 1 / D-098).
  */
 public class SecscanAuthenticationProvider implements AuthenticationProvider {
 
@@ -59,8 +60,9 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
         String email = authentication.getName() == null ? ""
                 : authentication.getName().trim().toLowerCase(Locale.ROOT);
         String ip = currentClientIp();
-        // D-098: refuse BEFORE the password check once any failure limit is exceeded (JSON login and Basic alike).
-        long wait = ip == null ? 0 : limits.loginBlockedFor(email, ip);
+        // D-098 + review SF-1: reserve a slot on every failure key ATOMICALLY before the password check, so a burst
+        // of concurrent attempts cannot all pass a check-then-record race. Refunded when it was not a failure.
+        long wait = ip == null ? 0 : limits.reserveLogin(email, ip);
         if (wait > 0) {
             throw new LoginRateLimitedException(wait);
         }
@@ -70,6 +72,11 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
                 limits.loginSucceeded(email, ip);
             }
             return ok;
+        } catch (AccountInactiveException inactive) {
+            if (ip != null) {
+                limits.loginNotAFailure(email, ip);   // correct password for a disabled account: not a failure
+            }
+            throw inactive;
         } catch (BadCredentialsException bad) {
             Object credentials = authentication.getCredentials();
             String password = credentials == null ? "" : credentials.toString();
@@ -79,12 +86,12 @@ public class SecscanAuthenticationProvider implements AuthenticationProvider {
             String hash = pending.map(SignupRequest::getPasswordHash).orElse(dummyHash);
             boolean matches = encoder.matches(password, hash);
             if (pending.isPresent() && matches) {
-                throw new AccountPendingException();   // correct password: not a failure
+                if (ip != null) {
+                    limits.loginNotAFailure(email, ip);   // correct password: not a failure
+                }
+                throw new AccountPendingException();
             }
-            if (ip != null) {
-                limits.loginFailed(email, ip);
-            }
-            throw bad;
+            throw bad;   // the reservation stays counted as the failure
         }
     }
 

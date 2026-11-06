@@ -10,7 +10,13 @@ import com.company.secscan.user.AppUser;
 import com.company.secscan.user.AppUserRepository;
 import com.company.secscan.workspace.Workspace;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,8 +33,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * M8.10 item 4 / approval item 2 (D-098): failed sign-ins are limited per (account, IP) 5, per IP 20 and per
  * account 50 per 15 minutes — for the JSON login AND HTTP Basic, which share the counters. Once a key is over,
  * even the correct password gets 429 + Retry-After (no password check). A success clears its (account, IP) pair;
- * a correct password for a pending sign-up is not a failure. Client IPs come from X-Forwarded-For (loopback is a
- * trusted proxy by default).
+ * a correct password for a pending sign-up or a disabled account is not a failure. A slot is reserved atomically
+ * before the password check (review SF-1), so a concurrent burst gets at most 5 attempts through to bcrypt. Client
+ * IPs come from X-Forwarded-For (loopback is a trusted proxy by default).
  */
 class LoginRateLimitIT extends AbstractApiServerIT {
 
@@ -48,9 +55,12 @@ class LoginRateLimitIT extends AbstractApiServerIT {
     @BeforeEach
     void seed() {
         String hash = encoder.encode(PASSWORD);
-        for (String u : new String[] {"alice", "bob", "carol", "dave", "erin", "frank"}) {
+        for (String u : new String[] {"alice", "bob", "carol", "dave", "erin", "frank", "grace"}) {
             users.save(new AppUser(Workspace.DEFAULT_ID, u + "@test.local", hash, "admin"));
         }
+        AppUser disabled = new AppUser(Workspace.DEFAULT_ID, "disabled@test.local", hash, "admin");
+        disabled.disable(null, java.time.Instant.now());
+        users.save(disabled);
         signups.save(SignupRequest.pending("pending@test.local", hash, "Acme"));
     }
 
@@ -114,6 +124,43 @@ class LoginRateLimitIT extends AbstractApiServerIT {
         for (int i = 0; i < 7; i++) {   // correct password of a pending sign-up: always 403, never counted
             assertThat(login("pending", PASSWORD, "203.0.113.7").getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         }
+    }
+
+    @Test
+    void aConcurrentBurstOfWrongPasswordsGetsAtMostFiveThroughTheRestAre429() throws Exception {
+        int burst = 30;
+        ExecutorService pool = Executors.newFixedThreadPool(burst);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<HttpStatus>> results = new ArrayList<>();
+        for (int i = 0; i < burst; i++) {
+            results.add(pool.submit(() -> {
+                start.await();
+                return HttpStatus.valueOf(login("grace", WRONG, "203.0.113.20").getStatusCode().value());
+            }));
+        }
+        start.countDown();
+        int unauthorized = 0;
+        int limited = 0;
+        for (Future<HttpStatus> f : results) {
+            HttpStatus st = f.get();
+            if (st == HttpStatus.UNAUTHORIZED) {
+                unauthorized++;
+            } else if (st == HttpStatus.TOO_MANY_REQUESTS) {
+                limited++;
+            }
+        }
+        pool.shutdown();
+        // A 401 means the password was checked (bcrypt ran); the reservation lets at most 5 of them through.
+        assertThat(unauthorized).as("attempts that reached the password check").isEqualTo(5);
+        assertThat(limited).isEqualTo(burst - 5);
+    }
+
+    @Test
+    void theCorrectPasswordOfADisabledAccountIsNotAFailure() {
+        for (int i = 0; i < 7; i++) {
+            assertThat(login("disabled", PASSWORD, "203.0.113.21").getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+        assertThat(login("disabled", WRONG, "203.0.113.21").getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     private ResponseEntity<String> login(String user, String password, String ip) {

@@ -82,6 +82,29 @@ class SlidingWindowLimiterTest {
     }
 
     @Test
+    void refundGivesBackTheNewestEventOnly() {
+        for (int i = 0; i < 5; i++) {
+            limiter.record("k");
+            clock.advance(Duration.ofMinutes(1));
+        }
+        assertThat(limiter.retryAfterSeconds("k")).isPositive();
+        limiter.refund("k");                                   // drops the 10:04 event
+        assertThat(limiter.retryAfterSeconds("k")).isZero();
+        assertThat(limiter.tryAcquire("k")).isZero();          // the slot is usable again
+        assertThat(limiter.tryAcquire("k")).isPositive();      // and the limit still holds
+        limiter.refund("unknown");                             // no-op, no key created
+        assertThat(limiter.retryAfterSeconds("unknown")).isZero();
+    }
+
+    @Test
+    void refundingTheLastEventForgetsTheKey() {
+        SlidingWindowLimiter small = new SlidingWindowLimiter(5, Duration.ofMinutes(15), 3, clock);
+        small.record("k");
+        small.refund("k");
+        assertThat(small.trackedKeys()).isZero();
+    }
+
+    @Test
     void theNumberOfTrackedKeysIsBounded() {
         SlidingWindowLimiter small = new SlidingWindowLimiter(5, Duration.ofMinutes(15), 3, clock);
         for (int i = 0; i < 10; i++) {

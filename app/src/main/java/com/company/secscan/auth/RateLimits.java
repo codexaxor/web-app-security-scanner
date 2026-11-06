@@ -11,8 +11,9 @@ import org.springframework.stereotype.Component;
  * <ul>
  *   <li>sign-up: per client IP, {@code secscan.rate-limit.signup-per-ip} (5) per 15 min — every attempt counts;</li>
  *   <li>login FAILURES (JSON login and HTTP Basic alike): per (account, IP) 5, per IP 20, per account 50 per
- *       15 min. Any key over its limit blocks the attempt before the password is checked; a success clears that
- *       (account, IP) pair only.</li>
+ *       15 min. Every attempt reserves a slot on all three keys atomically BEFORE the password is checked (any key
+ *       at its limit → blocked, nothing counted); a success or a correct password for a pending/disabled account
+ *       refunds it, and a success also clears that (account, IP) pair.</li>
  * </ul>
  * Keys are bounded (LRU) so a flood of distinct IPs/emails cannot exhaust memory.
  */
@@ -43,20 +44,36 @@ public class RateLimits {
         return signupPerIp.tryAcquire(ip);
     }
 
-    /** 0 if a login attempt for (account, ip) may proceed, else the Retry-After seconds (longest block wins). */
-    public long loginBlockedFor(String account, String ip) {
-        return Math.max(loginPerAccountIp.retryAfterSeconds(pair(account, ip)),
+    /**
+     * Reserves a login attempt for (account, ip) ATOMICALLY, before the password is checked (M8.10 review SF-1):
+     * 0 = allowed and counted against all three keys; otherwise nothing is counted and the Retry-After seconds
+     * (longest block wins) are returned. Atomic across the three limiters, so a burst of concurrent attempts can
+     * never get more than the limit through to bcrypt. An attempt that turns out not to be a failure gives its
+     * reservation back ({@link #loginSucceeded}, {@link #loginNotAFailure}).
+     */
+    public synchronized long reserveLogin(String account, String ip) {
+        long wait = Math.max(loginPerAccountIp.retryAfterSeconds(pair(account, ip)),
                 Math.max(loginPerIp.retryAfterSeconds(ip), loginPerAccount.retryAfterSeconds(account)));
+        if (wait == 0) {
+            loginPerAccountIp.record(pair(account, ip));
+            loginPerIp.record(ip);
+            loginPerAccount.record(account);
+        }
+        return wait;
     }
 
-    public void loginFailed(String account, String ip) {
-        loginPerAccountIp.record(pair(account, ip));
-        loginPerIp.record(ip);
-        loginPerAccount.record(account);
-    }
-
-    public void loginSucceeded(String account, String ip) {
+    /** A successful login: refunds its reservation and clears that (account, IP) pair (D-098). */
+    public synchronized void loginSucceeded(String account, String ip) {
+        loginPerIp.refund(ip);
+        loginPerAccount.refund(account);
         loginPerAccountIp.reset(pair(account, ip));
+    }
+
+    /** The correct password for a pending/disabled account: not a failure, so the reservation is refunded. */
+    public synchronized void loginNotAFailure(String account, String ip) {
+        loginPerAccountIp.refund(pair(account, ip));
+        loginPerIp.refund(ip);
+        loginPerAccount.refund(account);
     }
 
     /** Test hook: forget every counter (the bean is a singleton shared by a cached test context). */

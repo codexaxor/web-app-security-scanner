@@ -15,7 +15,9 @@ import java.util.Objects;
  * emails) cannot exhaust memory. Thread-safe. Pure Java — no Spring — so it is unit-testable with a fixed clock.
  *
  * <p>Usage: {@link #retryAfterSeconds} to check without counting, {@link #record} to count an event (e.g. a failed
- * login), {@link #tryAcquire} to check-and-count in one step (e.g. a sign-up), {@link #reset} to forget a key.
+ * login), {@link #tryAcquire} to check-and-count in one step (e.g. a sign-up or a login reservation),
+ * {@link #refund} to give back the newest counted event (a reservation that turned out not to be a failure) and
+ * {@link #reset} to forget a key.
  */
 public final class SlidingWindowLimiter {
 
@@ -69,6 +71,18 @@ public final class SlidingWindowLimiter {
             record(key);
         }
         return wait;
+    }
+
+    /** Removes the newest counted event for {@code key} (no-op when there is none). */
+    public synchronized void refund(String key) {
+        Deque<Instant> q = pruned(key);
+        if (q == null) {
+            return;
+        }
+        q.pollLast();
+        if (q.isEmpty()) {
+            events.remove(key);
+        }
     }
 
     public synchronized void reset(String key) {
