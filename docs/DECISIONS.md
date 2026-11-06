@@ -14,6 +14,26 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-100 Unreadable stored token (2026-11-06, accepted)
+Context: M8.10 S12. A stored source token that cannot be decrypted — the `SECSCAN_ENCRYPTION_KEY` was rotated,
+or the ciphertext is damaged/not base64 — surfaced as a generic 500 in the api and a retried failure in the worker.
+The token itself is fine to re-enter; nothing else is wrong.
+Decision: `SourceCredentials.tokenFor` (the single decrypt path) maps a decrypt failure to
+`UnreadableCredentialException` (cause dropped — it can only describe key/ciphertext, never echoed); a MISSING key
+stays a configuration error.
+ - **API:** every decrypting API path answers **409 `CONNECTION_TOKEN_UNREADABLE`** ("… Re-enter the token for
+   this source."): GitLab project listing + select, provider-neutral repository listing + select, the branch
+   picker and the scan-branch PATCH.
+ - **Worker:** the scan **fails permanently** with that code (job `failed`, not retried) and **closes nothing**
+   (no reconcile; domain rule 3).
+ - **`POST /repositories/{id}/scans` still answers 202**: enqueueing does not need the token (its decrypt is only
+   the best-effort default-branch refresh, which already tolerates a missing token and provider errors); the
+   queued scan then fails in the worker with the code above.
+Consequences: a key rotation shows as an actionable 409 per source instead of 500s. **Revisit** the scan-start
+202 with a pre-check once the e2e seed holds a REAL ciphertext (today's seeded placeholder ciphertext would turn
+the existing `repositories.spec.ts` polling test red) — deferred item "pre-check token at scan start (needs
+real-ciphertext seed)". Proven by `UnreadableTokenApiIT`, `UnreadableTokenScanIT`, `SourceCredentialsTest`.
+
 ## D-099 Theme persistence: narrow localStorage allowlist (amends D-067(e)) (2026-11-05, accepted)
 Context: M8.11 makes the light/dark theme a user choice (light default, dark via a toggle) that must be
 remembered across reloads. D-067(e)'s security guard FAILS on `localStorage` anywhere in `ui/src` (no
