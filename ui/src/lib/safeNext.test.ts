@@ -36,6 +36,31 @@ describe("safeNextPath", () => {
     }
   });
 
+  it("rejects the encoded, case and whitespace variants (M8.13 review)", () => {
+    for (const evil of [
+      "%2F%2Fevil.com", // still-encoded "//" — no leading slash
+      "%252F%252Fevil.com", // double-encoded "//"
+      "/\tevil", // tab
+      "\t//evil.com", // leading tab before "//"
+      "/\u3000/evil", // ideographic space
+      "\u3000//evil.com",
+      "JAVASCRIPT:alert(1)",
+      "JaVaScRiPt:alert(1)",
+    ]) {
+      expect(safeNextPath(evil), `expected fallback for ${JSON.stringify(evil)}`).toBe(DEFAULT_NEXT);
+    }
+  });
+
+  it("a double-encoded next decoded once by the query string stays rejected", () => {
+    // ?next=%252F%252Fevil.com → URLSearchParams decodes once → "%2F%2Fevil.com" (no leading "/") → fallback.
+    expect(safeNextPath(new URLSearchParams("next=%252F%252Fevil.com").get("next"))).toBe(DEFAULT_NEXT);
+    // ?next=%2F%252F%252Fevil.com → "/%2F%2Fevil.com": a literal same-origin path (the %2F are not separators);
+    // if kept it must never resolve off-origin.
+    const kept = safeNextPath(new URLSearchParams("next=%2F%252F%252Fevil.com").get("next"));
+    expect(new URL(kept, "http://secscan.invalid").origin).toBe("http://secscan.invalid");
+    expect(kept.startsWith("//")).toBe(false);
+  });
+
   it("honors a custom fallback", () => {
     expect(safeNextPath("//evil.com", "/")).toBe("/");
   });
