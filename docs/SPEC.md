@@ -471,6 +471,35 @@ palette (focus restore, combobox, debounce), first-run checklist, whole-row keyb
 size 20 and the URL-addressable Repositories filters are proven by unit tests and e2e; AA contrast holds in both
 themes. See `docs/reports/M8.11.md`.
 
+## M8.13 Public homepage
+
+**Scope (D-103; `ui/` + `docs/` only).** A public marketing homepage at "/" and route-based sign-in — no
+`app/`/`core/`, migration, compose or API change, no new runtime deps, no external fonts/scripts/images/analytics;
+the guard (incl. the D-099 storage allowlist) is unchanged.
+
+- **Routes.** "/" public homepage; `/login` sign-in and `/signup` self sign-up (D-093) as standalone public
+  routes in a centred frame (brand → "/", "Back to home"); every existing app route keeps its path and, signed
+  out, redirects to `/login?next=<path>`; after sign-in → `next` (sanitized by `safeNextPath`, D-103) or
+  `/dashboard`. An explicit Sign out lands on plain `/login`. A signed-in visitor on "/" sees "Open dashboard".
+- **Page.** Nav (section links, light/dark toggle, Sign in, Create account), hero with a pure-HTML/CSS sample
+  feed preview, trust strip, "How a scan works" (4 steps), "What it finds" (5 finding types, no orphan card at any
+  width), FAQ accordion (7 items, first open), comparison with *pipeline-based tools* (no competitor is named),
+  CTA band, footer; meta title + description.
+- **Truthfulness.** Every product/security sentence is backed by code or a decision (S0 fact-check, see
+  `docs/reports/M8.13.md`): claims describe SecScan's behaviour, never the token's limits; "four open-source
+  scanners plus our own end-of-life check"; secrets as a keyed hash + first 4 characters; AES-256-GCM; KEV/EPSS
+  ranking stated for dependency risks only; no host-allowlist, offline or crash-cleanup claim.
+- **No data calls.** The homepage itself fetches nothing; the shared `/auth/session` boot probe is the only
+  request on a signed-out "/".
+- **Accessibility/responsive.** One h1; accordion buttons with `aria-expanded`/`aria-controls`; skip link;
+  focus-visible on navy; AA contrast in both themes; scroll-reveal only when motion is allowed (fully readable
+  without it); no horizontal page scroll at 1440/1280/390.
+
+**Done when:** the UI gate and e2e (×2) pass; e2e covers CTA → `/signup`, Sign in → `/login`, `next` restore,
+open-redirect rejection, no business-API calls on "/", sign-out → `/login` without `next`, and no horizontal
+scroll at 1440/1280/390; `safeNextPath` is unit-tested against the open-redirect variants. See
+`docs/reports/M8.13.md`.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
