@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "../auth";
 import { useTheme } from "../theme";
@@ -133,7 +133,7 @@ function TrustStrip() {
     { icon: "users", title: "Isolated workspaces", body: "Only your workspace sees your findings." },
   ];
   return (
-    <section className="hp-trust" aria-label="At a glance">
+    <section className="hp-trust hp-reveal" aria-label="At a glance">
       <ul className="hp-trust-grid">
         {items.map((it) => (
           <li className="hp-trust-item" key={it.title}>
@@ -175,7 +175,7 @@ function HowItWorks() {
     },
   ];
   return (
-    <section className="hp-section" id="how">
+    <section className="hp-section hp-reveal" id="how">
       <div className="hp-section-inner">
         <h2 className="hp-h2">How a scan works</h2>
         <p className="hp-lead">Connect a token and SecScan does the rest — without ever changing your repository.</p>
@@ -224,7 +224,7 @@ function WhatItFinds() {
     },
   ];
   return (
-    <section className="hp-section hp-section-alt" id="what">
+    <section className="hp-section hp-section-alt hp-reveal" id="what">
       <div className="hp-section-inner">
         <h2 className="hp-h2">What it finds</h2>
         <p className="hp-lead">Five kinds of risk across your repositories, in one deduplicated, prioritized feed.</p>
@@ -273,7 +273,7 @@ function Security() {
     },
   ];
   return (
-    <section className="hp-section" id="security">
+    <section className="hp-section hp-reveal" id="security">
       <div className="hp-section-inner">
         <h2 className="hp-h2">Safe to point at your code</h2>
         <p className="hp-lead">
@@ -357,7 +357,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 function Faq() {
   return (
-    <section className="hp-section hp-section-alt" id="faq">
+    <section className="hp-section hp-section-alt hp-reveal" id="faq">
       <div className="hp-section-inner hp-faq-inner">
         <h2 className="hp-h2">Frequently asked</h2>
         <div className="hp-faq">
@@ -389,11 +389,12 @@ function Comparison() {
     },
   ];
   return (
-    <section className="hp-section">
+    <section className="hp-section hp-reveal">
       <div className="hp-section-inner">
         <h2 className="hp-h2">SecScan vs pipeline-based tools</h2>
         <p className="hp-lead">Same risks covered — without a pipeline to wire up or anything added to your code.</p>
-        <table className="hp-compare">
+        <div className="hp-compare-wrap">
+          <table className="hp-compare">
           <thead>
             <tr>
               <th scope="col">
@@ -414,7 +415,8 @@ function Comparison() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </section>
   );
@@ -422,7 +424,7 @@ function Comparison() {
 
 function CtaBand({ signedIn }: { signedIn: boolean }) {
   return (
-    <section className="hp-ctaband">
+    <section className="hp-ctaband hp-reveal">
       <div className="hp-ctaband-inner">
         <h2 className="hp-ctaband-title">See what's hiding in your repositories.</h2>
         <p className="hp-ctaband-sub">Connect a read-only token and get your first scan in minutes.</p>
@@ -471,8 +473,38 @@ function HomeFooter({ signedIn }: { signedIn: boolean }) {
 
 export default function HomePage() {
   const { signedIn } = useAuth();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Scroll reveal is a progressive enhancement: sections render visible by default. Only when the browser
+  // allows motion (prefers-reduced-motion: no-preference) and supports IntersectionObserver do we opt the page
+  // into the hide-then-reveal animation by setting data-anim="on" and observing each .hp-reveal. Under
+  // reduced-motion, no JS, or an old browser, every section stays visible and nothing animates.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const motionOk =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
+    if (!motionOk || typeof IntersectionObserver === "undefined") return;
+    root.setAttribute("data-anim", "on");
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("is-visible");
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.05 },
+    );
+    root.querySelectorAll(".hp-reveal").forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+
   return (
-    <div className="hp" data-testid="homepage">
+    <div className="hp" data-testid="homepage" ref={rootRef}>
       <a className="skip-link" href="#hp-main">
         Skip to content
       </a>
