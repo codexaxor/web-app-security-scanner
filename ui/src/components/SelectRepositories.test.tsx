@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SelectRepositories from "./SelectRepositories";
@@ -65,7 +65,8 @@ describe("SelectRepositories (M8.11 review SF-1)", () => {
     const picker = (await screen.findByLabelText("Connection")) as HTMLSelectElement;
     const options = within(picker).getAllByRole("option");
     expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["gl1"]);
-    expect(listProjects).toHaveBeenCalledWith("gl1", 0, 50);
+    // The project list loads in an effect after the picker renders — wait for it (M8.10 review SF-6 flake).
+    await waitFor(() => expect(listProjects).toHaveBeenCalledWith("gl1", 0, 50));
   });
 
   it("a project-list failure is an inline error scoped to the list; the page (picker, selected) stays", async () => {
