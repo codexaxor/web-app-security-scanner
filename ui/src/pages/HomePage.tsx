@@ -68,7 +68,7 @@ function Hero({ signedIn }: { signedIn: boolean }) {
           </h1>
           <p className="hp-hero-sub">
             Leaked secrets, vulnerable dependencies and risky code in your GitHub and GitLab repositories — found
-            in minutes with a read-only token. Nothing is built, run or changed.
+            in minutes. SecScan only reads — nothing is built, run or changed.
           </p>
           <div className="hp-hero-cta">
             {signedIn ? (
@@ -100,8 +100,8 @@ function Hero({ signedIn }: { signedIn: boolean }) {
  */
 function ProductPreview() {
   const rows: { sev: string; label: string; title: string; meta: string }[] = [
-    { sev: "critical", label: "Critical", title: "Hardcoded AWS key in config/deploy.yml", meta: "Secret · in KEV" },
-    { sev: "high", label: "High", title: "log4j-core 2.14.1 → 2.17.1", meta: "Dependency · CVE-2021-44228" },
+    { sev: "critical", label: "Critical", title: "log4j-core 2.14.1 → 2.17.1", meta: "Dependency · CVE-2021-44228 · in KEV" },
+    { sev: "critical", label: "Critical", title: "Hardcoded AWS key in config/deploy.yml", meta: "Secret" },
     { sev: "high", label: "High", title: "SQL built from request input", meta: "Code · java/sql-injection" },
     { sev: "medium", label: "Medium", title: "S3 bucket without encryption", meta: "Infra · CKV_AWS_19" },
     { sev: "low", label: "Low", title: "Node 16 runtime past end-of-life", meta: "Runtime · EOL" },
@@ -131,7 +131,11 @@ function ProductPreview() {
 
 function TrustStrip() {
   const items: { icon: IconName; title: string; body: string }[] = [
-    { icon: "check", title: "Read-only access", body: "A read-only token — it can't push or change settings." },
+    {
+      icon: "check",
+      title: "Read access only",
+      body: "SecScan asks only for read access and never pushes or changes anything in your repositories.",
+    },
     { icon: "scan", title: "Nothing is built or run", body: "Files are only read, in a locked-down container." },
     { icon: "secret", title: "Findings, not your code", body: "A secret is kept as a keyed hash, never in full." },
     { icon: "users", title: "Isolated workspaces", body: "Only your workspace sees your findings." },
@@ -160,12 +164,12 @@ function HowItWorks() {
     {
       n: "1",
       title: "Connect",
-      body: "Add a read-only token for the GitHub or GitLab repositories you choose. No pipeline, no app to install.",
+      body: "Add a token with read access for the GitHub or GitLab repositories you choose. No pipeline, no app to install.",
     },
     {
       n: "2",
       title: "Copy",
-      body: "A shallow copy of one branch goes into a locked-down, throwaway container — non-root, read-only filesystem, no access to your systems.",
+      body: "A shallow copy of one branch goes into a locked-down, throwaway container — non-root, read-only filesystem, and no credentials except a one-time clone token.",
     },
     {
       n: "3",
@@ -175,7 +179,7 @@ function HowItWorks() {
     {
       n: "4",
       title: "Review",
-      body: "Findings are deduplicated and ranked by real-world exploit data. The copy is deleted when the scan ends.",
+      body: "Findings are deduplicated and prioritized; dependency risks are ranked with CISA KEV and EPSS. The copy is deleted after every finished scan.",
     },
   ];
   return (
@@ -209,7 +213,7 @@ function WhatItFinds() {
     {
       icon: "sca",
       title: "Vulnerable dependencies",
-      body: "Known CVEs in the libraries you depend on, with the version that fixes each one.",
+      body: "Known CVEs in the libraries you depend on, with the version that fixes each one, where a fix exists.",
     },
     {
       icon: "sast",
@@ -251,7 +255,7 @@ function WhatItFinds() {
 const FAQ_ITEMS: { q: string; a: string }[] = [
   {
     q: "If I connect GitHub or GitLab, how is it secured?",
-    a: "You give SecScan a read-only token for the repositories you choose. It can read code — it can't push, change settings or see anything else. All traffic uses verified HTTPS.",
+    a: "You give SecScan a token for the repositories you choose. SecScan asks only for read access and never pushes or changes anything in your repositories. All traffic uses verified HTTPS.",
   },
   {
     q: "Do you store my data?",
@@ -259,7 +263,7 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   },
   {
     q: "How does scanning work? Is my code copied?",
-    a: "Yes, briefly. A shallow copy of one branch goes into a locked-down, throwaway container — non-root, with a read-only filesystem and no access to your systems. Four open-source scanners plus our own end-of-life check read the files — nothing is built or run. When the scan ends, the copy is deleted.",
+    a: "Yes, briefly. A shallow copy of one branch goes into a locked-down, throwaway container — non-root, read-only filesystem, and no credentials except a one-time clone token. Four open-source scanners plus our own end-of-life check read the files — nothing is built or run. The copy is deleted after every finished scan.",
   },
   {
     q: "How is my API token protected?",
@@ -267,11 +271,11 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   },
   {
     q: "Why this instead of pipeline-based tools?",
-    a: "No pipeline to set up and nothing to add to your repo — connect a token and scan. Secrets, dependencies, code, infrastructure and outdated runtimes in one place, ranked by real-world exploit data (CISA KEV, EPSS) so you fix what matters first.",
+    a: "No pipeline to set up and nothing to add to your repo — connect a token and scan. Secrets, dependencies, code, infrastructure and outdated runtimes in one prioritized feed; dependency risks are ranked with CISA KEV and EPSS so you fix what matters first.",
   },
   {
     q: "Who can see my findings?",
-    a: "Only your workspace. Not even the platform admin can read them.",
+    a: "Only your workspace. Other workspaces, and the platform admin, can't see them in SecScan.",
   },
   {
     q: "Will it change my repository?",
@@ -325,7 +329,7 @@ function Comparison() {
   const rows: { label: string; secscan: string; pipeline: string }[] = [
     {
       label: "Setup",
-      secscan: "Connect a read-only token and scan.",
+      secscan: "Connect a token with read access and scan.",
       pipeline: "Add and maintain a pipeline job in every repository.",
     },
     {
@@ -378,7 +382,7 @@ function CtaBand({ signedIn }: { signedIn: boolean }) {
     <section className="hp-ctaband hp-reveal">
       <div className="hp-ctaband-inner">
         <h2 className="hp-ctaband-title">See what's hiding in your repositories.</h2>
-        <p className="hp-ctaband-sub">Connect a read-only token and get your first scan in minutes.</p>
+        <p className="hp-ctaband-sub">Connect a token with read access and get your first scan in minutes.</p>
         <div className="hp-hero-cta">
           {signedIn ? (
             <Link to="/dashboard" className="hp-btn hp-btn-primary hp-btn-lg">
