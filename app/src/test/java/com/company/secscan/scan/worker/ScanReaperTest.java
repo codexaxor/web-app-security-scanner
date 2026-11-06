@@ -172,6 +172,58 @@ class ScanReaperTest {
         verify(docker, never()).removeContainerCmd(anyString());
     }
 
+    @Test
+    void oneFailedContainerRemovalDoesNotStopTheOthers() {
+        RemoveContainerCmd failing = mock(RemoveContainerCmd.class);
+        when(docker.removeContainerCmd("cid-bad")).thenReturn(failing);
+        when(failing.withForce(true)).thenReturn(failing);
+        when(failing.exec()).thenThrow(new RuntimeException("conflict: removal in progress"));
+        stubContainers(List.of(
+                container("cid-ok-1", scannerLabels(MY_INSTANCE, UUID.randomUUID().toString())),
+                container("cid-bad", scannerLabels(MY_INSTANCE, UUID.randomUUID().toString())),
+                container("cid-ok-2", scannerLabels(MY_INSTANCE, UUID.randomUUID().toString()))), List.of());
+
+        ScanReaper.ReapResult result = reaper.reap();
+
+        assertThat(result.containersRemoved()).isEqualTo(2);
+        verify(docker).removeContainerCmd("cid-ok-1");
+        verify(docker).removeContainerCmd("cid-ok-2");
+        verify(removeCmd, org.mockito.Mockito.times(2)).exec();
+    }
+
+    @Test
+    void reportsUnlabelledContainersAtInfoOnceThenAtDebug() {
+        Container legacy = container("cid-legacy",
+                Map.of("secscan.component", "scanner", "secscan.scan", UUID.randomUUID().toString()));
+        ListContainersCmd mine1 = listCmd(List.of(), null);
+        ListContainersCmd all1 = listCmd(List.of(legacy), null);
+        ListContainersCmd mine2 = listCmd(List.of(), null);
+        ListContainersCmd all2 = listCmd(List.of(legacy), null);
+        when(docker.listContainersCmd()).thenReturn(mine1, all1, mine2, all2);
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ScanReaper.class);
+        ch.qos.logback.classic.Level before = logger.getLevel();
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        try {
+            reaper.reap();
+            reaper.reap();
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(before);
+        }
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> legacyEvents = appender.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("no instance label"))
+                .toList();
+        assertThat(legacyEvents).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getLevel)
+                .containsExactly(ch.qos.logback.classic.Level.INFO, ch.qos.logback.classic.Level.DEBUG);
+        verify(docker, never()).removeContainerCmd(anyString());
+    }
+
     // --- dirs ---------------------------------------------------------------
 
     @Test
@@ -226,6 +278,37 @@ class ScanReaperTest {
         assertThat(result.dirsRemoved()).isZero();
         assertThat(Files.isSymbolicLink(link)).isTrue();       // the link itself is left alone
         assertThat(Files.exists(sentinelFile)).isTrue();        // and nothing behind it was touched
+    }
+
+    @Test
+    void aSymlinkInsideAStaleDirIsRemovedAsALinkAndItsTargetSurvives() throws IOException {
+        Path sentinel = Files.createDirectories(workRoot.resolve("reaper-target-" + UUID.randomUUID()));
+        Path sentinelFile = Files.writeString(sentinel.resolve("keep.txt"), "do not delete");
+        Path stale = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()).resolve("out"))
+                .getParent();
+        Files.createSymbolicLink(stale.resolve("out").resolve("escape"), sentinel);
+        Files.createSymbolicLink(stale.resolve("file-link"), sentinelFile);
+
+        ScanReaper.ReapResult result = reaper.reap();
+
+        assertThat(result.dirsRemoved()).isEqualTo(1);
+        assertThat(stale).doesNotExist();
+        assertThat(sentinelFile).exists().hasContent("do not delete");
+    }
+
+    @Test
+    void aWorkRootReachedThroughASymlinkIsStillSweptCorrectly() throws IOException {
+        // Real-path containment (review N2) must not break a legitimately symlinked work root.
+        Path linkedRoot = workRoot.resolve("linked-root");
+        Path realRoot = Files.createDirectories(workRoot.resolve("real-root"));
+        Files.createSymbolicLink(linkedRoot, realRoot);
+        props.setWorkRoot(linkedRoot.toString());
+        Path stale = Files.createDirectories(realRoot.resolve(MY_INSTANCE).resolve(UUID.randomUUID().toString()));
+
+        ScanReaper.ReapResult result = reaper.reap();
+
+        assertThat(result.dirsRemoved()).isEqualTo(1);
+        assertThat(stale).doesNotExist();
     }
 
     @Test

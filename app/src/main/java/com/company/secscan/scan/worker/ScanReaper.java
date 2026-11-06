@@ -67,6 +67,7 @@ public class ScanReaper {
     }
 
     private volatile boolean startupReapDone;
+    private volatile boolean legacyReported;
 
     /**
      * The periodic sweep. Its first tick is one interval after startup: the STARTUP sweep is not scheduled but run
@@ -151,9 +152,15 @@ public class ScanReaper {
                 .filter(c -> c.getLabels() == null || !c.getLabels().containsKey("secscan.instance"))
                 .count();
         if (legacy > 0) {
-            log.info("Scan reaper left {} scanner container(s) with no instance label untouched "
-                    + "(created before instance-id labelling)", legacy);
+            // Review N3: INFO once (the first sweep after startup), DEBUG afterwards — not every 10 minutes.
+            if (!legacyReported) {
+                log.info("Scan reaper left {} scanner container(s) with no instance label untouched "
+                        + "(created before instance-id labelling; remove them manually)", legacy);
+            } else {
+                log.debug("Scan reaper: {} scanner container(s) with no instance label still present", legacy);
+            }
         }
+        legacyReported = true;
         return removed;
     }
 
@@ -164,6 +171,8 @@ public class ScanReaper {
         if (!Files.isDirectory(instanceRoot, LinkOption.NOFOLLOW_LINKS)) {
             return new DirSweep(0, 0);
         }
+        // The fully resolved instance root (the configured work root may itself sit behind a symlink).
+        Path realInstanceRoot = instanceRoot.toRealPath();
         int removed = 0;
         int failed = 0;
         try (DirectoryStream<Path> children = Files.newDirectoryStream(instanceRoot)) {
@@ -183,7 +192,7 @@ public class ScanReaper {
                 // Review S2: one bad entry (unreadable sub-dir, vanished file, ...) is counted and skipped; it must
                 // never stop the sweep of the remaining leftovers (which may hold token files).
                 try {
-                    if (shouldReapDir(instanceRoot, child)) {
+                    if (shouldReapDir(realInstanceRoot, child)) {
                         // Under ActiveScans' lock: re-checked live, and the scan cannot become live mid-deletion.
                         boolean[] gone = {false};
                         boolean ran = activeScans.runIfInactive(child.getFileName().toString(),
@@ -194,7 +203,7 @@ public class ScanReaper {
                             failed++;
                         }
                     }
-                } catch (RuntimeException e) {
+                } catch (RuntimeException | IOException e) {
                     failed++;
                 }
             }
@@ -203,20 +212,22 @@ public class ScanReaper {
     }
 
     /**
-     * A direct child of the instance root is reapable iff: its name is a scan id (UUID), the scan is not live, it is
-     * a real directory (NOT a symlink — a symlink is never followed), and its real path is still a direct child
-     * of the work root (so a symlink named like a scan id cannot redirect deletion outside the instance root).
+     * A listed entry is reapable iff: its name is a scan id (UUID); the scan is not live; it is a real directory,
+     * NOT a symlink (checked without following links, so a link named like a scan id is never followed); and its
+     * fully resolved real path is a direct child of the resolved instance root (review N2). The last check is what
+     * stops a deletion from leaving the instance sub-tree if the instance dir (or an ancestor below the work root)
+     * was swapped for a symlink after the listing began.
      */
-    private boolean shouldReapDir(Path instanceRoot, Path child) {
+    private boolean shouldReapDir(Path realInstanceRoot, Path child) throws IOException {
         String name = child.getFileName().toString();
         if (!isScanDirName(name) || activeScans.isActive(name)) {
             return false;
         }
-        if (Files.isSymbolicLink(child) || !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
-            return false;
+        if (!Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
+            return false;   // a symlink (to anything) or a plain file
         }
-        Path parent = child.toAbsolutePath().normalize().getParent();
-        return instanceRoot.equals(parent);
+        Path real = child.toRealPath();
+        return realInstanceRoot.equals(real.getParent()) && real.getFileName().toString().equals(name);
     }
 
     private static boolean isScanDirName(String name) {

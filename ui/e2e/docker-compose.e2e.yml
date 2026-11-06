@@ -44,9 +44,6 @@ services:
       # intel tables (e.g. replacing epss_score from the live feed). Triage/toggle paths still run on demand.
       SECSCAN_INTEL_SCHEDULED_SYNC_ENABLED: "false"
       SECSCAN_SCANNER_POLLING_ENABLED: "false"
-      # D-102: the e2e stack runs NO worker and NO scanner, so nothing is ever launched or reaped here; this id
-      # is set only to keep the per-stack instance-id convention explicit (dev / smoke / e2e).
-      SECSCAN_INSTANCE_ID: "e2e"
       # D-098 / review SF-3: trust X-Forwarded-For only from the ui nginx's pinned address, never the subnet.
       SECSCAN_TRUSTED_PROXIES: ${SECSCAN_E2E_UI_IP:-10.203.2.10}
     ports:

@@ -26,7 +26,7 @@ run, `ScanWorkspace` replaces it when this run is the scan's only holder, else t
  - **containers:** lists with a daemon-side filter on BOTH labels — `secscan.component=scanner` AND
    `secscan.instance=<own id>` — and force-removes those whose `secscan.scan` is not currently live; a
    different instance's or an unlabelled pre-change container is never returned, so never removed (pre-change
-   ones are counted and logged only);
+   ones are counted only — INFO on the first sweep, DEBUG afterwards);
  - **dirs:** per-scan dirs live at `<workRoot>/<instanceId>/<scanId>` (same absolute path on host and in the
    worker, so D-022 holds; `ScanWorkspace` creates the instance sub-dir `0700` on demand). The reaper deletes
    only UUID-named direct children of ITS OWN sub-tree `<workRoot>/<ownInstanceId>`, never following a symlink
