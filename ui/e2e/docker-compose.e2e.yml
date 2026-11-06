@@ -44,8 +44,8 @@ services:
       # intel tables (e.g. replacing epss_score from the live feed). Triage/toggle paths still run on demand.
       SECSCAN_INTEL_SCHEDULED_SYNC_ENABLED: "false"
       SECSCAN_SCANNER_POLLING_ENABLED: "false"
-      # D-098: trust X-Forwarded-For only from the e2e network (the ui nginx), never from elsewhere.
-      SECSCAN_TRUSTED_PROXIES: ${SECSCAN_E2E_SUBNET:-10.203.2.0/24}
+      # D-098 / review SF-3: trust X-Forwarded-For only from the ui nginx's pinned address, never the subnet.
+      SECSCAN_TRUSTED_PROXIES: ${SECSCAN_E2E_UI_IP:-10.203.2.10}
     ports:
       - "127.0.0.1:8091:8080"
     depends_on:
@@ -64,6 +64,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:5274:80"
+    networks:
+      default:
+        ipv4_address: ${SECSCAN_E2E_UI_IP:-10.203.2.10}
     depends_on:
       api:
         condition: service_healthy

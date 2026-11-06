@@ -161,8 +161,11 @@ Basic alike). Fair use per workspace: **one running scan** (further scans queue)
 
 The client IP for those limits honours `X-Forwarded-For` only from `SECSCAN_TRUSTED_PROXIES` (default: loopback
 only). In compose the ui nginx overwrites that header with its direct peer, and the stack runs on a pinned subnet
-(`SECSCAN_COMPOSE_SUBNET`, default `10.203.0.0/24`; smoke `10.203.1.0/24`, e2e `10.203.2.0/24`) that compose
-trusts by default. Change it only if it clashes with a local/VPN route. **After upgrading to this version, run
+(`SECSCAN_COMPOSE_SUBNET`, default `10.203.0.0/24`; smoke `10.203.1.0/24`, e2e `10.203.2.0/24`) in which nginx has
+a pinned address (`SECSCAN_UI_IP`, default `10.203.0.10`; smoke `10.203.1.10`, e2e `10.203.2.10`) — the ONLY peer
+the api trusts (not the whole subnet, which includes the Docker gateway). Change both only if they clash with a
+local/VPN route. Behind a host-side TLS proxy every client may share one IP key until that proxy's client IP is
+carried through (M8.9). **After upgrading to this version, run
 `docker compose down` once (without `-v` — keep `postgres-data`) and `docker network rm
 web-app-security-scanner_default`, so the network is recreated with the pinned subnet.**
 
