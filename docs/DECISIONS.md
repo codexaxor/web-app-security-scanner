@@ -14,6 +14,36 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-103 Public homepage + route-based sign-in (2026-11-07, accepted)
+Context: M8.13 adds a public marketing homepage. Until now the app shell rendered the sign-in gate (and, M8.10,
+the sign-up form at `/signup`) IN PLACE of any route when signed out, so "/" could not be a public page.
+Decision (`ui/` only; no API change):
+ - **"/" is public** (the homepage, `HomePage.tsx`); **`/login`** (sign-in, `LoginPage.tsx`) and **`/signup`**
+   (self sign-up, D-093) are standalone public routes in a shared centred frame (`AuthShell`: `main` landmark,
+   brand linking to "/", "Back to home"). Existing app routes keep their paths (no `/app` prefix).
+ - **Signed-out app routes → `/login?next=<path+search>`** (`Layout.tsx`); after sign-in `/login` redirects to
+   `next` or `/dashboard`. While the `/auth/session` check runs, the shell renders an empty busy `main`, `/login`
+   a busy frame without the form, and the homepage invisible CTA placeholders — no flash of app content, of the
+   sign-in form, or of "Sign in / Create account" for a signed-in visitor.
+ - **`safeNextPath` policy** (`ui/src/lib/safeNext.ts`, the only open-redirect gate): `next` is kept only if it
+   (1) is a non-empty string; (2) starts with exactly one "/" — not "//" and not "/\"; (3) contains no
+   backslash anywhere; (4) contains no ASCII control character (U+0000–U+001F, U+007F) and no whitespace
+   (incl. Unicode spaces such as U+3000); (5) resolved against a sentinel origin, stays on that origin.
+   Anything else (absolute URL, any scheme incl. `javascript:` in any case, bare word, encoded "//" that is not
+   a leading "/") falls back to `/dashboard`. `next` is decoded once by the query string; a once-decoded
+   double-encoded value is a literal same-origin path.
+ - **The shared `/auth/session` probe stays on "/"** (the AuthProvider boot check, D-092): the homepage needs it
+   to show a signed-in visitor "Open dashboard". It is the only request on a signed-out "/"; the homepage makes
+   no business-data call (unit + e2e tested).
+ - **An explicit Sign out lands on plain `/login` (no `next`)** — `AuthProvider.signedOutByUser`, reset on
+   sign-in — so the next person to sign in starts on the dashboard, not the previous user's page. An expired
+   session (401) still keeps `next`. **Supersedes M8 change 10** ("route restore after sign-out → re-auth",
+   `M8-worklog.md` row 10) for an explicit sign-out only (owner decision 2026-11-07); `onboarding.spec`
+   now asserts sign-out → `/login` → re-auth → `/dashboard`.
+Consequences: deep links survive sign-in; the homepage is cacheable static UI. Homepage copy describes SecScan's
+behaviour, not token limits (SecScan does not yet refuse over-scoped tokens — deferred, see the M8.13 register).
+(D-102 is taken on `feature/m8.14-scan-reaper` — scan leftovers reaper.)
+
 ## D-102 Scan leftovers reaped on worker start + periodically (2026-11-07, accepted)
 Context: M8.13 fact-check (claim 6). After a worker crash/restart a scanner container and the per-scan host
 workspace dir (including its one-time token file) can linger; nothing reaped them — `ScanPoller`'s stale-lease
@@ -1745,6 +1775,11 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
+  - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
+    milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;
+    a broader token is accepted (GitHub fine-grained PATs expose no scopes at all). Until then the homepage
+    claims only SecScan's behaviour ("asks only for read access and never pushes or changes anything").
 - M8.x train `/review-pr` deferred register (recorded 2026-10-28, for a later milestone):
   - **Feed category-filter options ignore sibling filters (M8.6 N4):** `GET /issue-groups/categories` computes its
     distinct level-2 categories + counts honouring only `repositoryId` + `view` + `includeInactive` — NOT the

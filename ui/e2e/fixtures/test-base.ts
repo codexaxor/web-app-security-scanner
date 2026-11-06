@@ -92,11 +92,12 @@ export async function forceTheme(page: Page, theme: "light" | "dark"): Promise<v
 }
 
 /**
- * Signs in through the in-app gate using the per-run bootstrap admin credentials. Navigates to `path` FIRST (a
- * full load that wipes the in-memory credentials), then signs in there — the gate preserves the URL, so the
- * requested route renders after sign-in (route restore). Credentials are never reloaded across a page.goto.
+ * Signs in using the per-run bootstrap admin credentials. Navigates to `path` FIRST; a signed-out app route
+ * redirects to /login?next=<path> (M8.13), so the sign-in form appears and, after sign-in, the requested route
+ * renders (route restore via ?next). `path` defaults to an app route for this reason — "/" is now the public
+ * homepage, which has no sign-in form. Credentials are never reloaded across a page.goto.
  */
-export async function signIn(page: Page, path = "/"): Promise<void> {
+export async function signIn(page: Page, path = "/dashboard"): Promise<void> {
   await page.goto(path);
   // D-092: the session cookie may already be active (a second signIn in the same context, e.g. a light/dark
   // loop), so sign in only when the gate is actually showing. Wait for the app to settle into one or the other.

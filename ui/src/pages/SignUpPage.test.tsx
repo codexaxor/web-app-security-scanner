@@ -38,7 +38,7 @@ describe("SignUpPage (M8.10)", () => {
     const done = await screen.findByTestId("signup-done");
     expect(done.textContent).toContain("your request was received");
     expect(done.textContent).not.toContain("server text");
-    expect(screen.getByRole("link", { name: "Back to sign in" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: "Back to sign in" }).getAttribute("href")).toBe("/login");
     expect(signUp).toHaveBeenCalledWith({ email: "a@b.example", password: "correct-horse-battery", workspaceName: "Acme" });
   });
 

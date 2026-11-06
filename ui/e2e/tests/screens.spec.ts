@@ -3,13 +3,17 @@ import { test, signIn, forceTheme } from "../fixtures/test-base";
 // M8.11 S10 screenshot pass: every main page at 1440 and 390 (phone), in light AND dark. Saved under
 // ./artifacts/screens (gitignored, bind-mounted to the host). Not an oracle — a capture pass. The theme is set
 // via the D-099 `secscan-theme` key (the UI no longer follows prefers-color-scheme), so dark captures are real.
+// M8.13: capture with reduced motion so the homepage's scroll-reveal is disabled (it reveals on scroll, which a
+// fullPage screenshot does not do) and every section is visible in the capture.
+test.use({ reducedMotion: "reduce" });
 
 const COMMONS_TEXT = "40000000-0000-0000-0000-000000000001"; // an issue group → the feed side panel
 const CORE_ID = "20000000-0000-0000-0000-000000000001"; // core-keycloak repository
 
 // [name, path, needsSignIn]
 const SCREENS: [string, string, boolean][] = [
-  ["login", "/", false],
+  ["home", "/", false],
+  ["login", "/login", false],
   ["dashboard", "/dashboard", true],
   ["feed", "/feed", true],
   ["feed-panel", `/feed/${COMMONS_TEXT}`, true],

@@ -377,6 +377,22 @@
 .signin-brand .brand-mark {
   color: var(--accent);
 }
+/* M8.13: the brand on /login and /signup is a link home — keep it looking like the wordmark. */
+a.signin-brand {
+  color: var(--text);
+  text-decoration: none;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+a.signin-brand:hover .brand {
+  text-decoration: underline;
+}
+.auth-shell-home {
+  margin: var(--sp-4) 0 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
 /* Login card (M8.11): the sign-in form sits in a surface card for a polished, focused screen. */
 .signin-form {
   max-width: none;

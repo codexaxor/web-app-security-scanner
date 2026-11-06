@@ -74,7 +74,7 @@ for (const theme of ["light", "dark"] as const) {
 
       test(`awaiting ${theme} ${w}`, async ({ page }) => {
         await forceTheme(page, theme);
-        await page.goto("/");
+        await page.goto("/login");
         await page.getByLabel("Email").fill(PENDING_EMAIL);
         await page.getByLabel("Password").fill(PASSWORD);
         await page.getByRole("button", { name: /continue|sign in/i }).click();

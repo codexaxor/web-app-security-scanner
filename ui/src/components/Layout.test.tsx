@@ -1,9 +1,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Layout from "./Layout";
 import { useAuth } from "../auth";
+
+/** Stands in for the /login route so a signed-out redirect out of the shell resolves and exposes `?next`. */
+function LoginProbe() {
+  const [params] = useSearchParams();
+  const { search } = useLocation();
+  return <div data-testid="login-probe" data-next={params.get("next") ?? ""} data-search={search} />;
+}
 
 vi.mock("../auth", () => ({ useAuth: vi.fn() }));
 vi.mock("../theme", () => ({ useTheme: () => ({ theme: "light", setTheme: () => {}, toggle: () => {} }) }));
@@ -18,10 +25,11 @@ function signedIn(demoMode = false, operator = false) {
     operator,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: false,
   });
 }
 
-function signedOut() {
+function signedOut(byUser = false) {
   vi.mocked(useAuth).mockReturnValue({
     checking: false,
     signedIn: false,
@@ -31,6 +39,7 @@ function signedOut() {
     operator: false,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: byUser,
   });
 }
 
@@ -40,6 +49,7 @@ function renderAt(path: string) {
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
+          <Route path="/login" element={<LoginProbe />} />
           <Route element={<Layout />}>
             <Route path="*" element={<div>page</div>} />
           </Route>
@@ -117,15 +127,26 @@ describe("M8.10 tenancy in the shell", () => {
     expect(screen.getByTestId("user-menu-workspace").textContent).toContain("Acme Security");
   });
 
-  it("signed out: the gate offers a real Create account link, and /signup renders the sign-up form", () => {
+  it("signed out: redirects out of the shell to /login, remembering the requested route in ?next (M8.13)", () => {
     signedOut();
     renderAt("/dashboard");
-    expect(screen.getByRole("link", { name: "Create account" }).getAttribute("href")).toBe("/signup");
+    // The gate no longer renders in place; the shell bounces to the dedicated sign-in page.
+    expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+    expect(screen.getByTestId("login-probe").getAttribute("data-next")).toBe("/dashboard");
     cleanup();
 
     signedOut();
-    renderAt("/signup");
-    expect(screen.getByTestId("signup-form")).not.toBeNull();
-    expect(screen.queryByRole("heading", { name: "Sign in" })).toBeNull();
+    renderAt("/repositories/20000000-0000-0000-0000-000000000001?tab=issues");
+    expect(screen.getByTestId("login-probe").getAttribute("data-next")).toBe(
+      "/repositories/20000000-0000-0000-0000-000000000001?tab=issues",
+    );
+  });
+
+  it("after an explicit Sign out: redirects to plain /login with no ?next (M8.13 review)", () => {
+    signedOut(true);
+    renderAt("/repositories/20000000-0000-0000-0000-000000000001?tab=issues");
+    const probe = screen.getByTestId("login-probe");
+    expect(probe.getAttribute("data-next")).toBe("");
+    expect(probe.getAttribute("data-search")).toBe("");
   });
 });
