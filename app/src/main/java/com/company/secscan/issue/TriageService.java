@@ -80,8 +80,7 @@ public class TriageService {
     /** Ignore one sub-issue (subissue scope). The match value is fingerprint, or rule|file for SAST (D-062). */
     @Transactional
     public IgnoreRuleView ignoreSubIssue(UUID workspaceId, UUID subIssueId, String reason) {
-        SubIssue sub = subIssues.findById(subIssueId)
-                .filter(s -> workspaceId.equals(s.getWorkspaceId()))
+        SubIssue sub = subIssues.findByIdAndWorkspaceId(subIssueId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such sub-issue."));
         requireReason(reason);
         String matchValue = IgnoreMatcher.subIssueMatchValue(toFinding(sub, groupKeyOf(workspaceId, sub.getGroupId())));
@@ -238,11 +237,9 @@ public class TriageService {
             ids.add(s.getGroupId());
         }
         Map<UUID, String> out = new HashMap<>();
-        groups.findAllById(ids).forEach(g -> {
-            if (workspaceId.equals(g.getWorkspaceId())) {
-                out.put(g.getId(), g.getGroupKey());
-            }
-        });
+        if (!ids.isEmpty()) {
+            groups.findByWorkspaceIdAndIdIn(workspaceId, ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        }
         return out;
     }
 

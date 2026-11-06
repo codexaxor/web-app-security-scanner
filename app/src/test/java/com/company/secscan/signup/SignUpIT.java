@@ -121,9 +121,14 @@ class SignUpIT extends AbstractApiServerIT {
         assertInvalid(signUp("long@acme.test", "é".repeat(37), "Acme"));             // 74 bytes > 72
         assertInvalid(signUp("blank@acme.test", PASSWORD, "   "));
         assertInvalid(signUp("wide@acme.test", PASSWORD, "x".repeat(81)));
+        assertInvalid(signUp("\u00fcnicode@acme.test", PASSWORD, "Acme"));               // review N-3: ASCII only
+        assertInvalid(signUp("reserved1@acme.test", PASSWORD, "Default"));              // review N-6
+        assertInvalid(signUp("reserved2@acme.test", PASSWORD, "  dEfAuLt "));
         assertThat(requests.count()).isZero();
         assertThat(signUp("ok@acme.test", "twelve-chars", "x".repeat(80)).getStatusCode())
                 .isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(signUp("near@acme.test", PASSWORD, "Default Two").getStatusCode())
+                .as("only the exact reserved name is refused").isEqualTo(HttpStatus.ACCEPTED);
     }
 
     @Test

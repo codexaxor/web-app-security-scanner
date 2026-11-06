@@ -57,3 +57,8 @@ create index idx_signup_request_status_created on signup_request (status, create
 -- Fast "does this workspace already have a running job?" for the claimer. V6 constrains
 -- scan_job.state to queued|running|done|failed, so this is exactly the running set.
 create index idx_scan_job_workspace_running on scan_job (workspace_id) where state = 'running';
+
+-- ---------------------------------------------------------------- foreign-key indexes (M8.10 review N-1)
+create index idx_signup_request_decided_by on signup_request (decided_by);
+create index idx_signup_request_workspace on signup_request (workspace_id);
+create index idx_app_user_status_changed_by on app_user (status_changed_by);

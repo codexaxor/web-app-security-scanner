@@ -76,6 +76,9 @@ public class OperatorUserService {
     @Transactional
     public UserAdminView enable(UUID userId, UUID operatorId) {
         AppUser user = require(userId);
+        if (user.isActive()) {
+            return view(user, names(user));   // review N-4: already active → no-op, the audit fields are kept
+        }
         user.enable(operatorId, Instant.now());
         users.saveAndFlush(user);
         log.info("User {} re-enabled by the operator", user.getId());

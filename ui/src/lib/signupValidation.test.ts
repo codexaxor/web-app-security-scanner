@@ -17,6 +17,13 @@ describe("validateSignUp (M8.10, mirrors SignupService)", () => {
     expect(validateSignUp({ ...ok, workspaceName: "x".repeat(80) }).workspaceName).toBeUndefined();
   });
 
+  it("rejects a non-ASCII email and the reserved workspace name Default (any case) — review N-3/N-6", () => {
+    expect(validateSignUp({ ...ok, email: "\u00fcser@b.example" }).email).toMatch(/ASCII/);
+    expect(validateSignUp({ ...ok, workspaceName: "Default" }).workspaceName).toMatch(/reserved/);
+    expect(validateSignUp({ ...ok, workspaceName: "  dEFAULT " }).workspaceName).toMatch(/reserved/);
+    expect(validateSignUp({ ...ok, workspaceName: "Default Two" }).workspaceName).toBeUndefined();
+  });
+
   it("counts code points for the minimum and UTF-8 bytes for the bcrypt maximum", () => {
     expect(validateSignUp({ ...ok, password: "🔒".repeat(11) }).password).toMatch(/12/); // 22 UTF-16 units
     expect(validateSignUp({ ...ok, password: "🔒".repeat(12) }).password).toBeUndefined(); // 48 bytes

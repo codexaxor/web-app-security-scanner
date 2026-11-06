@@ -73,6 +73,10 @@ class V23MigrationIT {
         assertThat(indexExists("uq_app_user_single_operator")).isTrue();
         assertThat(indexExists("uq_signup_request_pending_email")).isTrue();
         assertThat(indexExists("idx_scan_job_workspace_running")).isTrue();
+        // review N-1: the new foreign keys are indexed
+        assertThat(indexExists("idx_signup_request_decided_by")).isTrue();
+        assertThat(indexExists("idx_signup_request_workspace")).isTrue();
+        assertThat(indexExists("idx_app_user_status_changed_by")).isTrue();
         assertThat(count("select count(*) from app_user where is_operator")).isZero();
     }
 

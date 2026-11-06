@@ -38,6 +38,9 @@ public interface IssueGroupRepository extends JpaRepository<IssueGroup, UUID> {
 
     Optional<IssueGroup> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
+    /** The groups with these ids IN this workspace only (review N-8: the query filters, not the caller). */
+    java.util.List<IssueGroup> findByWorkspaceIdAndIdIn(UUID workspaceId, java.util.Collection<UUID> ids);
+
     /**
      * The M8 Feed query (OD-14 item 3): workspace-scoped, filtered by repository/type, a status set (Focus =
      * {@code open}; All = {@code open, ignored}; solved never shown), an optional severity band range

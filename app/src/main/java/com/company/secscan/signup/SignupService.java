@@ -32,6 +32,8 @@ public class SignupService {
     static final int MAX_WORKSPACE_NAME = 80;
     static final int MAX_EMAIL = 254;
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+    /** The seeded Default workspace's name (D-011): reserved, so a tenant cannot look like Default (review N-6). */
+    static final String RESERVED_WORKSPACE_NAME = "Default";
 
     private final SignupRequestRepository requests;
     private final AppUserRepository users;
@@ -80,6 +82,10 @@ public class SignupService {
         if (email.length() > MAX_EMAIL || !EMAIL.matcher(email).matches()) {
             throw invalid("email: must be a valid email address");
         }
+        // Review N-3: printable ASCII only, so Java's and Postgres's lower() always agree (ck_signup_request_email).
+        if (!email.chars().allMatch(c -> c > 0x20 && c < 0x7f)) {
+            throw invalid("email: must use ASCII characters only");
+        }
         if (password == null || password.codePointCount(0, password.length()) < MIN_PASSWORD_CHARS) {
             throw invalid("password: must be at least " + MIN_PASSWORD_CHARS + " characters");
         }
@@ -89,6 +95,9 @@ public class SignupService {
         if (workspaceName.isEmpty() || workspaceName.length() > MAX_WORKSPACE_NAME
                 || workspaceName.chars().anyMatch(Character::isISOControl)) {
             throw invalid("workspaceName: 1 to " + MAX_WORKSPACE_NAME + " characters, no control characters");
+        }
+        if (workspaceName.equalsIgnoreCase(RESERVED_WORKSPACE_NAME)) {
+            throw invalid("workspaceName: \"" + RESERVED_WORKSPACE_NAME + "\" is reserved; choose another name");
         }
     }
 

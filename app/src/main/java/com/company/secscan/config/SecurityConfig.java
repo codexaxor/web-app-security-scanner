@@ -173,8 +173,8 @@ public class SecurityConfig {
 
     /**
      * CSRF is required for an unsafe method on the browser chain, except {@code POST /auth/login} (the token is
-     * issued by it) and {@code POST /auth/signup} (public, sessionless,
-             JSON-only). Safe methods are already excluded here; HTTP Basic never reaches this chain.
+     * issued by it) and {@code POST /auth/signup} (public, sessionless, JSON-only). Safe methods are already
+     * excluded here; HTTP Basic never reaches this chain.
      */
     private static RequestMatcher csrfRequiredMatcher() {
         return request -> !SAFE_METHODS.contains(request.getMethod()) && !LOGIN.matches(request)

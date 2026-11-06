@@ -164,6 +164,21 @@ class SignUpApprovalIT extends AbstractApiServerIT {
     }
 
     @Test
+    void enablingAnAlreadyActiveUserIsANoOpThatKeepsTheAuditFields() {
+        UUID id = pending("calm@acme.test", "Calm");
+        operator.post("/api/v1/admin/sign-ups/" + id + "/approve", "{}");
+        AppUser before = users.findByEmail("calm@acme.test").orElseThrow();
+        assertThat(before.getStatusChangedAt()).isNull();
+
+        var res = operator.post("/api/v1/admin/users/" + before.getId() + "/enable", "{}");
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(HttpSession.field(res.getBody(), "status")).isEqualTo("active");
+        AppUser after = users.findById(before.getId()).orElseThrow();
+        assertThat(after.getStatusChangedAt()).isNull();
+        assertThat(after.getStatusChangedBy()).isNull();
+    }
+
+    @Test
     void theOperatorCannotBeDisabledAndUnknownUsersAre404() {
         UUID operatorId = users.findByEmail("operator@test.local").orElseThrow().getId();
         var res = operator.post("/api/v1/admin/users/" + operatorId + "/disable", "{}");

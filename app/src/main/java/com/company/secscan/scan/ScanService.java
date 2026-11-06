@@ -203,8 +203,7 @@ public class ScanService {
     }
 
     private Repository requireScannable(UUID workspaceId, UUID repositoryId, boolean requireActive) {
-        Repository repo = repositories.findById(repositoryId)
-                .filter(r -> r.getWorkspaceId().equals(workspaceId))
+        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
         if (requireActive && !repo.isActive()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
