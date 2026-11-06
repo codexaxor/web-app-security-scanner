@@ -14,6 +14,13 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-101 Relaxed password minimum (temporary) (2026-11-06, accepted)
+Context: sign-up required min 12 chars (M8.10).
+Decision: sign-up password minimum = 2 characters; maximum unchanged (72 bytes, bcrypt); bcrypt, login rate
+limits and operator approval unchanged.
+Consequences: weak passwords are guessable; mitigated by rate limits + approval.
+Revisit when: before the first external tenant — add to the D-096 gate list.
+
 ## D-100 Unreadable stored token (2026-11-06, accepted)
 Context: M8.10 S12. A stored source token that cannot be decrypted — the `SECSCAN_ENCRYPTION_KEY` was rotated,
 or the ciphertext is damaged/not base64 — surfaced as a generic 500 in the api and a retried failure in the worker.
@@ -117,6 +124,8 @@ Addendum (2026-11-06, M8.10 review N-5): gate item **(4) volume caps** — befor
 cap on PENDING sign-ups (global, so a distributed sign-up flood cannot fill the operator queue; the per-IP limit
 alone does not stop it) and a cap on connections per workspace (fair use limits active repositories only, D-097).
 Not built in M8.10.
+Addendum (2026-11-06, D-101): gate item **(5) password minimum** — before the first external tenant, restore a
+stronger password minimum (D-101 temporarily relaxed the sign-up minimum from 12 to 2 characters).
 
 ## D-095 UI theme: light default + dark toggle (2026-11-05, accepted; record only)
 Context: the M8.11 UI redesign.

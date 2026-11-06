@@ -2,7 +2,7 @@
 // problem before submitting. The server stays authoritative. Pure, unit-tested.
 import type { SignUpRequest } from "../api";
 
-export const MIN_PASSWORD_CHARS = 12;
+export const MIN_PASSWORD_CHARS = 2; // D-101: temporarily relaxed from 12; restore before first external tenant
 export const MAX_PASSWORD_BYTES = 72; // bcrypt's input limit
 export const MAX_WORKSPACE_NAME = 80;
 /** The seeded Default workspace's name: reserved at sign-up (M8.10 review N-6). */
