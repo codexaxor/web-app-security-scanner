@@ -27,7 +27,7 @@ public class SignupService {
 
     private static final Logger log = LoggerFactory.getLogger(SignupService.class);
 
-    static final int MIN_PASSWORD_CHARS = 12;
+    static final int MIN_PASSWORD_CHARS = 2;   // D-101: temporarily relaxed from 12; restore before first external tenant
     static final int MAX_PASSWORD_BYTES = 72;            // bcrypt ignores bytes beyond 72
     static final int MAX_WORKSPACE_NAME = 80;
     static final int MAX_EMAIL = 254;

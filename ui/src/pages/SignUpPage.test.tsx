@@ -25,9 +25,9 @@ function fill(email: string, password: string, workspace: string) {
 
 describe("SignUpPage (M8.10)", () => {
   it("explains field problems before submitting and does not call the API", async () => {
-    fill("not-an-email", "short", "");
+    fill("not-an-email", "a", ""); // D-101: 1 char < 2 min
     expect(await screen.findByText("Enter a valid email address.")).not.toBeNull();
-    expect(screen.getByText(/at least 12 characters/)).not.toBeNull();
+    expect(screen.getByText(/at least 2 characters/)).not.toBeNull();
     expect(screen.getByLabelText("Work email").getAttribute("aria-invalid")).toBe("true");
     expect(signUp).not.toHaveBeenCalled();
   });

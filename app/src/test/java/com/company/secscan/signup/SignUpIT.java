@@ -27,7 +27,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * M8.10 item 3 (D-093/D-098): the public sign-up endpoint. A new email becomes ONE pending request (no workspace,
  * no app_user); an existing account, an already-pending email and a new email all get the IDENTICAL 202 (no account
  * enumeration) and nothing about an existing account changes. A rejected email may sign up again. Input is
- * validated (password ≥ 12 chars and ≤ 72 bytes, valid email, workspace name 1–80). JSON-only, no CSRF needed.
+ * validated (password ≥ 2 chars (D-101) and ≤ 72 bytes, valid email, workspace name 1–80). JSON-only, no CSRF needed.
  */
 class SignUpIT extends AbstractApiServerIT {
 
@@ -117,7 +117,7 @@ class SignUpIT extends AbstractApiServerIT {
     @Test
     void invalidInputIsA400WithoutCreatingAnything() {
         assertInvalid(signUp("not-an-email", PASSWORD, "Acme"));
-        assertInvalid(signUp("short@acme.test", "elevenchars", "Acme"));
+        assertInvalid(signUp("short@acme.test", "a", "Acme"));                       // D-101: 1 char < 2 min
         assertInvalid(signUp("long@acme.test", "é".repeat(37), "Acme"));             // 74 bytes > 72
         assertInvalid(signUp("blank@acme.test", PASSWORD, "   "));
         assertInvalid(signUp("wide@acme.test", PASSWORD, "x".repeat(81)));
@@ -125,7 +125,7 @@ class SignUpIT extends AbstractApiServerIT {
         assertInvalid(signUp("reserved1@acme.test", PASSWORD, "Default"));              // review N-6
         assertInvalid(signUp("reserved2@acme.test", PASSWORD, "  dEfAuLt "));
         assertThat(requests.count()).isZero();
-        assertThat(signUp("ok@acme.test", "twelve-chars", "x".repeat(80)).getStatusCode())
+        assertThat(signUp("ok@acme.test", "ab", "x".repeat(80)).getStatusCode())    // D-101: 2 chars accepted
                 .isEqualTo(HttpStatus.ACCEPTED);
         assertThat(signUp("near@acme.test", PASSWORD, "Default Two").getStatusCode())
                 .as("only the exact reserved name is refused").isEqualTo(HttpStatus.ACCEPTED);
