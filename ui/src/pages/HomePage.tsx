@@ -12,7 +12,18 @@ import Icon, { type IconName } from "../components/icons";
  * named. Every factual claim was fact-checked in S0; the copy matches the owner's final approved wording.
  */
 
-function HomeNav({ signedIn }: { signedIn: boolean }) {
+/**
+ * The visitor's auth state as the homepage sees it. "pending" = the shared /auth/session check has not answered
+ * yet: the CTA slots render a neutral, invisible placeholder so a signed-in visitor never sees "Sign in / Create
+ * account" flash before "Open dashboard" (M8.13 review nit).
+ */
+type Visitor = "pending" | "in" | "out";
+
+function CtaPending({ large = false }: { large?: boolean }) {
+  return <span className={`hp-cta-pending${large ? " hp-cta-pending-lg" : ""}`} aria-hidden="true" data-testid="cta-pending" />;
+}
+
+function HomeNav({ visitor }: { visitor: Visitor }) {
   const { theme, toggle } = useTheme();
   return (
     <header className="hp-nav">
@@ -36,7 +47,9 @@ function HomeNav({ signedIn }: { signedIn: boolean }) {
           >
             <Icon name={theme === "dark" ? "sun" : "moon"} />
           </button>
-          {signedIn ? (
+          {visitor === "pending" ? (
+            <CtaPending />
+          ) : visitor === "in" ? (
             <Link to="/dashboard" className="hp-btn hp-btn-primary">
               Open dashboard
             </Link>
@@ -56,7 +69,7 @@ function HomeNav({ signedIn }: { signedIn: boolean }) {
   );
 }
 
-function Hero({ signedIn }: { signedIn: boolean }) {
+function Hero({ visitor }: { visitor: Visitor }) {
   return (
     <section className="hp-hero">
       <div className="hp-hero-inner">
@@ -71,7 +84,9 @@ function Hero({ signedIn }: { signedIn: boolean }) {
             in minutes. SecScan only reads — nothing is built, run or changed.
           </p>
           <div className="hp-hero-cta">
-            {signedIn ? (
+            {visitor === "pending" ? (
+              <CtaPending large />
+            ) : visitor === "in" ? (
               <Link to="/dashboard" className="hp-btn hp-btn-primary hp-btn-lg">
                 Open dashboard
               </Link>
@@ -377,14 +392,16 @@ function Comparison() {
   );
 }
 
-function CtaBand({ signedIn }: { signedIn: boolean }) {
+function CtaBand({ visitor }: { visitor: Visitor }) {
   return (
     <section className="hp-ctaband hp-reveal">
       <div className="hp-ctaband-inner">
         <h2 className="hp-ctaband-title">See what's hiding in your repositories.</h2>
         <p className="hp-ctaband-sub">Connect a token with read access and get your first scan in minutes.</p>
         <div className="hp-hero-cta">
-          {signedIn ? (
+          {visitor === "pending" ? (
+            <CtaPending large />
+          ) : visitor === "in" ? (
             <Link to="/dashboard" className="hp-btn hp-btn-primary hp-btn-lg">
               Open dashboard
             </Link>
@@ -405,7 +422,7 @@ function CtaBand({ signedIn }: { signedIn: boolean }) {
   );
 }
 
-function HomeFooter({ signedIn }: { signedIn: boolean }) {
+function HomeFooter({ visitor }: { visitor: Visitor }) {
   return (
     <footer className="hp-footer">
       <div className="hp-footer-inner">
@@ -417,7 +434,11 @@ function HomeFooter({ signedIn }: { signedIn: boolean }) {
           <a href="#how">How it works</a>
           <a href="#what">What it finds</a>
           <a href="#faq">FAQ</a>
-          {signedIn ? <Link to="/dashboard">Dashboard</Link> : <Link to="/login">Sign in</Link>}
+          {visitor === "in" ? (
+            <Link to="/dashboard">Dashboard</Link>
+          ) : visitor === "out" ? (
+            <Link to="/login">Sign in</Link>
+          ) : null}
         </nav>
         <span className="hp-footer-note">Repository security scanning · read-only · no pipeline</span>
       </div>
@@ -426,7 +447,8 @@ function HomeFooter({ signedIn }: { signedIn: boolean }) {
 }
 
 export default function HomePage() {
-  const { signedIn } = useAuth();
+  const { checking, signedIn } = useAuth();
+  const visitor: Visitor = checking ? "pending" : signedIn ? "in" : "out";
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Scroll reveal is a progressive enhancement: sections render visible by default. Only when the browser
@@ -462,17 +484,17 @@ export default function HomePage() {
       <a className="skip-link" href="#hp-main">
         Skip to content
       </a>
-      <HomeNav signedIn={signedIn} />
+      <HomeNav visitor={visitor} />
       <main id="hp-main">
-        <Hero signedIn={signedIn} />
+        <Hero visitor={visitor} />
         <TrustStrip />
         <HowItWorks />
         <WhatItFinds />
         <Faq />
         <Comparison />
-        <CtaBand signedIn={signedIn} />
+        <CtaBand visitor={visitor} />
       </main>
-      <HomeFooter signedIn={signedIn} />
+      <HomeFooter visitor={visitor} />
     </div>
   );
 }

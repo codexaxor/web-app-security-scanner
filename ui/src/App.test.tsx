@@ -13,9 +13,9 @@ import { useAuth } from "./auth";
 vi.mock("./auth", () => ({ useAuth: vi.fn() }));
 vi.mock("./theme", () => ({ useTheme: () => ({ theme: "light", setTheme: () => {}, toggle: () => {} }) }));
 
-function setAuth(signedIn: boolean) {
+function setAuth(signedIn: boolean, checking = false) {
   vi.mocked(useAuth).mockReturnValue({
-    checking: false,
+    checking,
     signedIn,
     username: signedIn ? "demoadmin" : null,
     demoMode: false,
@@ -74,6 +74,38 @@ describe("public routes", () => {
   it('"/signup" renders the standalone sign-up form', () => {
     renderApp("/signup");
     expect(screen.getByTestId("signup-form")).not.toBeNull();
+  });
+
+  it('"/signup" sits in the centred public shell: a main landmark, the brand linking home, a link back home (B-2)', () => {
+    renderApp("/signup");
+    const main = screen.getByRole("main");
+    expect(main.contains(screen.getByTestId("signup-form"))).toBe(true);
+    expect(screen.getByRole("link", { name: "SecScan home" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: /Back to home/ }).getAttribute("href")).toBe("/");
+  });
+
+  it('"/login" sits in the same shell, with the brand linking to "/"', () => {
+    renderApp("/login");
+    expect(screen.getByRole("main").contains(screen.getByRole("heading", { name: "Sign in" }))).toBe(true);
+    expect(screen.getByRole("link", { name: "SecScan home" }).getAttribute("href")).toBe("/");
+  });
+
+  it('while the session check runs, "/login" shows a busy frame and no sign-in form (no flash)', () => {
+    setAuth(false, true);
+    renderApp("/login");
+    expect(screen.getByRole("main").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("heading", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it('while the session check runs, "/" shows CTA placeholders — no Sign in / Create account / Open dashboard', () => {
+    setAuth(false, true);
+    renderApp("/");
+    expect(screen.getByTestId("homepage")).not.toBeNull();
+    expect(screen.getAllByTestId("cta-pending").length).toBe(3);
+    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Create account" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open dashboard" })).toBeNull();
   });
 });
 

@@ -617,6 +617,17 @@
   font-size: var(--fs-sm);
 }
 
+/* --- CTA placeholder while the session check runs: reserves the button's space, shows nothing --- */
+.hp-cta-pending {
+  display: inline-block;
+  width: 9rem;
+  height: 34px; /* .hp-btn: 9px padding ×2 + 14px line + 2px border */
+}
+.hp-cta-pending-lg {
+  width: 12rem;
+  height: 44px; /* .hp-btn-lg: 13px ×2 + 16px + 2px */
+}
+
 /* --- scroll reveal (opt-in, motion only) --- */
 @media (prefers-reduced-motion: no-preference) {
   .hp[data-anim="on"] .hp-reveal {

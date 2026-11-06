@@ -1,6 +1,6 @@
 import { Navigate, useSearchParams } from "react-router";
 import { useAuth } from "../auth";
-import BrandMark from "../components/BrandMark";
+import AuthShell from "../components/AuthShell";
 import SignInGate from "../components/SignInGate";
 import { safeNextPath } from "../lib/safeNext";
 
@@ -11,25 +11,26 @@ import { safeNextPath } from "../lib/safeNext";
  *   - a `?next=` destination, sanitized to a same-origin path ({@link safeNextPath}) so a crafted link can never
  *     turn sign-in into an open redirect;
  *   - once the session is live, redirect to that destination (or /dashboard).
+ * It renders inside {@link AuthShell} (brand links to "/", a "Back to home" link), shared with /signup.
  * A signed-out visitor who deep-links a protected route is bounced here as /login?next=<that route> (see
  * Layout), so signing in lands them exactly where they were headed.
  */
 export default function LoginPage() {
-  const { signedIn } = useAuth();
+  const { checking, signedIn } = useAuth();
   const [params] = useSearchParams();
   const next = safeNextPath(params.get("next"));
 
+  // While the session check runs, show the neutral frame only — a signed-in visitor never sees the form flash.
+  if (checking) {
+    return <AuthShell busy />;
+  }
   if (signedIn) {
     return <Navigate to={next} replace />;
   }
 
   return (
-    <main className="shell-centered">
-      <div className="signin-brand">
-        <BrandMark />
-        <span className="brand">SecScan</span>
-      </div>
+    <AuthShell>
       <SignInGate />
-    </main>
+    </AuthShell>
   );
 }

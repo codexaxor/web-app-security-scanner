@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router";
 import Layout from "./components/Layout";
+import AuthShell from "./components/AuthShell";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import SignUpPage from "./pages/SignUpPage";
@@ -27,7 +28,14 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignUpPage />} />
+      <Route
+        path="/signup"
+        element={
+          <AuthShell>
+            <SignUpPage />
+          </AuthShell>
+        }
+      />
       <Route element={<Layout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/feed" element={<FeedPage />} />
