@@ -44,6 +44,8 @@ class ScanReaperTest {
 
     @TempDir
     Path workRoot;
+    /** This instance's sub-tree, {@code <workRoot>/<instanceId>} (D-102) — the only place the dir phase looks. */
+    private Path instanceRoot;
 
     @BeforeEach
     void setUp() {
@@ -51,6 +53,12 @@ class ScanReaperTest {
         props = new ScannerProperties();
         props.setInstanceId(MY_INSTANCE);
         props.setWorkRoot(workRoot.toString());
+        instanceRoot = workRoot.resolve(MY_INSTANCE);
+        try {
+            Files.createDirectories(instanceRoot);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
         activeScans = new ActiveScans();
         reaper = new ScanReaper(docker, props, activeScans);
 
@@ -167,7 +175,7 @@ class ScanReaperTest {
 
     @Test
     void removesStaleScanDirIncludingItsTokenFile() throws IOException {
-        Path stale = workRoot.resolve(UUID.randomUUID().toString());
+        Path stale = instanceRoot.resolve(UUID.randomUUID().toString());
         Files.createDirectories(stale.resolve("out"));
         Path token = Files.writeString(stale.resolve("token"), "super-secret-token-value");
         Files.writeString(stale.resolve("out").resolve("result.json"), "{}");
@@ -183,7 +191,7 @@ class ScanReaperTest {
     void keepsScanDirForLiveJob() throws IOException {
         String live = UUID.randomUUID().toString();
         activeScans.markActive(live);
-        Path dir = workRoot.resolve(live);
+        Path dir = instanceRoot.resolve(live);
         Files.createDirectories(dir.resolve("out"));
 
         ScanReaper.ReapResult result = reaper.reap();
@@ -194,7 +202,7 @@ class ScanReaperTest {
 
     @Test
     void ignoresDirsWhoseNameIsNotAScanId() throws IOException {
-        Path notUuid = workRoot.resolve("betterleaks-cache");
+        Path notUuid = instanceRoot.resolve("betterleaks-cache");
         Files.createDirectories(notUuid);
 
         ScanReaper.ReapResult result = reaper.reap();
@@ -206,10 +214,10 @@ class ScanReaperTest {
     @Test
     void doesNotFollowASymlinkNamedLikeAScanDir() throws IOException {
         // A sentinel dir OUTSIDE the work root, holding a file that must survive.
-        Path sentinel = Files.createDirectories(workRoot.getParent().resolve("reaper-sentinel-" + UUID.randomUUID()));
+        Path sentinel = Files.createDirectories(workRoot.resolve("reaper-sentinel-" + UUID.randomUUID()));
         Path sentinelFile = Files.writeString(sentinel.resolve("keep.txt"), "do not delete");
         // A symlink inside the work root whose NAME is a valid scan id, pointing at the sentinel dir.
-        Path link = workRoot.resolve(UUID.randomUUID().toString());
+        Path link = instanceRoot.resolve(UUID.randomUUID().toString());
         Files.createSymbolicLink(link, sentinel);
 
         ScanReaper.ReapResult result = reaper.reap();
@@ -219,12 +227,42 @@ class ScanReaperTest {
         assertThat(Files.exists(sentinelFile)).isTrue();        // and nothing behind it was touched
     }
 
+    @Test
+    void neverTouchesOldLayoutDirsDirectlyUnderTheWorkRootNorAnotherInstancesSubTree() throws IOException {
+        // Pre-D-102 layout: <workRoot>/<scanId> — left for a one-time manual cleanup, never reaped.
+        Path oldLayout = Files.createDirectories(workRoot.resolve(UUID.randomUUID().toString()));
+        Files.writeString(oldLayout.resolve("token"), "fake-old-token");
+        // Another instance sharing the same work root: <workRoot>/<other>/<scanId>.
+        Path foreign = Files.createDirectories(workRoot.resolve("inst-B").resolve(UUID.randomUUID().toString()));
+        // And one genuine leftover of THIS instance, to prove the sweep did run.
+        Path mine = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()));
+
+        ScanReaper.ReapResult result = reaper.reap();
+
+        assertThat(result.dirsRemoved()).isEqualTo(1);
+        assertThat(Files.exists(mine)).isFalse();
+        assertThat(Files.isDirectory(oldLayout)).isTrue();
+        assertThat(Files.exists(oldLayout.resolve("token"))).isTrue();
+        assertThat(Files.isDirectory(foreign)).isTrue();
+    }
+
+    @Test
+    void aMissingInstanceSubTreeIsNotAFailure() throws IOException {
+        Files.delete(instanceRoot);
+        Path oldLayout = Files.createDirectories(workRoot.resolve(UUID.randomUUID().toString()));
+
+        ScanReaper.ReapResult result = reaper.reap();
+
+        assertThat(result.dirsRemoved()).isZero();
+        assertThat(Files.isDirectory(oldLayout)).isTrue();
+    }
+
     // --- resilience ---------------------------------------------------------
 
     @Test
     void aContainerSweepFailureDoesNotStopTheReaperOrTheDirSweep() throws IOException {
         when(docker.listContainersCmd()).thenThrow(new RuntimeException("docker daemon unreachable"));
-        Path stale = workRoot.resolve(UUID.randomUUID().toString());
+        Path stale = instanceRoot.resolve(UUID.randomUUID().toString());
         Files.createDirectories(stale);
 
         AtomicReference<ScanReaper.ReapResult> captured = new AtomicReference<>();

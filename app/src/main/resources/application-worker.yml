@@ -9,7 +9,8 @@ spring:
 
 secscan:
   scanner:
-    # Ownership tag stamped on every scanner container; ScanReaper reaps ONLY leftovers carrying this id, never
-    # another stack's (dev / smoke / e2e / a Gradle IT run). Stable across restarts; one worker per id (D-102).
+    # Ownership tag stamped on every scanner container, and the name of this worker's sub-tree of the work root
+    # (<workRoot>/<instanceId>/<scanId>); ScanReaper reaps ONLY leftovers carrying this id, never another stack's
+    # (dev / smoke / a Gradle IT run). One plain path segment. Stable across restarts; one worker per id (D-102).
     # SECSCAN_INSTANCE_ID (not SECSCAN_SCANNER_INSTANCE_ID) so the one setting reads the same in every compose.
     instance-id: ${SECSCAN_INSTANCE_ID:default}

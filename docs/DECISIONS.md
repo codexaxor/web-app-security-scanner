@@ -24,22 +24,26 @@ Decision: a worker-side `ScanReaper` runs on startup and every `secscan.scanner.
    `secscan.instance=<own id>` — and force-removes those whose `secscan.scan` is not currently live; a
    different instance's or an unlabelled pre-change container is never returned, so never removed (pre-change
    ones are counted and logged only);
- - **dirs:** deletes only UUID-named direct children of its own work root, never following a symlink and never
-   leaving the work root.
+ - **dirs:** per-scan dirs live at `<workRoot>/<instanceId>/<scanId>` (same absolute path on host and in the
+   worker, so D-022 holds; `ScanWorkspace` creates the instance sub-dir `0700` on demand). The reaper deletes
+   only UUID-named direct children of ITS OWN sub-tree `<workRoot>/<ownInstanceId>`, never following a symlink
+   and never leaving that sub-tree. Another instance's sub-tree, and old-layout `<workRoot>/<scanId>` dirs left
+   from before this change, are never listed and so never touched (one-time manual cleanup, see the M8.14
+   report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`).
  - **"Live"** = a scan id in this worker's in-memory `ActiveScans` set, marked by `ScanJobProcessor` BEFORE the
    per-scan dir/container exists and cleared only AFTER both are gone — so an in-flight scan is never mistaken
    for a leftover, and a freshly (re)started worker (empty set) reaps every pre-existing leftover on the first
    tick.
  - **Ownership:** every scanner container is now also labelled `secscan.instance=<SECSCAN_INSTANCE_ID>`
-   (`ScannerProperties`, stable across restarts, default `"default"`; docker-compose=`dev`, compose-smoke=`smoke`,
-   e2e overlay=`e2e` though e2e runs no worker/scanner, Gradle ITs=`it-<random>`). dev and smoke also get
-   DISTINCT work roots (`/var/lib/secscan/scans` vs `/var/lib/secscan/scans-smoke`, env-only) so the dir phase of
-   one stack never sees another's dirs.
+   (`ScannerProperties`, stable across restarts, default `"default"`; docker-compose=`dev`, compose-smoke=`smoke`;
+   Gradle ITs use a random `it-<random>` per test JVM — `AbstractScanWorkerIT`, which every scanner-launching IT
+   extends, and `ScanReaperIT`). Stacks that share one work root (dev + smoke, or dev + a `bootRun` worker) are
+   safe because each instance only ever looks in its own sub-tree and its own labelled containers.
  - It NEVER changes job/scan/finding state (the stale-lease sweep stays the only requeue path; a failed scanner
    still closes nothing) and logs counts only — never a path (which could name a token file) and never token
    content. A reaper failure is swallowed and never stops the worker.
 Consequences: assumes ONE worker per instance id — `ActiveScans` is process-local, so two workers sharing one
-instance id (and one daemon) could reap each other's live containers. Revisit (a shared live-lease source) before
+instance id (and one daemon / work root) could reap each other's live containers and dirs. Revisit (a shared live-lease source) before
 running several workers with the same instance id. Proven by `ScanReaperTest` (default build) and `ScanReaperIT`
 (`-PliveReaper`, real daemon).
 

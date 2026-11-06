@@ -32,8 +32,8 @@ import org.springframework.stereotype.Component;
  *   <li>containers carrying BOTH scanner labels for THIS instance ({@code secscan.component=scanner} AND
  *       {@code secscan.instance=<own id>}) — a different instance's, or an unlabelled pre-change, container is
  *       never returned by the daemon-side filter, so it is never removed (its count is only logged); and</li>
- *   <li>direct children of THIS instance's work root whose name is a scan id (UUID), never following a
- *       symlink and never leaving the work root.</li>
+ *   <li>direct children of THIS instance's sub-tree {@code <workRoot>/<instanceId>} whose name is a scan id
+ *       (UUID), never following a symlink and never leaving that sub-tree.</li>
  * </ul>
  * One worker per instance id is assumed (D-102).
  */
@@ -125,14 +125,16 @@ public class ScanReaper {
     }
 
     private int reapDirs() throws IOException {
-        Path workRoot = Path.of(props.getWorkRoot()).toAbsolutePath().normalize();
-        if (!Files.isDirectory(workRoot)) {
+        // Only THIS instance's sub-tree (D-102): another instance's dirs, and old-layout scan dirs sitting directly
+        // under the work root, are never listed and so never touched.
+        Path instanceRoot = ScanWorkspace.instanceRoot(Path.of(props.getWorkRoot()), props.getInstanceId());
+        if (!Files.isDirectory(instanceRoot, LinkOption.NOFOLLOW_LINKS)) {
             return 0;
         }
         int removed = 0;
-        try (DirectoryStream<Path> children = Files.newDirectoryStream(workRoot)) {
+        try (DirectoryStream<Path> children = Files.newDirectoryStream(instanceRoot)) {
             for (Path child : children) {
-                if (shouldReapDir(workRoot, child) && deleteRecursively(child)) {
+                if (shouldReapDir(instanceRoot, child) && deleteRecursively(child)) {
                     removed++;
                 }
             }
@@ -141,11 +143,11 @@ public class ScanReaper {
     }
 
     /**
-     * A direct child of the work root is reapable iff: its name is a scan id (UUID), the scan is not live, it is
+     * A direct child of the instance root is reapable iff: its name is a scan id (UUID), the scan is not live, it is
      * a real directory (NOT a symlink — a symlink is never followed), and its real path is still a direct child
-     * of the work root (so a symlink named like a scan id cannot redirect deletion outside the work root).
+     * of the work root (so a symlink named like a scan id cannot redirect deletion outside the instance root).
      */
-    private boolean shouldReapDir(Path workRoot, Path child) {
+    private boolean shouldReapDir(Path instanceRoot, Path child) {
         String name = child.getFileName().toString();
         if (!isScanDirName(name) || activeScans.isActive(name)) {
             return false;
@@ -154,7 +156,7 @@ public class ScanReaper {
             return false;
         }
         Path parent = child.toAbsolutePath().normalize().getParent();
-        return workRoot.equals(parent);
+        return instanceRoot.equals(parent);
     }
 
     private static boolean isScanDirName(String name) {

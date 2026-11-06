@@ -39,7 +39,9 @@ public class ScannerProperties {
     /**
      * Ownership tag stamped on every scanner container (label {@code secscan.instance}) and used by
      * {@link ScanReaper}: a worker reaps ONLY leftovers carrying its own instance id, never another stack's
-     * (dev / smoke / e2e / a Gradle IT run). Stable across restarts; one worker per instance id (D-102).
+     * (dev / smoke / a Gradle IT run). It is also the name of this worker's sub-tree of the work root
+     * ({@code <workRoot>/<instanceId>/<scanId>}), so it must be one plain path segment. Stable across restarts;
+     * one worker per instance id (D-102).
      * Sourced from {@code SECSCAN_INSTANCE_ID} (see application-worker.yml), default {@code "default"}.
      */
     private String instanceId = "default";

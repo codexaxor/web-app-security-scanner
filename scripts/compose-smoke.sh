@@ -27,11 +27,11 @@ export SECSCAN_COMPOSE_SUBNET="${SECSCAN_SMOKE_SUBNET:-10.203.1.0/24}"
 export SECSCAN_UI_IP="${SECSCAN_SMOKE_UI_IP:-10.203.1.10}"
 export SECSCAN_TRUSTED_PROXIES="$SECSCAN_UI_IP"
 
-# D-102: give the smoke worker its OWN reaper instance id AND its OWN scan work root, distinct from the dev
-# stack's ("dev" / /var/lib/secscan/scans). Without this the two share a work root and the smoke worker's reaper
-# could delete the dev worker's scan dirs (the dir phase keys off the work root, not the instance id).
+# D-102: give the smoke worker its OWN reaper instance id, distinct from the dev stack's ("dev"). It shares the
+# dev work root (README-provisioned, already owned by the worker user): each instance keeps its scan dirs in its
+# own sub-tree <workRoot>/<instanceId>/, and the reaper only ever looks in its own, so dev and smoke never reap
+# each other's containers or dirs.
 export SECSCAN_INSTANCE_ID="${SECSCAN_SMOKE_INSTANCE_ID:-smoke}"
-export SECSCAN_SCAN_WORK_ROOT="${SECSCAN_SMOKE_WORK_ROOT:-/var/lib/secscan/scans-smoke}"
 
 # An inline override that (a) excludes the ui and (b) gives postgres/api random loopback host ports so the smoke
 # stack cannot collide with a running dev stack on 5432/8080.

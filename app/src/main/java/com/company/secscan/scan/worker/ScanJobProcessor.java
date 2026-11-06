@@ -165,7 +165,8 @@ public class ScanJobProcessor {
 
         ScanWorkspace ws;
         try {
-            ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), scan.getId().toString());
+            ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), props.getInstanceId(),
+                    scan.getId().toString());
         } catch (RuntimeException e) {
             // Config error (work root missing / not writable by the worker user): fail once, do not retry.
             state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",

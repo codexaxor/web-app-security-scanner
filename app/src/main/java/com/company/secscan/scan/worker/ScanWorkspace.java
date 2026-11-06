@@ -12,8 +12,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A per-scan working directory on the host work root (point 3 / D-022): {@code <workRoot>/<scanId>} with mode
- * {@code 0700}, holding the {@code out} bind-mount target and the optional one-time token file ({@code 0600}).
+ * A per-scan working directory on the host work root (point 3 / D-022):
+ * {@code <workRoot>/<instanceId>/<scanId>} with mode {@code 0700} (D-102: each worker instance owns its own
+ * sub-tree, so stacks that share one work root never see — or reap — each other's dirs), holding the {@code out} bind-mount target and the optional one-time token file ({@code 0600}).
  * Created before the container runs and deleted in a {@code finally} (so the token file never outlives the
  * scan). Because the worker shares the work root with the Docker daemon at the same absolute path, these are
  * also the host paths the container binds.
@@ -31,10 +32,33 @@ public final class ScanWorkspace implements AutoCloseable {
         this.outDir = outDir;
     }
 
-    public static ScanWorkspace create(Path workRoot, String scanId) {
+    /**
+     * This instance's sub-tree of the work root: {@code <workRoot>/<instanceId>}. The instance id must be one
+     * plain path segment (letters, digits, {@code . _ -}; not {@code .} or {@code ..}) so it can never point
+     * outside the work root.
+     */
+    public static Path instanceRoot(Path workRoot, String instanceId) {
+        if (instanceId == null || !instanceId.matches("[A-Za-z0-9._-]{1,64}")
+                || instanceId.equals(".") || instanceId.equals("..")) {
+            throw new IllegalArgumentException(
+                    "secscan.scanner.instance-id must be 1-64 chars of [A-Za-z0-9._-] and not '.' or '..'");
+        }
+        return workRoot.toAbsolutePath().normalize().resolve(instanceId);
+    }
+
+    public static ScanWorkspace create(Path workRoot, String instanceId, String scanId) {
         try {
-            Files.createDirectories(workRoot);
-            Path root = workRoot.resolve(scanId);
+            Path instanceRoot = instanceRoot(workRoot, instanceId);
+            if (!Files.isDirectory(instanceRoot)) {
+                Files.createDirectories(workRoot);
+                try {
+                    Files.createDirectory(instanceRoot,
+                            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+                } catch (java.nio.file.FileAlreadyExistsException e) {
+                    // created concurrently by another scan of this instance (maxParallel > 1) — fine
+                }
+            }
+            Path root = instanceRoot.resolve(scanId);
             Files.createDirectory(root,
                     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
             Path outDir = Files.createDirectory(root.resolve("out"),

@@ -91,20 +91,23 @@ class ScanReaperIT {
 
         // (a) leftover: THIS instance, not live, with a dir + token file → must be removed.
         String leftoverId = createContainer(ScannerContainerConfig.labels(leftover, props.getInstanceId()));
-        Path leftoverDir = Files.createDirectories(workRoot.resolve(leftover));
+        Path instanceRoot = workRoot.resolve(props.getInstanceId());   // D-102: <workRoot>/<instanceId>/<scanId>
+        Path leftoverDir = Files.createDirectories(instanceRoot.resolve(leftover));
         Files.writeString(leftoverDir.resolve("token"), "super-secret-token");
 
         // (b) live: THIS instance, registered live, with a dir → must be kept.
         activeScans.markActive(live);
         String liveId = createContainer(ScannerContainerConfig.labels(live, props.getInstanceId()));
-        Path liveDir = Files.createDirectories(workRoot.resolve(live));
+        Path liveDir = Files.createDirectories(instanceRoot.resolve(live));
 
         // (c) foreign: a DIFFERENT instance id → must be kept.
         String foreignId = createContainer(ScannerContainerConfig.labels(foreign, "it-other-instance"));
+        Path foreignDir = Files.createDirectories(workRoot.resolve("it-other-instance").resolve(foreign));
 
         // (d) no instance label (pre-change) → counted only, never removed.
         String noInstanceId = createContainer(
                 Map.of("secscan.component", "scanner", "secscan.scan", noInstance));
+        Path oldLayoutDir = Files.createDirectories(workRoot.resolve(noInstance));   // pre-D-102 layout
 
         ScanReaper.ReapResult result = reaper.reap();
 
@@ -116,6 +119,8 @@ class ScanReaperIT {
         assertThat(Files.isDirectory(liveDir)).as("a live scan's dir is kept").isTrue();
         assertThat(exists(foreignId)).as("another instance's container is kept").isTrue();
         assertThat(exists(noInstanceId)).as("an unlabelled pre-change container is kept").isTrue();
+        assertThat(Files.isDirectory(foreignDir)).as("another instance's dir (same work root) is kept").isTrue();
+        assertThat(Files.isDirectory(oldLayoutDir)).as("an old-layout dir under the work root is kept").isTrue();
     }
 
     private String createContainer(Map<String, String> labels) {
