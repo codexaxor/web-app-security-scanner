@@ -1,10 +1,12 @@
 package com.company.secscan.scan.worker;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,6 +25,8 @@ import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.parse.ScannerOutputParser;
 import com.company.secscan.source.ProviderRegistry;
 import com.company.secscan.source.SourceCredentials;
+import com.github.dockerjava.api.exception.NotFoundException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -30,6 +34,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * {@link ScanJobProcessor}'s workspace / live-registration lifecycle against a stubbed launcher (no Docker, no DB):
@@ -52,6 +58,8 @@ class ScanJobProcessorLifecycleTest {
     ScannerLauncher launcher;
     ActiveScans activeScans;
     ScanJobProcessor processor;
+    /** Whether the scan dir still existed when the processor released the scan (must be false). */
+    final AtomicBoolean dirExistedAtRelease = new AtomicBoolean(true);
 
     @BeforeEach
     void setUp() {
@@ -88,7 +96,14 @@ class ScanJobProcessorLifecycleTest {
 
         state = mock(ScanStateService.class);
         launcher = mock(ScannerLauncher.class);
-        activeScans = new ActiveScans();
+        activeScans = new ActiveScans() {
+            @Override
+            public synchronized void clear(String id) {
+                // Record what the reaper could see at the instant the scan stops being live.
+                dirExistedAtRelease.set(Files.exists(scanDir()));
+                super.clear(id);
+            }
+        };
         processor = new ScanJobProcessor(scans, jobs, repositories, connections, mock(SourceCredentials.class),
                 mock(GitLabClient.class), mock(RepositoryConnectionGuard.class), launcher,
                 mock(ScannerOutputParser.class), state, props, mock(GitLabHostPolicy.class),
@@ -132,5 +147,46 @@ class ScanJobProcessorLifecycleTest {
         verify(state, never()).failPermanently(any(), any(), any(), anyString(), anyString());
         assertThat(marker).exists();
         assertThat(activeScans.holders(scanId.toString())).as("only the other run's hold remains").isEqualTo(1);
+    }
+
+    // --- review S5: the scan is live for exactly the span of its dir + container ------------------------
+
+    /** How the stubbed launcher ends. */
+    enum LaunchOutcome { NORMAL_RETURN, TIMEOUT, RUNTIME_EXCEPTION, IMAGE_NOT_FOUND }
+
+    @ParameterizedTest
+    @EnumSource(LaunchOutcome.class)
+    void scanIsLiveDuringLaunchAndReleasedAfterwards(LaunchOutcome outcome) {
+        AtomicBoolean liveDuringRun = new AtomicBoolean();
+        AtomicBoolean dirDuringRun = new AtomicBoolean();
+        when(launcher.run(any())).thenAnswer(inv -> {
+            liveDuringRun.set(activeScans.isActive(scanId.toString()));
+            dirDuringRun.set(Files.isDirectory(scanDir()));
+            return switch (outcome) {
+                case NORMAL_RETURN -> new ScannerLauncher.LaunchResult(0, false, "");
+                case TIMEOUT -> new ScannerLauncher.LaunchResult(null, true, "");
+                case RUNTIME_EXCEPTION -> throw new IllegalArgumentException("boom");
+                case IMAGE_NOT_FOUND -> throw new NotFoundException("no such image");
+            };
+        });
+
+        processor.process(jobId);
+
+        verify(launcher).run(any());
+        assertThat(liveDuringRun).as("live while the container runs").isTrue();
+        assertThat(dirDuringRun).as("the workspace existed while live").isTrue();
+        assertThat(activeScans.isActive(scanId.toString())).as("released afterwards").isFalse();
+        assertThat(dirExistedAtRelease).as("workspace already gone at the moment of release").isFalse();
+        assertThat(scanDir()).doesNotExist();
+    }
+
+    @Test
+    void scanIsReleasedEvenWhenAnExceptionEscapesProcess() {
+        doThrow(new IllegalStateException("db down")).when(state).markRunning(workspaceId, scanId);
+
+        assertThatThrownBy(() -> processor.process(jobId)).isInstanceOf(IllegalStateException.class);
+
+        assertThat(activeScans.isActive(scanId.toString())).isFalse();
+        verify(launcher, never()).run(any());
     }
 }
