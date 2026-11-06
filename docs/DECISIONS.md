@@ -113,6 +113,10 @@ rule-pack licence re-check (SPEC "SAST rule licensing"), (2) scanner egress rest
 the Docker-socket risk (D-026). Self-managed source hosts stay on the operator allowlist — the SSRF guard (D-018,
 D-090) is unchanged; tenants cannot add hosts.
 Consequences: M8.10 ships the mechanism; going live externally is a separate, gated operator step.
+Addendum (2026-11-06, M8.10 review N-5): gate item **(4) volume caps** — before the first external tenant, add a
+cap on PENDING sign-ups (global, so a distributed sign-up flood cannot fill the operator queue; the per-IP limit
+alone does not stop it) and a cap on connections per workspace (fair use limits active repositories only, D-097).
+Not built in M8.10.
 
 ## D-095 UI theme: light default + dark toggle (2026-11-05, accepted; record only)
 Context: the M8.11 UI redesign.
