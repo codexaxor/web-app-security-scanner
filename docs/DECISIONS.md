@@ -32,7 +32,9 @@ run, `ScanWorkspace` replaces it when this run is the scan's only holder, else t
    only UUID-named direct children of ITS OWN sub-tree `<workRoot>/<ownInstanceId>`, never following a symlink
    and never leaving that sub-tree. Another instance's sub-tree, and old-layout `<workRoot>/<scanId>` dirs left
    from before this change, are never listed and so never touched (one-time manual cleanup, see the M8.14
-   report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`).
+   report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`). A leftover
+   that cannot be fully deleted (e.g. an unreadable sub-dir) is deleted as far as possible, counted
+   (`dirsFailed`, logged as a count) and skipped; the sweep always continues with the remaining leftovers.
  - **"Live"** = a scan id in this worker's in-memory `ActiveScans` registry (reference-counted per scan id, so a
    second concurrent run of one scan keeps it live), marked by `ScanJobProcessor` BEFORE the per-scan
    dir/container exists and released only AFTER both are gone; the reaper deletes each leftover under the

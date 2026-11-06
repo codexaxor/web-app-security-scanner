@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -255,6 +256,38 @@ class ScanReaperTest {
 
         assertThat(result.dirsRemoved()).isZero();
         assertThat(Files.isDirectory(oldLayout)).isTrue();
+    }
+
+    @Test
+    void anUnreadableSubDirIsCountedAndDoesNotStopTheSweepOfOtherLeftovers() throws IOException {
+        Assumptions.assumeFalse("root".equals(System.getProperty("user.name")),
+                "root ignores directory permissions, so an unreadable sub-dir cannot be simulated");
+        // A stuck leftover: its out/ dir is mode 000 with a file inside, so the walk cannot list it.
+        Path stuck = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()));
+        Path stuckToken = Files.writeString(stuck.resolve("token"), "fake-token-a");
+        Path locked = Files.createDirectories(stuck.resolve("out"));
+        Files.writeString(locked.resolve("result.json"), "{}");
+        // Several healthy leftovers, whichever order the directory listing yields them in.
+        List<Path> healthy = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            Path d = Files.createDirectories(instanceRoot.resolve(UUID.randomUUID().toString()));
+            Files.writeString(d.resolve("token"), "fake-token-" + i);
+            healthy.add(d);
+        }
+        Files.setPosixFilePermissions(locked, java.util.Set.of());
+        try {
+            ScanReaper.ReapResult result = reaper.reap();
+
+            assertThat(result.dirsRemoved()).isEqualTo(3);
+            assertThat(result.dirsFailed()).isEqualTo(1);
+            assertThat(healthy).allSatisfy(d -> assertThat(d).doesNotExist());
+            // Best effort inside the stuck dir: its token file still went, only the locked part remains.
+            assertThat(stuckToken).doesNotExist();
+            assertThat(stuck).isDirectory();
+        } finally {
+            Files.setPosixFilePermissions(locked,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        }
     }
 
     // --- startup gate (review S1) ---------------------------------------------

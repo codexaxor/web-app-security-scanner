@@ -3,15 +3,18 @@ package com.company.secscan.scan.worker;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.model.Container;
 import java.io.IOException;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -56,7 +59,11 @@ public class ScanReaper {
     }
 
     /** The outcome of one reap pass (counts only; returned for tests and logging). */
-    public record ReapResult(int containersRemoved, int dirsRemoved) {
+    public record ReapResult(int containersRemoved, int dirsRemoved, int dirsFailed) {
+    }
+
+    /** Counts from one dir sweep. */
+    private record DirSweep(int removed, int failed) {
     }
 
     private volatile boolean startupReapDone;
@@ -86,7 +93,7 @@ public class ScanReaper {
     /** Reap leftover containers and dirs. Never throws — a reaper failure must not stop the worker. */
     public ReapResult reap() {
         int containers = 0;
-        int dirs = 0;
+        DirSweep dirs = new DirSweep(0, 0);
         try {
             containers = reapContainers();
         } catch (RuntimeException e) {
@@ -99,11 +106,15 @@ public class ScanReaper {
             log.warn("Scan reaper: workspace-dir sweep failed ({}); leaving dirs for the next tick",
                     e.getClass().getSimpleName());
         }
-        if (containers > 0 || dirs > 0) {
+        if (containers > 0 || dirs.removed() > 0) {
             log.info("Scan reaper removed {} leftover scanner container(s) and {} leftover workspace dir(s)",
-                    containers, dirs);
+                    containers, dirs.removed());
         }
-        return new ReapResult(containers, dirs);
+        if (dirs.failed() > 0) {
+            log.warn("Scan reaper could not fully remove {} leftover workspace dir(s); retrying next tick",
+                    dirs.failed());
+        }
+        return new ReapResult(containers, dirs.removed(), dirs.failed());
     }
 
     private int reapContainers() {
@@ -146,28 +157,49 @@ public class ScanReaper {
         return removed;
     }
 
-    private int reapDirs() throws IOException {
+    private DirSweep reapDirs() throws IOException {
         // Only THIS instance's sub-tree (D-102): another instance's dirs, and old-layout scan dirs sitting directly
         // under the work root, are never listed and so never touched.
         Path instanceRoot = ScanWorkspace.instanceRoot(Path.of(props.getWorkRoot()), props.getInstanceId());
         if (!Files.isDirectory(instanceRoot, LinkOption.NOFOLLOW_LINKS)) {
-            return 0;
+            return new DirSweep(0, 0);
         }
         int removed = 0;
+        int failed = 0;
         try (DirectoryStream<Path> children = Files.newDirectoryStream(instanceRoot)) {
-            for (Path child : children) {
-                if (shouldReapDir(instanceRoot, child)) {
-                    // Under ActiveScans' lock: re-checked live, and the scan cannot become live mid-deletion.
-                    boolean[] gone = {false};
-                    activeScans.runIfInactive(child.getFileName().toString(),
-                            () -> gone[0] = deleteRecursively(child));
-                    if (gone[0]) {
-                        removed++;
+            Iterator<Path> it = children.iterator();
+            while (true) {
+                Path child;
+                try {
+                    if (!it.hasNext()) {
+                        break;
                     }
+                    child = it.next();
+                } catch (DirectoryIteratorException e) {
+                    // The listing itself broke; what was reaped so far stands, the rest waits for the next tick.
+                    failed++;
+                    break;
+                }
+                // Review S2: one bad entry (unreadable sub-dir, vanished file, ...) is counted and skipped; it must
+                // never stop the sweep of the remaining leftovers (which may hold token files).
+                try {
+                    if (shouldReapDir(instanceRoot, child)) {
+                        // Under ActiveScans' lock: re-checked live, and the scan cannot become live mid-deletion.
+                        boolean[] gone = {false};
+                        boolean ran = activeScans.runIfInactive(child.getFileName().toString(),
+                                () -> gone[0] = deleteRecursively(child));
+                        if (gone[0]) {
+                            removed++;
+                        } else if (ran) {
+                            failed++;
+                        }
+                    }
+                } catch (RuntimeException e) {
+                    failed++;
                 }
             }
         }
-        return removed;
+        return new DirSweep(removed, failed);
     }
 
     /**
@@ -197,23 +229,44 @@ public class ScanReaper {
     }
 
     /**
-     * Delete a scan-dir subtree, deepest first. {@link Files#walk} does not follow symlinks (no FOLLOW_LINKS), so
-     * a symlink entry inside is removed as a link and its target is left untouched. Returns true if the root is
-     * gone afterwards.
+     * Delete a scan-dir subtree, deepest first, carrying on past entries it cannot read or delete so that as much
+     * as possible (in particular a token file) goes even when part of the tree is stuck. Symlinks are never
+     * followed ({@link Files#walkFileTree} without FOLLOW_LINKS): a link is removed as a link and its target is
+     * left untouched. Returns true if the root is gone afterwards.
      */
-    private boolean deleteRecursively(Path root) {
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.deleteIfExists(p);
-                } catch (IOException e) {
-                    log.warn("Scan reaper: could not delete part of a leftover workspace dir");
+    private static boolean deleteRecursively(Path root) {
+        try {
+            Files.walkFileTree(root, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    tryDelete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    // Unreadable sub-dir: try removing it as-is (works if empty), then move on.
+                    tryDelete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException e) {
+                    tryDelete(dir);
+                    return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (IOException e) {
-            log.warn("Scan reaper: could not walk a leftover workspace dir");
-            return false;
+        } catch (IOException | RuntimeException e) {
+            // fall through to the existence check
         }
         return !Files.exists(root, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static void tryDelete(Path p) {
+        try {
+            Files.deleteIfExists(p);
+        } catch (IOException e) {
+            // counted by the caller via the root's existence; never logged with a path
+        }
     }
 }
