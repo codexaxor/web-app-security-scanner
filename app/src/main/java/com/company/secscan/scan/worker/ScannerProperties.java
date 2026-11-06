@@ -37,6 +37,17 @@ public class ScannerProperties {
     private boolean pollingEnabled = true;
     private long pollIntervalMs = 5000;
     /**
+     * Ownership tag stamped on every scanner container (label {@code secscan.instance}) and used by
+     * {@link ScanReaper}: a worker reaps ONLY leftovers carrying its own instance id, never another stack's
+     * (dev / smoke / e2e / a Gradle IT run). Stable across restarts; one worker per instance id (D-102).
+     * Sourced from {@code SECSCAN_INSTANCE_ID} (see application-worker.yml), default {@code "default"}.
+     */
+    private String instanceId = "default";
+    /** How often {@link ScanReaper} sweeps for leftovers (default every 10 minutes; configurable). */
+    private long reapIntervalMs = 600_000;
+    /** Delay before the first reap sweep after worker startup (the startup cleanup; configurable). */
+    private long reapInitialDelayMs = 10_000;
+    /**
      * TEST-ONLY: allow cloning a repository over {@code file:///src} from a local path. Default false — in
      * production the worker clones only over https to an allowlisted host (D-018). The offline fixture ITs set
      * this true; it must never be enabled in a real deployment.
@@ -161,6 +172,30 @@ public class ScannerProperties {
 
     public void setPollIntervalMs(long pollIntervalMs) {
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    public String getInstanceId() {
+        return instanceId;
+    }
+
+    public void setInstanceId(String instanceId) {
+        this.instanceId = instanceId;
+    }
+
+    public long getReapIntervalMs() {
+        return reapIntervalMs;
+    }
+
+    public void setReapIntervalMs(long reapIntervalMs) {
+        this.reapIntervalMs = reapIntervalMs;
+    }
+
+    public long getReapInitialDelayMs() {
+        return reapInitialDelayMs;
+    }
+
+    public void setReapInitialDelayMs(long reapInitialDelayMs) {
+        this.reapInitialDelayMs = reapInitialDelayMs;
     }
 
     public boolean isAllowLocalFileClone() {

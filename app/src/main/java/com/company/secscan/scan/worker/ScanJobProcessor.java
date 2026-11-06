@@ -65,12 +65,13 @@ public class ScanJobProcessor {
     private final ScannerProperties props;
     private final GitLabHostPolicy hostPolicy;
     private final com.company.secscan.source.ProviderRegistry providers;
+    private final ActiveScans activeScans;
 
     public ScanJobProcessor(ScanRepository scans, ScanJobRepository jobs, RepositoryRepository repositories,
                             GitlabConnectionRepository connections, SourceCredentials credentials, GitLabClient client,
                             RepositoryConnectionGuard guard, ScannerLauncher launcher, ScannerOutputParser parser,
                             ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy,
-                            com.company.secscan.source.ProviderRegistry providers) {
+                            com.company.secscan.source.ProviderRegistry providers, ActiveScans activeScans) {
         this.scans = scans;
         this.jobs = jobs;
         this.repositories = repositories;
@@ -84,6 +85,7 @@ public class ScanJobProcessor {
         this.props = props;
         this.hostPolicy = hostPolicy;
         this.providers = providers;
+        this.activeScans = activeScans;
     }
 
     public void process(UUID jobId) {
@@ -96,6 +98,20 @@ public class ScanJobProcessor {
         }
         UUID workspaceId = job.getWorkspaceId();
         Scan scan = scans.findByIdAndWorkspaceId(job.getScanId(), workspaceId).orElseThrow();
+        // M8.14: register this scan as live BEFORE any per-scan workspace dir or scanner container exists, and
+        // clear it (in finally) only AFTER both are gone, so ScanReaper never mistakes an in-flight scan for a
+        // crash/restart leftover. One worker per instance id is assumed (D-102).
+        String activeKey = scan.getId().toString();
+        activeScans.markActive(activeKey);
+        try {
+            processClaimed(job, workspaceId, scan);
+        } finally {
+            activeScans.clear(activeKey);
+        }
+    }
+
+    private void processClaimed(ScanJob job, UUID workspaceId, Scan scan) {
+        UUID jobId = job.getId();
         Repository repo = repositories.findByIdAndWorkspaceId(scan.getRepositoryId(), workspaceId).orElseThrow();
         GitlabConnection conn = repo.getConnectionId() == null ? null
                 : connections.findByIdAndWorkspaceId(repo.getConnectionId(), workspaceId).orElse(null);
@@ -277,7 +293,7 @@ public class ScanJobProcessor {
         return new ScannerLaunchSpec(scan.getId().toString(), props.getImage(), cloneUrl,
                 branch, props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
                 props.getTmpfsSize(), props.getMemory().toBytes(), props.getCpus(), props.getPidsLimit(),
-                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser);
+                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser, props.getInstanceId());
     }
 
     private static String httpsCloneUrl(String baseUrl, String pathWithNamespace) {

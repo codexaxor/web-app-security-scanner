@@ -6,3 +6,10 @@ spring:
     # A non-web app with no non-daemon threads would exit right after startup. keep-alive holds it up until the
     # job-claiming loop (M2) provides its own long-running work. (Spring Boot 3.2+.)
     keep-alive: true
+
+secscan:
+  scanner:
+    # Ownership tag stamped on every scanner container; ScanReaper reaps ONLY leftovers carrying this id, never
+    # another stack's (dev / smoke / e2e / a Gradle IT run). Stable across restarts; one worker per id (D-102).
+    # SECSCAN_INSTANCE_ID (not SECSCAN_SCANNER_INSTANCE_ID) so the one setting reads the same in every compose.
+    instance-id: ${SECSCAN_INSTANCE_ID:default}
