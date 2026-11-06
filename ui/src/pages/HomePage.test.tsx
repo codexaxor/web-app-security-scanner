@@ -52,7 +52,6 @@ describe("HomePage", () => {
     for (const h of [
       "How a scan works",
       "What it finds",
-      "Safe to point at your code",
       "Frequently asked",
       "SecScan vs pipeline-based tools",
     ]) {
@@ -60,19 +59,30 @@ describe("HomePage", () => {
     }
   });
 
+  it("the first FAQ item is open by default (aria-expanded true, panel visible)", () => {
+    renderHome();
+    const first = screen.getByRole("button", { name: /If I connect GitHub or GitLab/ });
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    expect(first.getAttribute("aria-controls")).toBeTruthy();
+    const panel = screen.getByRole("region", { name: /If I connect GitHub or GitLab/ });
+    expect(panel.getAttribute("id")).toBe(first.getAttribute("aria-controls"));
+    expect(panel.textContent).toMatch(/read-only token/i);
+  });
+
   it("FAQ items are accordion buttons with aria-expanded/aria-controls that toggle a region", () => {
     renderHome();
-    const trigger = screen.getByRole("button", { name: /If I connect GitHub or GitLab/ });
+    // A non-first item starts collapsed, proving each item is an independent accordion.
+    const trigger = screen.getByRole("button", { name: /Do you store my data/ });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(trigger.getAttribute("aria-controls")).toBeTruthy();
     // Collapsed: the panel is hidden (absent from the accessibility tree).
-    expect(screen.queryByRole("region", { name: /If I connect GitHub or GitLab/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: /Do you store my data/ })).toBeNull();
 
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    const panel = screen.getByRole("region", { name: /If I connect GitHub or GitLab/ });
+    const panel = screen.getByRole("region", { name: /Do you store my data/ });
     expect(panel.getAttribute("id")).toBe(trigger.getAttribute("aria-controls"));
-    expect(panel.textContent).toMatch(/read-only token/i);
+    expect(panel.textContent).toMatch(/keyed hash/i);
 
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");

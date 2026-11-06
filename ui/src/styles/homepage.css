@@ -154,10 +154,12 @@
 .hp-hero-title {
   margin: 0;
   color: var(--shell-text);
-  font-size: clamp(32px, 5vw, 50px);
-  line-height: 1.07;
+  /* Two deliberate lines (explicit <br>): ~34px balanced on phones up to ~60px on desktop (56–64px band). */
+  font-size: clamp(34px, 6vw, 60px);
+  line-height: 1.05;
   font-weight: 700;
   letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 .hp-hero-sub {
   margin: var(--sp-4) 0 0;
@@ -375,15 +377,32 @@
   list-style: none;
   margin: var(--sp-8) 0 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* Flex (not grid) so a short trailing row CENTERS and the five cards never leave a lone orphan:
+     1 per row on phones, 3 per row mid-width (3 + 2, last row centred), all 5 in one row at >=1280px. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--sp-5);
 }
 .hp-card {
+  /* grow 0 so the trailing row's cards keep the same width as the rows above (no stretch). */
+  flex: 0 1 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--sp-6);
+}
+@media (min-width: 760px) {
+  /* 3 per row → 5 cards wrap to 3 + 2; justify-content:center centres the trailing two. */
+  .hp-card {
+    flex-basis: calc((100% - 2 * var(--sp-5)) / 3);
+  }
+}
+@media (min-width: 1280px) {
+  /* all five in a single row */
+  .hp-card {
+    flex-basis: calc((100% - 4 * var(--sp-5)) / 5);
+  }
 }
 .hp-card-icon {
   display: inline-flex;
@@ -416,48 +435,6 @@
   font-weight: 600;
 }
 .hp-card-body {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-base);
-  line-height: 1.6;
-}
-
-/* --- security section --- */
-.hp-seclist {
-  list-style: none;
-  margin: var(--sp-8) auto 0;
-  padding: 0;
-  max-width: 840px;
-  display: grid;
-  gap: var(--sp-4);
-}
-.hp-sec-item {
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: var(--sp-4);
-  align-items: start;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-5);
-}
-.hp-sec-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  color: var(--accent);
-  font-size: 22px;
-}
-.hp-sec-title {
-  margin: 0 0 var(--sp-1);
-  font-size: var(--fs-md);
-  font-weight: 600;
-}
-.hp-sec-body {
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-base);
@@ -683,11 +660,5 @@
   .hp-footer-note {
     margin-left: 0;
     flex-basis: 100%;
-  }
-  .hp-sec-item {
-    grid-template-columns: 1fr;
-  }
-  .hp-sec-icon {
-    display: none;
   }
 }

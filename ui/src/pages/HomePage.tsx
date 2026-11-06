@@ -23,7 +23,7 @@ function HomeNav({ signedIn }: { signedIn: boolean }) {
         </Link>
         <nav className="hp-nav-links" aria-label="Sections">
           <a href="#how">How it works</a>
-          <a href="#security">Security</a>
+          <a href="#what">What it finds</a>
           <a href="#faq">FAQ</a>
         </nav>
         <div className="hp-nav-actions">
@@ -61,7 +61,11 @@ function Hero({ signedIn }: { signedIn: boolean }) {
     <section className="hp-hero">
       <div className="hp-hero-inner">
         <div className="hp-hero-copy">
-          <h1 className="hp-hero-title">Scan everything. Touch nothing.</h1>
+          <h1 className="hp-hero-title">
+            Scan everything.
+            <br />
+            Touch nothing.
+          </h1>
           <p className="hp-hero-sub">
             Leaked secrets, vulnerable dependencies and risky code in your GitHub and GitLab repositories — found
             in minutes with a read-only token. Nothing is built, run or changed.
@@ -161,7 +165,7 @@ function HowItWorks() {
     {
       n: "2",
       title: "Copy",
-      body: "A shallow copy of one branch goes into a locked-down, throwaway container — read-only and offline to everything else.",
+      body: "A shallow copy of one branch goes into a locked-down, throwaway container — non-root, read-only filesystem, no access to your systems.",
     },
     {
       n: "3",
@@ -244,59 +248,6 @@ function WhatItFinds() {
   );
 }
 
-function Security() {
-  const points: { icon: IconName; title: string; body: string }[] = [
-    {
-      icon: "check",
-      title: "Read-only, least privilege",
-      body: "You grant a read-only token for the repositories you choose. SecScan can read code — it can't push, change settings or reach anything else.",
-    },
-    {
-      icon: "scan",
-      title: "Your code is never executed",
-      body: "A shallow copy of one branch is read inside a locked-down, throwaway container — non-root, read-only filesystem, no network to build services. Nothing is built or run, and the copy is deleted when the scan ends.",
-    },
-    {
-      icon: "secret",
-      title: "We store findings, not source",
-      body: "A finding keeps the file path, line, rule and package version — not your code. A secret we find is stored only as a one-way keyed hash plus its first 4 characters, never in full.",
-    },
-    {
-      icon: "connect",
-      title: "Tokens encrypted at rest",
-      body: "You enter a token once, in the app only. It's encrypted with AES-256-GCM before it's saved, never shown again, never logged, and only ever sent to your Git provider over verified HTTPS.",
-    },
-    {
-      icon: "users",
-      title: "Every workspace is isolated",
-      body: "Your findings belong to your workspace alone. Not even the platform admin can read another workspace's data.",
-    },
-  ];
-  return (
-    <section className="hp-section hp-reveal" id="security">
-      <div className="hp-section-inner">
-        <h2 className="hp-h2">Safe to point at your code</h2>
-        <p className="hp-lead">
-          SecScan is built to read your repositories without becoming a risk of its own.
-        </p>
-        <ul className="hp-seclist">
-          {points.map((p) => (
-            <li className="hp-sec-item" key={p.title}>
-              <span className="hp-sec-icon" aria-hidden="true">
-                <Icon name={p.icon} />
-              </span>
-              <div>
-                <h3 className="hp-sec-title">{p.title}</h3>
-                <p className="hp-sec-body">{p.body}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  );
-}
-
 const FAQ_ITEMS: { q: string; a: string }[] = [
   {
     q: "If I connect GitHub or GitLab, how is it secured?",
@@ -308,7 +259,7 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   },
   {
     q: "How does scanning work? Is my code copied?",
-    a: "Yes, briefly. A shallow copy of one branch goes into a locked-down, throwaway container. Four open-source scanners plus our own end-of-life check read the files — nothing is built or run. When the scan ends, the copy is deleted.",
+    a: "Yes, briefly. A shallow copy of one branch goes into a locked-down, throwaway container — non-root, with a read-only filesystem and no access to your systems. Four open-source scanners plus our own end-of-life check read the files — nothing is built or run. When the scan ends, the copy is deleted.",
   },
   {
     q: "How is my API token protected?",
@@ -328,8 +279,8 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   },
 ];
 
-function FaqItem({ q, a }: { q: string; a: string }) {
-  const [open, setOpen] = useState(false);
+function FaqItem({ q, a, defaultOpen = false }: { q: string; a: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const base = useId();
   const btnId = `${base}-b`;
   const panelId = `${base}-p`;
@@ -357,12 +308,12 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 function Faq() {
   return (
-    <section className="hp-section hp-section-alt hp-reveal" id="faq">
+    <section className="hp-section hp-reveal" id="faq">
       <div className="hp-section-inner hp-faq-inner">
         <h2 className="hp-h2">Frequently asked</h2>
         <div className="hp-faq">
-          {FAQ_ITEMS.map((it) => (
-            <FaqItem key={it.q} q={it.q} a={it.a} />
+          {FAQ_ITEMS.map((it, i) => (
+            <FaqItem key={it.q} q={it.q} a={it.a} defaultOpen={i === 0} />
           ))}
         </div>
       </div>
@@ -389,7 +340,7 @@ function Comparison() {
     },
   ];
   return (
-    <section className="hp-section hp-reveal">
+    <section className="hp-section hp-section-alt hp-reveal">
       <div className="hp-section-inner">
         <h2 className="hp-h2">SecScan vs pipeline-based tools</h2>
         <p className="hp-lead">Same risks covered — without a pipeline to wire up or anything added to your code.</p>
@@ -461,7 +412,6 @@ function HomeFooter({ signedIn }: { signedIn: boolean }) {
         <nav className="hp-footer-links" aria-label="Footer">
           <a href="#how">How it works</a>
           <a href="#what">What it finds</a>
-          <a href="#security">Security</a>
           <a href="#faq">FAQ</a>
           {signedIn ? <Link to="/dashboard">Dashboard</Link> : <Link to="/login">Sign in</Link>}
         </nav>
@@ -514,7 +464,6 @@ export default function HomePage() {
         <TrustStrip />
         <HowItWorks />
         <WhatItFinds />
-        <Security />
         <Faq />
         <Comparison />
         <CtaBand signedIn={signedIn} />
