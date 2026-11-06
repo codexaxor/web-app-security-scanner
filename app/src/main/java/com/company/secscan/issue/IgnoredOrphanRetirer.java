@@ -8,8 +8,6 @@ import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTask;
 import com.company.secscan.scan.ScanTaskRepository;
-import com.company.secscan.workspace.Workspace;
-import com.company.secscan.workspace.WorkspaceRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,9 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
  * with {@code BRANCH_CHANGED} ({@link TriageApplier}); this pass is the retroactive, re-runnable cleanup and
  * writes {@code SOLVED_NOT_DETECTED} against that latest scan.
  *
- * <p>An operator maintenance pass (M8.10: {@code /api/v1/admin/**} is operator-only, D-094) that runs across ALL
- * workspaces, like the re-score sweep (driven by {@code WorkspaceRepository.findAll}); within each workspace every
- * query is scoped by that workspace's id (domain rule 1). {@code dryRun} (the endpoint default) computes and returns the candidates without changing anything.
+ * <p>An operator maintenance pass (M8.10: {@code /api/v1/admin/**} is operator-only, D-094) that acts ONLY on the
+ * caller's own workspace (the operator's: Default) — never across tenants, so it neither reveals nor changes another
+ * workspace's findings (D-094). Every query is scoped by that workspace's id (domain rule 1). {@code dryRun} (the
+ * endpoint default) computes and returns the candidates without changing anything.
  * Idempotent: a real run solves each candidate (status ignored → solved) and writes a {@code triage_event}
  * (actor system); a second run finds nothing new because the rows are now solved. A failed or non-authoritative
  * scanner retires nothing (domain rule 3); a secret not hashed with the current fingerprint key id is skipped
@@ -56,13 +55,11 @@ public class IgnoredOrphanRetirer {
     private final TriageEventRepository events;
     private final GroupRollupService rollup;
     private final SecretFingerprinterHolder fingerprinter;
-    private final WorkspaceRepository workspaces;
 
     public IgnoredOrphanRetirer(RepositoryRepository repositories, ScanRepository scans, ScanTaskRepository tasks,
                                 SubIssueRepository subIssues, IgnoreRuleRepository ignoreRules,
                                 IssueGroupRepository groups, TriageEventRepository events,
-                                GroupRollupService rollup, SecretFingerprinterHolder fingerprinter,
-                                WorkspaceRepository workspaces) {
+                                GroupRollupService rollup, SecretFingerprinterHolder fingerprinter) {
         this.repositories = repositories;
         this.scans = scans;
         this.tasks = tasks;
@@ -72,7 +69,6 @@ public class IgnoredOrphanRetirer {
         this.events = events;
         this.rollup = rollup;
         this.fingerprinter = fingerprinter;
-        this.workspaces = workspaces;
     }
 
     /** One retire candidate (what a dry run returns): the sub-issue id, its rule/package id, file and ignore reason. */
@@ -83,17 +79,14 @@ public class IgnoredOrphanRetirer {
     public record RetireResult(boolean dryRun, int candidates, int retired, List<Candidate> candidateList) {
     }
 
-    /** Runs the pass for every workspace (system maintenance, M8.10) and sums the per-workspace results. */
+    /**
+     * Runs the pass for ONE workspace — the caller's own (D-094 amended in the M8.10 review: operator maintenance
+     * acts on the operator's own workspace only, never on another tenant's findings). Every query is scoped by
+     * {@code workspaceId}.
+     */
     @Transactional
-    public RetireResult retire(boolean dryRun) {
-        List<Candidate> all = new ArrayList<>();
-        int retired = 0;
-        for (Workspace ws : workspaces.findAll()) {
-            RetireResult r = retireWorkspace(ws.getId(), dryRun);
-            all.addAll(r.candidateList());
-            retired += r.retired();
-        }
-        return new RetireResult(dryRun, all.size(), retired, all);
+    public RetireResult retire(UUID workspaceId, boolean dryRun) {
+        return retireWorkspace(workspaceId, dryRun);
     }
 
     private RetireResult retireWorkspace(UUID workspaceId, boolean dryRun) {

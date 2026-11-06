@@ -108,6 +108,7 @@ The operator has **no read access to other tenants' data**: their own data is th
 API exposes only sign-up/user metadata (email, status, workspace name, dates), never another workspace's
 repositories, findings or settings. The V23 backfill and AdminBootstrap promote an operator only when none exists.
 Consequences: OD-9 resolved. The demo user (D-091) is never operator, so it loses `/admin/**`.
+Addendum (2026-11-06, M8.10 review B-1): **operator maintenance acts on the operator's own workspace only.** `POST /api/v1/admin/maintenance/retire-ignored-orphans` takes its workspace from the principal (`@CurrentWorkspace`, i.e. Default for the operator); it never lists or changes another tenant's findings. The earlier all-workspaces retire loop (and its CLAUDE.md rule-1 exception) is removed. Tenants have no retire endpoint of their own yet. Global intel sync and the re-score sweep stay platform-wide (they touch shared intel tables and return counts only). Proven by `IgnoredOrphanRetirerWorkspaceScopeIT`.
 
 ## D-093 Tenancy by self sign-up (2026-11-05, accepted)
 Context: SecScan was single-tenant (Default workspace, D-011) on a tenant-ready schema (D-001).
