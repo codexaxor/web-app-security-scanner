@@ -9,7 +9,8 @@ const CORE_ID = "20000000-0000-0000-0000-000000000001"; // core-keycloak reposit
 
 // [name, path, needsSignIn]
 const SCREENS: [string, string, boolean][] = [
-  ["login", "/", false],
+  ["home", "/", false],
+  ["login", "/login", false],
   ["dashboard", "/dashboard", true],
   ["feed", "/feed", true],
   ["feed-panel", `/feed/${COMMONS_TEXT}`, true],

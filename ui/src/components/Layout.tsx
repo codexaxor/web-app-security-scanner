@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useAuth } from "../auth";
 import { useTheme, type Theme } from "../theme";
-import SignInGate from "./SignInGate";
-import SignUpPage from "../pages/SignUpPage";
 import Button from "./Button";
 import BrandMark from "./BrandMark";
 import CommandPalette from "./CommandPalette";
@@ -66,9 +64,6 @@ export const OPERATOR_GROUP: (typeof NAV_GROUPS)[number] = {
     { to: "/admin/users", label: "Users", icon: "users" },
   ],
 };
-
-/** The public (signed-out) path for self sign-up (M8.10). Rendered in place of the gate, like the gate itself. */
-export const SIGNUP_PATH = "/signup";
 
 function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
   // S11.5: no per-group chevrons — a small muted section label and the items are always shown. (The whole
@@ -162,12 +157,12 @@ function UserMenu({
 }
 
 /**
- * The app shell. When not signed in, the sign-in gate renders IN PLACE — the URL is untouched, so signing in
- * reveals the route the person asked for (post-refresh route restore). When signed in: a deep-navy left sidebar
- * (brand chrome, constant across light/dark) with the SecScan wordmark, grouped collapsible nav with a clear
- * active state, and a user menu (theme toggle + Sign out) in the footer. Below ~1024 px a navy top app-bar
- * appears and the sidebar becomes an off-canvas drawer toggled by the menu button (Esc or the scrim closes it,
- * navigating closes it); the shell stays keyboard navigable.
+ * The app shell (protected). A signed-out visitor is redirected to /login?next=<path> (M8.13) so signing in
+ * lands them back on the route they asked for — the public homepage and sign-in page live outside this shell.
+ * When signed in: a deep-navy left sidebar (brand chrome, constant across light/dark) with the SecScan wordmark,
+ * grouped collapsible nav with a clear active state, and a user menu (theme toggle + Sign out) in the footer.
+ * Below ~1024 px a navy top app-bar appears and the sidebar becomes an off-canvas drawer toggled by the menu
+ * button (Esc or the scrim closes it, navigating closes it); the shell stays keyboard navigable.
  */
 export default function Layout() {
   const { checking, signedIn, username, demoMode, workspaceName, operator, signOut } = useAuth();
@@ -192,19 +187,10 @@ export default function Layout() {
   }
 
   if (!signedIn) {
-    return (
-      <main className="shell-centered">
-        <div className="signin-brand">
-          <BrandMark />
-          <span className="brand">SecScan</span>
-        </div>
-        {location.pathname === SIGNUP_PATH ? (
-          <SignUpPage />
-        ) : (
-          <SignInGate />
-        )}
-      </main>
-    );
+    // M8.13: bounce to the dedicated sign-in page, remembering where the visitor was headed (sanitized on the
+    // way back by safeNextPath). Signing in then returns them to this exact route.
+    const next = location.pathname + location.search;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
 
   const appClass = ["app", navOpen ? "nav-open" : "", collapsed ? "sidebar-collapsed" : ""]

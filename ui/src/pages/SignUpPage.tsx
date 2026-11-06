@@ -6,10 +6,10 @@ import InlineError from "../components/InlineError";
 import { retryText, validateSignUp, MIN_PASSWORD_CHARS, type SignUpErrors } from "../lib/signupValidation";
 
 /**
- * M8.10 public sign-up (D-093/D-098), shown in place of the sign-in gate at /signup (signed out). Whatever the
- * email, a well-formed request ends on the SAME neutral confirmation — the page never says whether an account
- * already exists. The password lives only in component state for the submit and is cleared afterwards; nothing
- * goes to web storage.
+ * M8.10 public sign-up (D-093/D-098) at /signup (M8.13: a standalone public route, outside the app shell).
+ * Whatever the email, a well-formed request ends on the SAME neutral confirmation — the page never says whether
+ * an account already exists. The password lives only in component state for the submit and is cleared
+ * afterwards; nothing goes to web storage.
  */
 export default function SignUpPage() {
   const [form, setForm] = useState<SignUpRequest>({ email: "", password: "", workspaceName: "" });
@@ -53,7 +53,7 @@ export default function SignUpPage() {
           you can sign in with the email and password you chose.
         </p>
         <div className="signin-footer">
-          <Link to="/">Back to sign in</Link>
+          <Link to="/login">Back to sign in</Link>
         </div>
       </div>
     );
@@ -123,7 +123,7 @@ export default function SignUpPage() {
       </Button>
       <div className="signin-footer">
         <span className="muted">Already have an account?</span>{" "}
-        <Link to="/">Sign in</Link>
+        <Link to="/login">Sign in</Link>
       </div>
     </form>
   );

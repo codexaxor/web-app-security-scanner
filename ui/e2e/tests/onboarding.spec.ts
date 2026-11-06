@@ -18,7 +18,7 @@ test("signs in and shows the app shell with navigation", async ({ page }) => {
 });
 
 test("rejects a wrong password at the gate", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill(adminEmail());
   await page.getByLabel("Password").fill("definitely-not-" + adminPassword());
   await page.getByRole("button", { name: /continue|sign in/i }).click();

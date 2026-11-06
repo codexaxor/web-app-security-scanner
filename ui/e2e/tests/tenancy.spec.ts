@@ -32,9 +32,10 @@ test("sign up → pending → approved → empty workspace → disabled is signe
   const email = `tenant-${Date.now()}@e2e.example`;
   const workspace = `E2E Tenant ${Date.now() % 100000}`;
 
-  // 1. Sign up from the gate's "Create account" link; the confirmation is the neutral, identical text.
+  // 1. Sign up from the homepage's "Create account" link (M8.13: the nav and hero each offer one; take the
+  //    first); the confirmation is the neutral, identical text.
   await page.goto("/");
-  await page.getByRole("link", { name: "Create account" }).click();
+  await page.getByRole("link", { name: "Create account" }).first().click();
   await expect(page).toHaveURL(/\/signup$/);
   await page.getByLabel("Work email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
