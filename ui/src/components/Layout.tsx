@@ -165,7 +165,7 @@ function UserMenu({
  * button (Esc or the scrim closes it, navigating closes it); the shell stays keyboard navigable.
  */
 export default function Layout() {
-  const { checking, signedIn, username, demoMode, workspaceName, operator, signOut } = useAuth();
+  const { checking, signedIn, username, demoMode, workspaceName, operator, signOut, signedOutByUser } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false); // S11.5: collapse the whole sidebar to icons (desktop)
   const location = useLocation();
@@ -187,6 +187,11 @@ export default function Layout() {
   }
 
   if (!signedIn) {
+    // M8.13 review: an explicit Sign out lands on plain /login — no `next`, so whoever signs in next starts on
+    // the dashboard rather than the previous user's page. An expired session (401) keeps `next` below.
+    if (signedOutByUser) {
+      return <Navigate to="/login" replace />;
+    }
     // M8.13: bounce to the dedicated sign-in page, remembering where the visitor was headed (sanitized on the
     // way back by safeNextPath). Signing in then returns them to this exact route.
     const next = location.pathname + location.search;

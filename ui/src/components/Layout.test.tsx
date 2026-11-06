@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useSearchParams } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Layout from "./Layout";
@@ -8,7 +8,8 @@ import { useAuth } from "../auth";
 /** Stands in for the /login route so a signed-out redirect out of the shell resolves and exposes `?next`. */
 function LoginProbe() {
   const [params] = useSearchParams();
-  return <div data-testid="login-probe" data-next={params.get("next") ?? ""} />;
+  const { search } = useLocation();
+  return <div data-testid="login-probe" data-next={params.get("next") ?? ""} data-search={search} />;
 }
 
 vi.mock("../auth", () => ({ useAuth: vi.fn() }));
@@ -24,10 +25,11 @@ function signedIn(demoMode = false, operator = false) {
     operator,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: false,
   });
 }
 
-function signedOut() {
+function signedOut(byUser = false) {
   vi.mocked(useAuth).mockReturnValue({
     checking: false,
     signedIn: false,
@@ -37,6 +39,7 @@ function signedOut() {
     operator: false,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: byUser,
   });
 }
 
@@ -137,5 +140,13 @@ describe("M8.10 tenancy in the shell", () => {
     expect(screen.getByTestId("login-probe").getAttribute("data-next")).toBe(
       "/repositories/20000000-0000-0000-0000-000000000001?tab=issues",
     );
+  });
+
+  it("after an explicit Sign out: redirects to plain /login with no ?next (M8.13 review)", () => {
+    signedOut(true);
+    renderAt("/repositories/20000000-0000-0000-0000-000000000001?tab=issues");
+    const probe = screen.getByTestId("login-probe");
+    expect(probe.getAttribute("data-next")).toBe("");
+    expect(probe.getAttribute("data-search")).toBe("");
   });
 });

@@ -17,6 +17,7 @@ function setSignedIn(signedIn: boolean) {
     operator: false,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: false,
   });
 }
 

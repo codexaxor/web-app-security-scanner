@@ -23,6 +23,7 @@ function setAuth(signedIn: boolean, checking = false) {
     operator: false,
     signIn: () => {},
     signOut: () => {},
+    signedOutByUser: false,
   });
 }
 
