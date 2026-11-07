@@ -331,12 +331,19 @@ while IFS= read -r _xid; do
     [ -n "$_xid" ] && OPENGREP_EXCLUDE_ARGS="$OPENGREP_EXCLUDE_ARGS --exclude-rule $_xid"
 done < "$SAST_EXCLUDE_IDS"
 echo "opengrep: excluding $(wc -l < "$SAST_EXCLUDE_IDS" | tr -d ' ') check_ids (deny-list + category exclusions)" >&2
+# Cross-function taint (D-104, M8.15 S4): --taint-intrafile adds intra-file inter-procedural taint findings.
+# On by default; the worker sets SAST_TAINT_INTRAFILE=0 only for TaintRescanStabilityIT's OFF scan. It changes
+# no fingerprint input, so turning it on does not churn existing findings.
+OPENGREP_TAINT_ARG=""
+if [ "${SAST_TAINT_INTRAFILE:-1}" = "1" ]; then
+    OPENGREP_TAINT_ARG="--taint-intrafile"
+fi
 START="$(date +%s)"
 set +e
 # shellcheck disable=SC2086 # $OPENGREP_EXCLUDE_ARGS MUST word-split into individual --exclude-rule <id> args.
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS --json-output="$SAST_RAW" \
+    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
     >"$WORK/opengrep.log" 2>&1
 SAST_EXIT=$?

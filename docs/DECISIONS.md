@@ -65,6 +65,12 @@ Decision (extends D-053; does NOT supersede it):
 - **Cross-function taint:** pass `--taint-intrafile` (intra-file inter-procedural taint; confirmed on 1.31.0). It
   changes neither `rule_id`, `file_path` nor the normalized-snippet hash, so a rescan with the flag on does not
   churn existing findings (0 triage_events for findings seen by both; taint-only NEW findings are allowed).
+  Default-on via `ScannerProperties.taintIntrafile` (delivered as `SAST_TAINT_INTRAFILE` → `run-scan.sh`). The
+  live `TaintRescanStabilityIT` flips OFF→ON on one commit of `fixtures/sast-taint` and proved matched findings
+  keep identical fingerprints with **0 triage_events** (observed 4 matched, 0 rescan events, 2 taint-only-new JS
+  findings). Measured taint marginal cost is ~2 s (~7 %) on PyGoat; the before→after SAST-time rise (≈2.3–2.5× on
+  small repos, from ~12 s to ~25–30 s) is dominated by the six new packs' rule set, not taint, and absolute times
+  are far below the 30-min timeout. The budget stop-rule is evaluated on the real Celloscope Java repo before S5.
 - **Uncovered-language warning (D-030):** reusing `lang_detect.py`, a scan raises `SAST_LANGUAGE_UNCOVERED`
   listing detected SAST-eligible languages that have no rule pack, mapped in the coverage banner. **Excluded** from
   the warning: markup/style (HTML, CSS/SCSS/Sass/Less, Vue, Svelte — but see below), and Shell / Dockerfile / HCL
