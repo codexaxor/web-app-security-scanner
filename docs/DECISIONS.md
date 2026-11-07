@@ -14,6 +14,56 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-104 SAST coverage: six more language packs, noise control, taint, locale (2026-11-07, accepted)
+Context: a scan of `github.com/plexicus/simplest-sast-vulnerable @77baa1b` gave **0 Python SAST findings**
+because D-053 bakes only java/csharp/javascript/typescript language packs from opengrep/opengrep-rules
+@`f1d2b562b414783763fd02a6ed2736eaed622efa` (the AikidoSec pack is tiny). The architect verified Opengrep
+1.31.0 + that commit's `python/` pack finds SQLi, `os.system`, SSTI, pickle, `yaml.load`, `subprocess
+shell=True` and XXE at ERROR, and that Opengrep crashed with a `UnicodeDecodeError` loading rules under a
+non-UTF-8 locale. M8.15 widens SAST coverage without touching any fingerprint input.
+Decision (extends D-053; does NOT supersede it):
+- **Rule packs:** bake `python, go, php, ruby, kotlin, scala` from the **SAME pinned commit** `f1d2b56` — the SHA
+  is NOT bumped, because every `check_id` is a SAST fingerprint input (D-053) and a bump would re-fingerprint and
+  churn existing findings. New loaded check_ids (distinct): python 375, go 82, php 61, ruby 92, kotlin 14,
+  scala 27 (≈651 new; ≈1039 distinct across ten packs). **Licence:** these packs are **Commons Clause** (restricts
+  resale/SaaS) — the SAME flag D-053 already raised for the open "SAST rule licensing before any SaaS" SPEC item
+  and the D-005 note; INTERNAL USE OK, does NOT block M8.15. **NEVER** `semgrep/semgrep-rules`. Kotlin (14) and
+  Scala (27) coverage is **thin** (noted in the scorecard).
+- **Bake only rule YAML** (`*.yaml`/`*.yml`, excluding `*.test.yaml`/`*.test.yml`, which load 0 rules) — never the
+  packs' test SOURCE files (`.py`/`.go`/`.php`/`.html`). This also fixes the existing four packs (they `cp -r` the
+  whole dir today, shipping ~930 untrusted test-source files). The existing four packs' LOADED check_id set is
+  proven **identical** before/after the YAML-only change (opengrep `--verbose --max-log-list-entries` list
+  diffed: 388 distinct, unchanged), so no fingerprint churn.
+- **Deny-list (noise control):** a baked, commented `scanner-image/opengrep-denylist.txt` of **full check_ids**
+  (`opengrep-rules.<pack>.<dotted-dir>.<id>`, never short ids — `eval-detected` exists in both js and python).
+  Applied via Opengrep `--exclude-rule` (confirmed present on 1.31.0; `results[]` post-filter kept as fallback).
+  For audit/non-audit twins (e.g. `dangerous-system-call` vs `dangerous-system-call-audit`) we **DENY the `-audit`
+  twin** rather than extend the D-061 winner map — the audit twin fires on different lines than its base, so the
+  winner map (same-file co-occurrence only) would not suppress it. The deny-list may contain **only ids from the
+  six NEW packs**: denying an existing java/csharp/js/ts rule would make reconcile "solve" its live findings
+  (reads as fixed) — a separate decision, out of scope here. The final list is captured from REAL scanner output
+  (hit counts on the recall fixture + plexicus + one real repo; audit-only-hit evidence), never guessed, and
+  human-approved (mirrors D-061's "seeded from real output").
+- **Locale:** run Opengrep under `LANG=C.UTF-8 LC_ALL=C.UTF-8` so loading a rule with non-ASCII text cannot crash
+  with `UnicodeDecodeError`.
+- **Cross-function taint:** pass `--taint-intrafile` (intra-file inter-procedural taint; confirmed on 1.31.0). It
+  changes neither `rule_id`, `file_path` nor the normalized-snippet hash, so a rescan with the flag on does not
+  churn existing findings (0 triage_events for findings seen by both; taint-only NEW findings are allowed).
+- **Uncovered-language warning (D-030):** reusing `lang_detect.py`, a scan raises `SAST_LANGUAGE_UNCOVERED`
+  listing detected SAST-eligible languages that have no rule pack, mapped in the coverage banner. **Excluded** from
+  the warning: markup/style (HTML, CSS/SCSS/Sass/Less, Vue, Svelte — but see below), and Shell / Dockerfile / HCL
+  — Shell has no pack and is rarely a SAST target; Dockerfile and HCL are covered by the IaC engine (Checkov),
+  not Opengrep, so flagging them as "SAST-uncovered" would be misleading. **Vue/Svelte:** these are not pure
+  markup (they embed `<script>` JS/TS); M8.15 proves whether the JS/TS packs scan `.vue`/`.svelte` `<script>`
+  blocks — if not, they are reported as uncovered.
+- **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
+  **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
+  stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer
+  deferred (added to the deferred register).
+Consequences: SAST covers ten languages with controlled noise and no fingerprint churn; the Commons-Clause SaaS
+flag now covers the wider rule set; thin Kotlin/Scala coverage and the uncovered-language gaps are shown, not
+hidden.
+
 ## D-103 Public homepage + route-based sign-in (2026-11-07, accepted)
 Context: M8.13 adds a public marketing homepage. Until now the app shell rendered the sign-in gate (and, M8.10,
 the sign-up form at `/signup`) IN PLACE of any route when signed out, so "/" could not be a public page.
@@ -1775,6 +1825,12 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.15 deferred register (recorded 2026-11-07, D-104):
+  - **Additional SAST engines (Joern, Bearer):** deferred. M8.15 keeps the single Opengrep engine. CodeQL was
+    rejected on licence; Joern (dataflow/CPG) and Bearer (privacy/security) are candidate second engines for a
+    later milestone once the single-engine coverage + noise profile is understood from the scorecard.
+  - **Thicker Kotlin/Scala rule coverage:** the stock packs are thin (Kotlin 14, Scala 27 rules). Custom MIT
+    rules for common Kotlin/Scala (e.g. Ktor/Spring-Kotlin, Play/Akka) weaknesses are a later add.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;
