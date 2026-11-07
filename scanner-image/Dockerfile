@@ -119,16 +119,26 @@ RUN set -eu; \
     chmod 0444 /etc/secscan/checkov-requirements.txt; \
     checkov --version
 
-# --- Opengrep rule bundle (D-053), baked at pinned commit SHAs so the rule set (and therefore every SAST
-# check_id, which is a fingerprint input) is frozen. Three sources:
+# --- Opengrep rule bundle (D-053 + D-104), baked at pinned commit SHAs so the rule set (and therefore every
+# SAST check_id, which is a fingerprint input) is frozen. Three sources:
 #   (a) AikidoSec/opengrep-rules  — MIT — curated Aikido rules (the `rules/` tree).
 #   (b) opengrep/opengrep-rules   — Commons Clause (restricts resale/SaaS — FLAGGED for the open "SAST rule
-#       licensing before SaaS" SPEC item and D-005; INTERNAL USE OK, does NOT block M6). Only the language
-#       packs we need are copied (java, csharp, javascript, typescript).
-#   (c) our custom Spring/.NET rules (MIT) land in /etc/secscan/opengrep-rules/custom in M6 Slice 1.
+#       licensing before SaaS" SPEC item and D-005; INTERNAL USE OK, does NOT block internal use). M8.15 (D-104)
+#       widens the copied language packs from four to TEN — java, csharp, javascript, typescript, python, go,
+#       php, ruby, kotlin, scala — at the SAME pinned commit (the SHA is NOT bumped: a bump would change
+#       check_ids, which are fingerprint inputs, and churn every existing SAST finding).
+#   (c) our custom Spring/.NET rules (MIT) land in /etc/secscan/opengrep-rules/custom.
 # NEVER semgrep/semgrep-rules (restrictive Semgrep Rules License). run-scan.sh runs opengrep from /etc/secscan
-# with a RELATIVE `--config opengrep-rules`, so check_ids are the stable `opengrep-rules.<pack>.<id>` and never
-# leak an absolute path. The clone + copy are build-time only; the scanner runs fully offline. ---
+# with a RELATIVE `--config opengrep-rules`, so check_ids are the stable `opengrep-rules.<pack>.<dotted-dir>.<id>`
+# and never leak an absolute path. The clone + copy are build-time only; the scanner runs fully offline.
+#
+# YAML-ONLY BAKE (D-104): for every opengrep language pack we copy ONLY rule YAML (*.yaml/*.yml), EXCLUDING
+# *.test.yaml/*.test.yml (Opengrep treats those as test fixtures and loads 0 rules from them), and NEVER the
+# packs' test SOURCE files (.py/.go/.php/.html etc.) — those are inert to `--config` but would ship ~930
+# untrusted sample files into the image. This also fixes the four original packs (they used to `cp -r` the whole
+# dir). The loaded check_id set of the four original packs is UNCHANGED by this (proven in the build: the
+# excluded files contribute no rule — verified 388 distinct check_ids before == after). The directory structure
+# under each pack is preserved, so every check_id is byte-for-byte identical. ---
 ARG AIKIDO_RULES_SHA=7ac79affecf709eb7263a243b518a417cd7e0ab2
 ARG OPENGREP_RULES_SHA=f1d2b562b414783763fd02a6ed2736eaed622efa
 RUN set -eu; \
@@ -138,9 +148,15 @@ RUN set -eu; \
     cp -r /tmp/aikido/rules /etc/secscan/opengrep-rules/aikido; \
     git clone -q --filter=blob:none https://github.com/opengrep/opengrep-rules /tmp/ogr; \
     git -C /tmp/ogr checkout -q "$OPENGREP_RULES_SHA"; \
-    for lang in java csharp javascript typescript; do \
-        cp -r "/tmp/ogr/$lang" "/etc/secscan/opengrep-rules/$lang"; \
+    cd /tmp/ogr; \
+    for lang in java csharp javascript typescript python go php ruby kotlin scala; do \
+        find "$lang" -type f \( -name '*.yaml' -o -name '*.yml' \) \
+            ! -name '*.test.yaml' ! -name '*.test.yml' | while IFS= read -r f; do \
+            mkdir -p "/etc/secscan/opengrep-rules/$(dirname "$f")"; \
+            cp "$f" "/etc/secscan/opengrep-rules/$f"; \
+        done; \
     done; \
+    cd /; \
     rm -rf /tmp/aikido /tmp/ogr
 
 # Our custom Spring/.NET rules (MIT, D-053 (c)). They land at opengrep-rules/custom, so their check_ids are the
