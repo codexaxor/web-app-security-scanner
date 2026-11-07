@@ -311,8 +311,37 @@ val opengrepLocaleInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-104 gate (M8.15 S6): recall + canary leak. Scans fixtures/sast-recall THE PRODUCTION WAY (real run-scan.sh
+// over a file:// clone) inside the built image, asserting every expected (check_id, file) fires for the six new
+// packs, negatives stay clean, no denied/category-excluded id appears, and the planted canary secret never
+// reaches /out or the logs. --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastRecallInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run SAST recall + canary-leak checks for the new packs inside the scanner image (D-104, M8.15 S6)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-recall")
+    inputs.file(scannerDir.resolve("sast_recall_in_image_test.py")).withPropertyName("recallTest")
+    inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
+    inputs.dir(fixtureDir).withPropertyName("recallFixture")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-recall-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "SCAN_CLONE_URL=file:///tmp/repo",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_recall_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
         branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
-        opengrepLocaleInImageTest)
+        opengrepLocaleInImageTest, sastRecallInImageTest)
 }

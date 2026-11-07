@@ -72,14 +72,33 @@ Decision (extends D-053; does NOT supersede it):
   keep identical fingerprints with **0 triage_events** (observed 4 matched, 0 rescan events, 2 taint-only-new JS
   findings). Measured taint marginal cost is ~2 s (~7 %) on PyGoat; the before→after SAST-time rise (≈2.3–2.5× on
   small repos, from ~12 s to ~25–30 s) is dominated by the six new packs' rule set, not taint, and absolute times
-  are far below the 30-min timeout. The budget stop-rule is evaluated on the real Celloscope Java repo before S5.
-- **Uncovered-language warning (D-030):** reusing `lang_detect.py`, a scan raises `SAST_LANGUAGE_UNCOVERED`
-  listing detected SAST-eligible languages that have no rule pack, mapped in the coverage banner. **Excluded** from
-  the warning: markup/style (HTML, CSS/SCSS/Sass/Less, Vue, Svelte — but see below), and Shell / Dockerfile / HCL
-  — Shell has no pack and is rarely a SAST target; Dockerfile and HCL are covered by the IaC engine (Checkov),
-  not Opengrep, so flagging them as "SAST-uncovered" would be misleading. **Vue/Svelte:** these are not pure
-  markup (they embed `<script>` JS/TS); M8.15 proves whether the JS/TS packs scan `.vue`/`.svelte` `<script>`
-  blocks — if not, they are reported as uncovered.
+  are far below the 30-min timeout.
+- **Scan-time budget (resolved on a real Celloscope Java repo, `ib-api` @`807b6aa`, 2594 Java files):** SAST
+  wall time **119 s → 194 s** isolated (**1.63×**, +75 s; full-pipeline SAST step 203 s); full scan **276.5 s
+  (~4.6 min)** — SCA 54 s, SAST 203 s, the rest <5 s. Stop rule ("SAST >2× **and** +>60 s, **or** full scan
+  >15 min") **not triggered** (ratio <2×; full scan ≪15 min) → proceeded to S5/S6. Note (deferred register):
+  `java.lang.security.audit.formatted-sql-string` hit Opengrep's per-file **Timeout** (5 s/rule/file) on 1–2
+  large files under the heavier 10-pack+taint run (24→14 hits on this repo); a recall gap on very large files,
+  not an exclusion/taint-logic effect — revisit raising `--timeout` if it recurs.
+- **Uncovered-language warning (D-030):** reusing `lang_detect.py`, `ScanStateService` raises
+  `SAST_LANGUAGE_UNCOVERED` after each scan listing the detected SAST-eligible CODE languages that have no
+  Opengrep pack; the message names them and reads as a complete coverage-banner line (the UI shows it verbatim).
+  The pure classifier is `core` `SastLanguageCoverage`, three buckets covering every `lang_detect.py` name:
+  **covered** (the 10 packs: java/csharp/js/ts/python/go/php/ruby/kotlin/scala); **uncovered-eligible, reported**
+  (Groovy, Rust, C, C++, Swift, PowerShell, **Vue, Svelte**); **not-SAST, never reported** (HTML, CSS/SCSS/Sass/
+  Less, FreeMarker, Shell, Dockerfile, HCL — Shell has no pack and would be noise on nearly every repo;
+  Dockerfile/HCL are covered by the IaC engine, not Opengrep). An unrecognised name is NOT reported, so a future
+  detector name can't manufacture a false banner. **Vue/Svelte are reported (measured, change #7):** on Opengrep
+  1.31.0 the js/ts rules TARGET `.vue`/`.svelte` (they appear in `paths.scanned`, 182 rules applied) but produce
+  ZERO findings even for a top-level `eval()`/`document.write()` that fires three JS rules in a `.js` file — so
+  their `<script>` code is effectively unanalyzed.
+- **Recall fixture (S6):** `fixtures/sast-recall` has a vulnerable file per new pack + negatives + a canary case
+  (`ruby/secret.rb`, an obviously-fake hardcoded secret). `:app:sastRecallInImageTest` scans it the PRODUCTION
+  way (real `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
+  `(check_id, file)` fires (16 across all six packs), no finding on a `negative/` file, NO denied/category-excluded
+  id ever appears, and the **canary value appears nowhere in `/out` or the scanner logs** — the D-053/S1 sanitize
+  (strips `extra.lines`/`extra.metavars`) holds; Opengrep did NOT interpolate the matched value into
+  `extra.message` for the firing rules, so no in-container message sanitization was needed.
 - **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
   **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
   stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer
@@ -1866,6 +1885,13 @@ Decision: `workspace_id` on every business table from day one.
     snippets stay distinct findings under the shared rule id. Left as-is: giving each a unique id would change
     the check_id and churn existing SAST fingerprints (check_id is a fingerprint input, D-053). Noted so a
     future pack bump / rename weighs the fingerprint churn.
+  - **`formatted-sql-string` per-file Timeout on very large files:** measured on the real `ib-api` repo —
+    `java.lang.security.audit.formatted-sql-string` exceeded Opengrep's default per-rule-per-file timeout
+    (5 s) on 1–2 large files under the heavier 10-pack + `--taint-intrafile` run, dropping those files' matches
+    (24→14 hits on that repo; errors array showed `Timeout` for that rule). Pre-existing (the 4-pack baseline
+    already timed out on one file), aggravated by the heavier run. A recall gap on very large files only, not an
+    exclusion/taint-logic effect. Deferred: consider raising `--timeout` (scan-time cost) or per-rule timeout if
+    it recurs on real repos; needs a timing/recall trade-off decision.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;
