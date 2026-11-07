@@ -202,7 +202,7 @@ function CoverageBanner({ scanId }: { scanId: string }) {
   if (!detail.data || !warns.data) return null;
   const banners = coverageBanners({
     tasks: detail.data.tasks ?? [],
-    warningCodes: warns.data.content.map((w) => w.code),
+    warnings: warns.data.content.map((w) => ({ code: w.code, message: w.message })),
   });
   if (banners.length === 0) return null;
   return (

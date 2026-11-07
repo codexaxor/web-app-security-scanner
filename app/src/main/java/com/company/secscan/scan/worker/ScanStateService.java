@@ -6,6 +6,7 @@ import com.company.secscan.issue.EolEnricher;
 import com.company.secscan.issue.ReconcileService;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.SastLanguageCoverage;
 import com.company.secscan.scan.Scan;
 import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scan.ScanFindingRepository;
@@ -142,6 +143,16 @@ public class ScanStateService {
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SCOPE_INVENTORY_FAILED",
                     "The dev/test scope inventory failed; prior dev/test auto-ignores were frozen this scan.",
                     null));
+        }
+        // SAST coverage gap (M8.15 S5, D-104/D-030): a detected CODE language with no Opengrep pack is surfaced,
+        // not hidden. Computed from the just-detected languages (empty detection => nothing to say). The message
+        // lists the languages so it reads as a complete coverage-banner line; Vue/Svelte are included (change #7).
+        List<String> uncoveredLangs = SastLanguageCoverage.uncovered(parsed.languages());
+        if (!uncoveredLangs.isEmpty()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_LANGUAGE_UNCOVERED",
+                    "SAST has no rule pack for " + String.join(", ", uncoveredLangs)
+                            + ", so code in " + (uncoveredLangs.size() == 1 ? "that language" : "those languages")
+                            + " was not analyzed for code issues.", null));
         }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
