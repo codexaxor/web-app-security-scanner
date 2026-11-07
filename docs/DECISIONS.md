@@ -51,13 +51,15 @@ Decision (extends D-053; does NOT supersede it):
   `dangerous-asyncio-*-audit` orphans are KEPT** (no base rule → denying loses all async exec/shell coverage for
   zero observed noise).
 - **Category exclusion (noise control, NEW six packs only):** the packs load non-security categories too (of 651
-  distinct new check_ids: 528 security, **97** in best-practice/correctness/maintainability/performance, 26
-  "other" = 25 `compatibility` + 1 `caching`). At scan time Opengrep also `--exclude-rule`s every new-pack rule
-  whose `metadata.category` ∈ {best-practice, correctness, maintainability, performance}. The list is **generated**
-  by `scanner-image/gen_category_exclusions.py` into the committed `scanner-image/opengrep-excluded-by-category.txt`
-  (per-pack: python 83, go 11, ruby 2, scala 1, php 0, kotlin 0); `:app:opengrepExclusionsInImageTest` regenerates
-  it in-image and **fails the build on any diff** so category changes are reviewed. Rules with "other"/missing
-  categories are KEPT. Both lists are applied via `--exclude-rule` (confirmed to take the full check_id on 1.31.0)
+  distinct new check_ids: 528 security, **122** in best-practice/compatibility/correctness/maintainability/
+  performance, 1 "other" = `python.flask.caching.flask-cache-query-string` (`caching`), KEPT). At scan time
+  Opengrep also `--exclude-rule`s every new-pack rule whose `metadata.category` ∈ {best-practice, **compatibility**,
+  correctness, maintainability, performance}. `compatibility` (the 25 python36/37 + django-compat version-portability
+  rules) was added in an M8.15 follow-up — version portability is not a security risk in a scanned repo; the single
+  `caching` rule is kept. The list is **generated** by `scanner-image/gen_category_exclusions.py` into the committed
+  `scanner-image/opengrep-excluded-by-category.txt` (per-pack: python 108, go 11, ruby 2, scala 1, php 0, kotlin 0);
+  `:app:opengrepExclusionsInImageTest` regenerates it in-image and **fails the build on any diff** so category
+  changes are reviewed. Rules with "other"/missing categories are KEPT. Both lists are applied via `--exclude-rule` (confirmed to take the full check_id on 1.31.0)
   with a `run-scan.sh` `results[]` post-filter fallback; the in-image test proves every listed id is a real
   loaded check_id (no dead/typo), belongs to no existing pack, and is actually removed from a trigger scan.
 - **Locale:** run Opengrep under `LANG=C.UTF-8 LC_ALL=C.UTF-8` so loading a rule with non-ASCII text cannot crash
