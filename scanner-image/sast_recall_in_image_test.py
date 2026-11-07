@@ -4,15 +4,18 @@ SHIPPED baked rules + exclusion lists, scanning fixtures/sast-recall THE PRODUCT
 run-scan.sh over a file:// clone of the fixture, so the deny-list, category exclusions, C.UTF-8 locale,
 --taint-intrafile and the D-053/S1 sanitize all apply exactly as in a real scan. Proves:
 
-  1. RECALL: every expected (check_id, file) for the six NEW packs (python/go/php/ruby/kotlin/scala) is present
-     in the sanitized /out/opengrep.json — the packs actually fire on real vulnerable code in the real image.
+  1. RECALL: every expected (check_id, file) is present in the sanitized /out/opengrep.json — the six NEW packs
+     (python/go/php/ruby/kotlin/scala) AND the existing java/javascript/typescript packs actually fire on real
+     vulnerable code (incl. Spring JDBC/JPA SQLi, formatted SQL, command injection, XXE, actuator; express SQLi,
+     XSS sink, eval) in the real image.
   2. NEGATIVES: no finding lands on a fixtures/sast-recall/negative/ file.
   3. EXCLUSIONS HOLD: no denied or category-excluded check_id ever appears in the output (the S6 end-to-end
      guard promised in the S2 plan).
-  4. CANARY (BLOCKER): a unique fake secret planted in ruby/secret.rb (matched by a real hardcoded-secret rule)
-     appears NOWHERE in /out or in the scanner's stdout/stderr — proving the sanitize keeps matched source
-     values (extra.lines/metavars) out of the results, even though Opengrep can interpolate metavars into
-     extra.message (D-053/S1). A leak here fails the build and must be fixed by sanitizing messages in-container.
+  4. CANARY (BLOCKER): unique fake secrets planted in several hardcoded-secret cases (ruby/secret.rb,
+     java/application.properties, python/flask_secret.py) appear NOWHERE in /out or in the scanner's
+     stdout/stderr — proving the sanitize keeps matched source values (extra.lines/metavars) out of the results,
+     even though Opengrep can interpolate metavars into extra.message (D-053/S1). A leak fails the build and must
+     be fixed by sanitizing messages in-container.
 
 Run (as the gradle task does), mounting fixtures/sast-recall at /fixture:ro, inside the image:
     SCAN_CLONE_URL=file:///tmp/repo python3 -I /host/sast_recall_in_image_test.py
@@ -27,12 +30,13 @@ import sys
 FIXTURE = os.environ.get("FIXTURE", "/fixture")
 OUT = "/out"
 CHECKOUT_PREFIX = "/work/checkout/"
-CANARY = "L3AKcanaryZZZ9000"
 DENY_FILES = ("/etc/secscan/opengrep-denylist.txt", "/etc/secscan/opengrep-excluded-by-category.txt")
 
-# Expected (check_id, repo-relative file) for the six NEW packs — captured from a real run-scan.sh over this
-# fixture in the built image. Each is a NON-denied, NON-category-excluded security rule.
+# Expected (check_id, repo-relative file) — captured from a real run-scan.sh over this fixture in the built
+# image. Each is a NON-denied, NON-category-excluded security rule. Covers the six NEW packs AND the existing
+# java/javascript/typescript packs (so the YAML-only bake keeps the existing packs firing too).
 EXPECTED = {
+    # --- NEW packs ---
     ("opengrep-rules.python.lang.security.insecure-hash-algorithm-md5", "python/vuln.py"),
     ("opengrep-rules.python.lang.security.audit.subprocess-shell-true", "python/vuln.py"),
     ("opengrep-rules.python.lang.security.audit.eval-detected", "python/vuln.py"),
@@ -49,6 +53,30 @@ EXPECTED = {
     ("opengrep-rules.kotlin.lang.security.command-injection-formatted-runtime-call", "kotlin/Vuln.kt"),
     ("opengrep-rules.scala.lang.security.audit.dangerous-seq-run", "scala/Vuln.scala"),
     ("opengrep-rules.scala.lang.security.audit.insecure-random", "scala/Vuln.scala"),
+    ("opengrep-rules.python.flask.security.audit.avoid_hardcoded_config_SECRET_KEY", "python/flask_secret.py"),
+    # --- EXISTING java pack (incl. Spring) ---
+    ("opengrep-rules.java.lang.security.audit.sqli.jdbc-sqli", "java/SqlAndCmd.java"),
+    ("opengrep-rules.java.lang.security.audit.sqli.jpa-sqli", "java/SqlAndCmd.java"),
+    ("opengrep-rules.java.lang.security.audit.formatted-sql-string", "java/SqlAndCmd.java"),
+    ("opengrep-rules.java.lang.security.audit.command-injection-process-builder", "java/SqlAndCmd.java"),
+    ("opengrep-rules.java.lang.security.audit.xxe.documentbuilderfactory-disallow-doctype-decl-missing",
+     "java/Xxe.java"),
+    ("opengrep-rules.java.spring.security.audit.spring-actuator-fully-enabled", "java/application.properties"),
+    ("opengrep-rules.custom.spring-actuator-exposed", "java/application.properties"),
+    # --- EXISTING javascript/typescript packs ---
+    ("opengrep-rules.javascript.express.security.injection.tainted-sql-string", "js/app.js"),
+    ("opengrep-rules.javascript.express.security.audit.xss.direct-response-write", "js/app.js"),
+    ("opengrep-rules.javascript.browser.security.eval-detected", "js/app.js"),
+    ("opengrep-rules.javascript.browser.security.eval-detected", "ts/vuln.ts"),
+    ("opengrep-rules.javascript.browser.security.insecure-document-method", "ts/vuln.ts"),
+}
+
+# Canary cases: an obviously-fake secret planted in several hardcoded-secret rules' files. Each must appear
+# NOWHERE in /out or the scanner logs. {sentinel: fixture-relative file it is planted in}.
+CANARIES = {
+    "L3AKcanaryZZZ9000": "ruby/secret.rb",            # ruby brakeman check-secrets
+    "L3AKjdbcCanary7777": "java/application.properties",  # custom.hardcoded-connection-string
+    "L3AKflaskCanary5555": "python/flask_secret.py",  # python flask avoid_hardcoded_config_SECRET_KEY
 }
 
 failures = []
@@ -123,7 +151,7 @@ def main():
             fail(f"expected finding missing: {cid} on {rel}")
     else:
         print(f"recall OK: all {len(EXPECTED)} expected (check_id, file) present "
-              f"across python/go/php/ruby/kotlin/scala")
+              f"across the six new packs + existing java/javascript/typescript")
 
     # 2. negatives
     neg = sorted({p for (_c, p) in present if p.startswith("negative/")})
@@ -142,30 +170,34 @@ def main():
     else:
         print(f"exclusions OK: none of the {len(excluded)} excluded ids appear in the output")
 
-    # 4. canary — the planted secret must not reach /out or the scanner logs
-    hits = []
+    # 4. canaries — each planted secret must not reach /out or the scanner logs
+    out_blobs = {}
     for root, _dirs, files in os.walk(OUT):
         for name in files:
             p = os.path.join(root, name)
             try:
                 with open(p, "rb") as fh:
-                    if CANARY.encode() in fh.read():
-                        hits.append(p)
+                    out_blobs[p] = fh.read()
             except OSError:
                 pass
-    if CANARY in stdout:
-        hits.append("<run-scan stdout>")
-    if CANARY in stderr:
-        hits.append("<run-scan stderr>")
-    # sanity: the canary must actually be in the fixture (else the test proves nothing)
-    with open(os.path.join(FIXTURE, "ruby", "secret.rb"), encoding="utf-8") as fh:
-        if CANARY not in fh.read():
-            fail("canary sentinel not present in the fixture — the canary test is vacuous")
-    if hits:
-        fail("CANARY LEAKED into: " + ", ".join(hits)
-             + " — sanitize the matched value out in-container (D-053/S1) and record in D-104")
-    else:
-        print("canary OK: the planted secret appears nowhere in /out or the scanner logs")
+    for canary, rel in CANARIES.items():
+        # sanity: the canary must actually be in its fixture file (else the test proves nothing)
+        try:
+            with open(os.path.join(FIXTURE, *rel.split("/")), encoding="utf-8") as fh:
+                if canary not in fh.read():
+                    fail(f"canary {canary} not present in {rel} — that canary test is vacuous")
+        except OSError:
+            fail(f"canary fixture {rel} not readable — that canary test is vacuous")
+        hits = [p for p, blob in out_blobs.items() if canary.encode() in blob]
+        if canary in stdout:
+            hits.append("<run-scan stdout>")
+        if canary in stderr:
+            hits.append("<run-scan stderr>")
+        if hits:
+            fail(f"CANARY {canary} (from {rel}) LEAKED into: " + ", ".join(hits)
+                 + " — sanitize the matched value out in-container (D-053/S1) and record in D-104")
+        else:
+            print(f"canary OK ({rel}): the planted secret appears nowhere in /out or the scanner logs")
 
     if failures:
         print(f"\n{len(failures)} failure(s).")
