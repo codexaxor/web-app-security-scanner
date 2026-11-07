@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.spring.boot)
     alias(libs.plugins.spring.dependency.management)
@@ -61,6 +63,30 @@ tasks.withType<Test> {
     }
 }
 
+// Content hash of scanner-image/, mirroring buildScannerImage's find-based formula (skip dotfiles and
+// __pycache__). Declared as an input property on :app:test and every in-image test task so their up-to-date
+// checks are tied to the scanner image's content: a change to ANY baked scanner file re-runs those tasks
+// against the freshly rebuilt image instead of staying UP-TO-DATE / FROM-CACHE. Without it a scanner-image
+// change rebuilds the image (buildScannerImage reruns) but leaves :app:test UP-TO-DATE, so the ITs never
+// exercise the new image (the M8.15 S1 gate miss). It need not equal the docker label string — Gradle only
+// compares it against this task's own previous value, so any stable content hash detects the change.
+val scannerImageContentHash: Provider<String> = providers.provider {
+    val base = rootProject.file("scanner-image")
+    fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { b -> "%02x".format(b) }
+    val manifest = base.walkTopDown()
+        .filter { it.isFile }
+        .filterNot { f ->
+            f.relativeTo(base).invariantSeparatorsPath.split('/')
+                .any { seg -> seg.startsWith(".") || seg == "__pycache__" }
+        }
+        .map { f -> f.relativeTo(base).invariantSeparatorsPath + "\u0000" + sha256Hex(f.readBytes()) }
+        .sorted()
+        .joinToString("\n")
+    sha256Hex(manifest.toByteArray(Charsets.UTF_8))
+}
+
 // Builds the disposable scanner image (scanner-image/) that the worker ITs launch. The tag must match
 // ScannerProperties.image (D-023). Rebuilds when the image is missing OR when scanner-image/ changed: a
 // content hash of scanner-image/ is stamped on the image as a label, and we rebuild whenever the current
@@ -89,6 +115,8 @@ val buildScannerImage by tasks.registering(Exec::class) {
 
 tasks.named<Test>("test") {
     dependsOn(buildScannerImage)
+    // Re-run the suite (incl. the worker ITs that launch the scanner image) whenever the image content changes.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
 }
 
 // D-039 gate: the static Gradle resolver (scanner-image/gradle_resolver.py) is Python, so its unit tests run
@@ -193,6 +221,8 @@ val branchVectorsInImageTest by tasks.registering(Exec::class) {
     inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
     inputs.file(scannerDir.resolve("branch-vectors.json")).withPropertyName("branchVectors")
     inputs.file(scannerDir.resolve("branch_vectors_test.py")).withPropertyName("branchVectorsTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
     val marker = layout.buildDirectory.file("branch-vectors-in-image-test.ok")
     outputs.file(marker)
     commandLine(
@@ -216,6 +246,8 @@ val langDetectInImageTest by tasks.registering(Exec::class) {
     val scannerDir = rootProject.file("scanner-image")
     inputs.file(scannerDir.resolve("lang_detect.py")).withPropertyName("langDetect")
     inputs.file(scannerDir.resolve("lang_detect_in_image_test.py")).withPropertyName("langDetectInImageTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
     val marker = layout.buildDirectory.file("lang-detect-in-image-test.ok")
     outputs.file(marker)
     commandLine(
