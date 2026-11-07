@@ -43,7 +43,23 @@ Decision (extends D-053; does NOT supersede it):
   six NEW packs**: denying an existing java/csharp/js/ts rule would make reconcile "solve" its live findings
   (reads as fixed) — a separate decision, out of scope here. The final list is captured from REAL scanner output
   (hit counts on the recall fixture + plexicus + one real repo; audit-only-hit evidence), never guessed, and
-  human-approved (mirrors D-061's "seeded from real output").
+  human-approved (mirrors D-061's "seeded from real output"). **Finalized (S2, from plexicus@77baa1b + PyGoat +
+  DVWA; a real Celloscope repo was waived by the architect):** `scanner-image/opengrep-denylist.txt` = **20**
+  full check_ids — the **8 audit twins with a base rule** (php `assert-use-audit` + 7 python `dangerous-*-audit`;
+  the base keeps the real-risk subset), the **11 `wp-*-audit`** WordPress-plugin audit rules, and
+  `python.flask.security.audit.avoid_app_run_with_bad_host` (binding `0.0.0.0` is normal in containers). The **3
+  `dangerous-asyncio-*-audit` orphans are KEPT** (no base rule → denying loses all async exec/shell coverage for
+  zero observed noise).
+- **Category exclusion (noise control, NEW six packs only):** the packs load non-security categories too (of 651
+  distinct new check_ids: 528 security, **97** in best-practice/correctness/maintainability/performance, 26
+  "other" = 25 `compatibility` + 1 `caching`). At scan time Opengrep also `--exclude-rule`s every new-pack rule
+  whose `metadata.category` ∈ {best-practice, correctness, maintainability, performance}. The list is **generated**
+  by `scanner-image/gen_category_exclusions.py` into the committed `scanner-image/opengrep-excluded-by-category.txt`
+  (per-pack: python 83, go 11, ruby 2, scala 1, php 0, kotlin 0); `:app:opengrepExclusionsInImageTest` regenerates
+  it in-image and **fails the build on any diff** so category changes are reviewed. Rules with "other"/missing
+  categories are KEPT. Both lists are applied via `--exclude-rule` (confirmed to take the full check_id on 1.31.0)
+  with a `run-scan.sh` `results[]` post-filter fallback; the in-image test proves every listed id is a real
+  loaded check_id (no dead/typo), belongs to no existing pack, and is actually removed from a trigger scan.
 - **Locale:** run Opengrep under `LANG=C.UTF-8 LC_ALL=C.UTF-8` so loading a rule with non-ASCII text cannot crash
   with `UnicodeDecodeError`.
 - **Cross-function taint:** pass `--taint-intrafile` (intra-file inter-procedural taint; confirmed on 1.31.0). It
@@ -1831,6 +1847,10 @@ Decision: `workspace_id` on every business table from day one.
     later milestone once the single-engine coverage + noise profile is understood from the scorecard.
   - **Thicker Kotlin/Scala rule coverage:** the stock packs are thin (Kotlin 14, Scala 27 rules). Custom MIT
     rules for common Kotlin/Scala (e.g. Ktor/Spring-Kotlin, Play/Akka) weaknesses are a later add.
+  - **Non-security rules in the existing java/csharp/js/ts packs:** NOT excluded in M8.15 (S2 touches new packs
+    only). Removing/denying an existing rule would make reconcile "solve" its live findings (reads as fixed).
+    Needs a **"rule retired ≠ fixed"** decision (a dedicated terminal state / reason code so retiring a rule does
+    not masquerade as a fix) before any exclusion is applied to the four original packs.
   - **Four C# `ssrf` rules share one check_id (`opengrep-rules.csharp.lang.security.ssrf.ssrf`)** — pre-existing
     in the D-053 `csharp` pack (four `ssrf.yaml` files under `csharp/lang/security/ssrf/`, all `id: ssrf`;
     the filename is not part of the check_id). Opengrep loads four rule definitions but one distinct check_id,

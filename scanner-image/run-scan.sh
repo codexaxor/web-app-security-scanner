@@ -314,10 +314,24 @@ SAST_RAW="$WORK/opengrep-raw.json"
 # raw lines/metavars stripped (S1); only the hash leaves the container.
 SAST_TMP=/opt/sast-exec
 OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" opengrep --version 2>/dev/null | head -1)"
+# SAST noise control (D-104, M8.15 S2): exclude the baked deny-list + category-exclusion check_ids via
+# --exclude-rule. Both lists are NEW-pack-only (never an existing java/csharp/js/ts rule — that would make
+# reconcile "solve" the removed rule's live findings). '#' comments and blank lines are stripped; ids are
+# full check_ids (no spaces/globs). A results[] post-filter below is the fallback, because opengrep silently
+# ignores an unknown --exclude-rule id, so a typo would otherwise pass through.
+SAST_EXCLUDE_IDS="$WORK/sast-exclude-ids.txt"
+cat /etc/secscan/opengrep-denylist.txt /etc/secscan/opengrep-excluded-by-category.txt 2>/dev/null \
+    | sed 's/#.*$//' | awk 'NF{$1=$1; print}' | sort -u > "$SAST_EXCLUDE_IDS"
+OPENGREP_EXCLUDE_ARGS=""
+while IFS= read -r _xid; do
+    [ -n "$_xid" ] && OPENGREP_EXCLUDE_ARGS="$OPENGREP_EXCLUDE_ARGS --exclude-rule $_xid"
+done < "$SAST_EXCLUDE_IDS"
+echo "opengrep: excluding $(wc -l < "$SAST_EXCLUDE_IDS" | tr -d ' ') check_ids (deny-list + category exclusions)" >&2
 START="$(date +%s)"
 set +e
+# shellcheck disable=SC2086 # $OPENGREP_EXCLUDE_ARGS MUST word-split into individual --exclude-rule <id> args.
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
-    opengrep scan --config opengrep-rules --json-output="$SAST_RAW" \
+    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
     >"$WORK/opengrep.log" 2>&1
 SAST_EXIT=$?
@@ -337,7 +351,12 @@ fi
 # REMOVED and extra.snippet_sha256 added. The raw matched lines never reach /out. ---
 : > "$WORK/sast.ndjson"
 if [ "$SAST_STATUS" = "ok" ]; then
-    jq -c '.results[]?' "$SAST_RAW" 2>/dev/null | while IFS= read -r result; do
+    # Post-filter fallback (D-104): drop any result whose check_id is in the exclude list, in case
+    # --exclude-rule did not take (e.g. an id opengrep did not recognize). Belt-and-suspenders with the flag.
+    jq -c --rawfile ex "$SAST_EXCLUDE_IDS" \
+        '(($ex | split("\n") | map(select(length > 0))) as $deny | .results[]?
+          | select(((.check_id // "") as $c | $deny | index($c)) | not))' \
+        "$SAST_RAW" 2>/dev/null | while IFS= read -r result; do
         snippet="$(printf '%s' "$result" | jq -r '.extra.lines // ""')"
         hash="$(printf '%s' "$snippet" | awk 'NF>0{$1=$1;print}' | sha256sum | cut -d' ' -f1)"
         unset snippet

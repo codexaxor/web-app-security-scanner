@@ -259,7 +259,35 @@ val langDetectInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-104 gate (M8.15 S2): the SAST exclusion lists (deny-list + category-exclusion) are applied INSIDE the
+// image, so verify them there against the SHIPPED baked rules — the category list regenerates byte-for-byte
+// (diff gate), no excluded id is dead or belongs to an existing pack, and --exclude-rule actually removes
+// every listed id from a synthetic trigger scan. Runs as --user 0 (logic-only, like the sibling in-image
+// tests); production USER 10001 + hardening unchanged.
+val opengrepExclusionsInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the SAST deny-list + category exclusions inside the scanner image (D-104, M8.15 S2)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("gen_category_exclusions.py")).withPropertyName("genCategoryExclusions")
+    inputs.file(scannerDir.resolve("opengrep-denylist.txt")).withPropertyName("denylist")
+    inputs.file(scannerDir.resolve("opengrep-excluded-by-category.txt")).withPropertyName("categoryExclusions")
+    inputs.file(scannerDir.resolve("opengrep_exclusions_in_image_test.py")).withPropertyName("exclusionsTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("opengrep-exclusions-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-e", "HOST=/host",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/opengrep_exclusions_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
-        branchVectorsInImageTest, langDetectInImageTest)
+        branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest)
 }
