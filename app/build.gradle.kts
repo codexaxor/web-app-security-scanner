@@ -287,7 +287,32 @@ val opengrepExclusionsInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-104 gate (M8.15 S3): Opengrep must load rules containing non-ASCII text, which it only does under a UTF-8
+// locale. Proven inside the image: C.UTF-8 loads+fires a non-ASCII rule, a forced non-UTF-8 locale crashes on
+// it, and run-scan.sh sets C.UTF-8 for the opengrep scan. --user 0 logic-only (like the sibling in-image tests).
+val opengrepLocaleInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify Opengrep loads non-ASCII rules under C.UTF-8 inside the scanner image (D-104, M8.15 S3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
+    inputs.file(scannerDir.resolve("opengrep_locale_in_image_test.py")).withPropertyName("localeTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("opengrep-locale-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-e", "HOST=/host",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/opengrep_locale_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
-        branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest)
+        branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
+        opengrepLocaleInImageTest)
 }

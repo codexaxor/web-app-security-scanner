@@ -313,7 +313,11 @@ SAST_RAW="$WORK/opengrep-raw.json"
 # (D-023/D-027). We compute the normalized-snippet SHA-256 HERE and write a sanitized report to /out with the
 # raw lines/metavars stripped (S1); only the hash leaves the container.
 SAST_TMP=/opt/sast-exec
-OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" opengrep --version 2>/dev/null | head -1)"
+# Locale (D-104, M8.15 S3): the opengrep CLI (Python) reads rule YAML with the locale's preferred encoding, so
+# under a non-UTF-8 locale (e.g. LC_ALL=C) a rule containing non-ASCII text crashes with a UnicodeDecodeError
+# ('ascii' codec ...). Force C.UTF-8 for every opengrep invocation so non-ASCII rules load. Scoped to opengrep
+# (not exported) so the other tools' behaviour is unchanged. Proven by opengrepLocaleInImageTest.
+OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" LANG=C.UTF-8 LC_ALL=C.UTF-8 opengrep --version 2>/dev/null | head -1)"
 # SAST noise control (D-104, M8.15 S2): exclude the baked deny-list + category-exclusion check_ids via
 # --exclude-rule. Both lists are NEW-pack-only (never an existing java/csharp/js/ts rule — that would make
 # reconcile "solve" the removed rule's live findings). '#' comments and blank lines are stripped; ids are
@@ -331,6 +335,7 @@ START="$(date +%s)"
 set +e
 # shellcheck disable=SC2086 # $OPENGREP_EXCLUDE_ARGS MUST word-split into individual --exclude-rule <id> args.
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
     >"$WORK/opengrep.log" 2>&1
