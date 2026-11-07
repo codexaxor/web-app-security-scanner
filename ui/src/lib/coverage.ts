@@ -32,6 +32,8 @@ export const WARNING_BANNERS: Record<string, string> = {
   SECSCAN_CONFIG_NO_REASON: "An ignore entry in .secscan.yml was skipped because it had no reason.",
   SECSCAN_CONFIG_OUTSIDE_CLONE: "An ignore path in .secscan.yml pointed outside the repository and was skipped.",
   SCANNER_IMAGE_MISSING: "A scanner was unavailable for the last scan, so some findings were not updated.",
+  SAST_FILES_SKIPPED:
+    "Some files could not be fully analyzed for code issues in the last scan, so their findings were left unchanged.",
 };
 
 /**

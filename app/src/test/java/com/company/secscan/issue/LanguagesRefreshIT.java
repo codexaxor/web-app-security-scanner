@@ -27,7 +27,7 @@ class LanguagesRefreshIT extends TriageSeedSupport {
     private ParsedScan parsed(List<String> languages) {
         ScannerTaskResult sca = new ScannerTaskResult("sca", "ok", 0, 5L, "osv.json", false);
         return new ParsedScan(false, "commit-lang", Map.of(), List.of(sca), List.of(), List.of(),
-                SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), languages);
+                SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), languages, List.of());
     }
 
     private UUID recordScan(UUID repo, List<String> languages) {

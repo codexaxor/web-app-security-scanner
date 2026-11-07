@@ -154,6 +154,22 @@ public class ScanStateService {
                             + ", so code in " + (uncoveredLangs.size() == 1 ? "that language" : "those languages")
                             + " was not analyzed for code issues.", null));
         }
+        // SAST partial coverage (M8.15 S6 follow-up, D-104/D-030): files Opengrep could not fully analyze this
+        // scan (errors[] — Timeout/ParseError/…). Surface a coverage warning (count + distinct error TYPES only —
+        // no path or source text) so the gap is shown, not hidden; the freeze that keeps their findings from
+        // false-solving is applied in reconcile (via TriageContext below).
+        List<com.company.secscan.scan.parse.SastSkippedFile> skipped = parsed.sastSkippedFiles();
+        if (!skipped.isEmpty()) {
+            java.util.TreeSet<String> types = new java.util.TreeSet<>();
+            skipped.forEach(sf -> types.addAll(sf.errorTypes()));
+            String typeList = types.isEmpty() ? "errors" : String.join(", ", types);
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_FILES_SKIPPED",
+                    "Opengrep could not fully analyze " + skipped.size() + " file"
+                            + (skipped.size() == 1 ? "" : "s") + " in the last scan (" + typeList
+                            + "); existing code findings in "
+                            + (skipped.size() == 1 ? "that file" : "those files")
+                            + " were left unchanged (not marked solved).", null));
+        }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
         }
@@ -176,9 +192,11 @@ public class ScanStateService {
                 || (parsed.config().present() && Boolean.TRUE.equals(parsed.config().includeDevDependencies()));
         boolean epssAutoIgnore = workspaces.findById(workspaceId)
                 .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        List<String> sastSkippedPaths = parsed.sastSkippedFiles().stream()
+                .map(com.company.secscan.scan.parse.SastSkippedFile::path).toList();
         com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
                 parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore,
-                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests());
+                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests(), sastSkippedPaths);
         reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {

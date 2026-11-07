@@ -338,12 +338,21 @@ OPENGREP_TAINT_ARG=""
 if [ "${SAST_TAINT_INTRAFILE:-1}" = "1" ]; then
     OPENGREP_TAINT_ARG="--taint-intrafile"
 fi
+# Per-file rule timeout (D-104, M8.15 S6 follow-up). Opengrep 1.31.0 defaults: --timeout 5.0 s (max time one rule
+# may run on one file; 0 = no limit) and --timeout-threshold 3 (max rules that may time out on a file before the
+# WHOLE file is skipped; 0 = no limit). At the 5 s default a slow rule (e.g. formatted-sql-string) times out on
+# large files, silently DROPPING its matches there — so a real finding can vanish for a non-fix reason. We raise
+# the per-rule timeout to 60 s (clears every file on real repos we measured; a pathological rule×file is still
+# bounded well under the 30-min container timeout) and keep the threshold at 3 as a safety valve. Any file still
+# reported in errors[] is carried to the worker as a skipped file and its findings are frozen, never solved.
+OPENGREP_TIMEOUT_ARGS="--timeout ${SAST_RULE_TIMEOUT:-60} --timeout-threshold ${SAST_TIMEOUT_THRESHOLD:-3}"
 START="$(date +%s)"
 set +e
 # shellcheck disable=SC2086 # $OPENGREP_EXCLUDE_ARGS MUST word-split into individual --exclude-rule <id> args.
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG --json-output="$SAST_RAW" \
+    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG $OPENGREP_TIMEOUT_ARGS \
+    --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
     >"$WORK/opengrep.log" 2>&1
 SAST_EXIT=$?
@@ -377,7 +386,20 @@ if [ "$SAST_STATUS" = "ok" ]; then
             >> "$WORK/sast.ndjson"
     done
 fi
-jq -s '{results: ., errors: []}' "$WORK/sast.ndjson" > "$SAST_JSON"
+# Skipped files (D-104, M8.15 S6 follow-up): distill Opengrep's errors[] into the repo-relative files it could
+# not fully analyze, carrying ONLY the path and the error-TYPE classifications (Timeout/ParseError/…) — never a
+# message or any source text (D-053/S1). The worker freezes these files' SAST findings (never false-solved) and
+# raises SAST_FILES_SKIPPED. The $CHECKOUT prefix is stripped to a repo-relative path here.
+SAST_SKIPPED="$WORK/sast-skipped.json"
+jq -c --arg co "$CHECKOUT/" \
+    '[.errors[]? | (.location.path // .path) as $p | select($p != null)
+      | {path: ($p | ltrimstr($co)), type: ((.type // .error_type // "error") | tostring)}]
+     | group_by(.path)
+     | map({path: .[0].path, errorTypes: (map(.type) | unique)})' \
+    "$SAST_RAW" 2>/dev/null > "$SAST_SKIPPED" || printf '[]' > "$SAST_SKIPPED"
+[ -s "$SAST_SKIPPED" ] || printf '[]' > "$SAST_SKIPPED"
+jq -s --slurpfile sk "$SAST_SKIPPED" '{results: ., errors: [], skippedFiles: ($sk[0] // [])}' \
+    "$WORK/sast.ndjson" > "$SAST_JSON"
 if [ "$SAST_STATUS" = "failed" ] && [ -s "$WORK/opengrep.log" ]; then
     echo "opengrep failed (exit $SAST_EXIT); last output follows:" >&2
     tail -c 4000 "$WORK/opengrep.log" >&2 || true

@@ -92,13 +92,32 @@ Decision (extends D-053; does NOT supersede it):
   1.31.0 the js/ts rules TARGET `.vue`/`.svelte` (they appear in `paths.scanned`, 182 rules applied) but produce
   ZERO findings even for a top-level `eval()`/`document.write()` that fires three JS rules in a `.js` file — so
   their `<script>` code is effectively unanalyzed.
-- **Recall fixture (S6):** `fixtures/sast-recall` has a vulnerable file per new pack + negatives + a canary case
-  (`ruby/secret.rb`, an obviously-fake hardcoded secret). `:app:sastRecallInImageTest` scans it the PRODUCTION
-  way (real `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
-  `(check_id, file)` fires (16 across all six packs), no finding on a `negative/` file, NO denied/category-excluded
-  id ever appears, and the **canary value appears nowhere in `/out` or the scanner logs** — the D-053/S1 sanitize
-  (strips `extra.lines`/`extra.metavars`) holds; Opengrep did NOT interpolate the matched value into
-  `extra.message` for the firing rules, so no in-container message sanitization was needed.
+- **Recall fixture (S6):** `fixtures/sast-recall` has a vulnerable file per NEW pack AND existing-pack cases —
+  Java/Spring (JDBC + JPA SQLi, formatted-SQL-string, `ProcessBuilder` command injection, XXE, actuator) and
+  JS/TS (express SQLi, XSS sink, `eval`) — plus negatives and three canary cases (`ruby/secret.rb`,
+  `java/application.properties` → `custom.hardcoded-connection-string`, `python/flask_secret.py` → Flask
+  `SECRET_KEY`), each an obviously-fake secret. `:app:sastRecallInImageTest` scans it the PRODUCTION way (real
+  `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
+  `(check_id, file)` fires (29, across all six new packs + java/javascript/typescript), no finding on a
+  `negative/` file, NO denied/category-excluded id ever appears, and **no canary value appears anywhere in
+  `/out` or the scanner logs** — the D-053/S1 sanitize (strips `extra.lines`/`extra.metavars`) holds; Opengrep
+  did NOT interpolate a matched secret into `extra.message` for the firing rules, so no in-container message
+  sanitization was needed.
+- **Per-rule timeout + skipped files close nothing (S6 follow-up):** Opengrep's default per-rule timeout is
+  **5.0 s** (`--timeout`; max seconds one rule may run on one file, 0 = no limit) with `--timeout-threshold 3`
+  (max rules that may time out on a file before the WHOLE file is skipped, 0 = no limit). At 5 s a slow rule
+  (e.g. `formatted-sql-string`) times out on large files and SILENTLY DROPS its matches there, so a real finding
+  could vanish for a non-fix reason. `run-scan.sh` now runs with **`--timeout 60 --timeout-threshold 3`** (60 s
+  clears every file on the repos measured, incl. `ib-api`'s 2594 Java files → 0 timeout-skipped files; a
+  pathological rule×file is still bounded far under the 30-min container timeout; threshold 3 kept as a safety
+  valve). Any file Opengrep still reports in `errors[]` (any type) is carried to the worker as a **skipped file**
+  — PATHS + error-TYPE classifications only, never a message or source (D-053/S1) — in `opengrep.json`
+  `skippedFiles[]`. At reconcile, every OPEN SAST finding whose file is skipped is **frozen** (left untouched —
+  never solved/reopened, no `triage_event`), exactly like the EOL coverage guard; SAST findings in fully-scanned
+  files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types), mapped in the coverage
+  banner (D-030). This enforces domain rule 3 (a scanner that did not fully cover a file closes nothing there)
+  at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
+  fingerprint)` set both runs.
 - **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
   **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
   stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer
@@ -1885,13 +1904,12 @@ Decision: `workspace_id` on every business table from day one.
     snippets stay distinct findings under the shared rule id. Left as-is: giving each a unique id would change
     the check_id and churn existing SAST fingerprints (check_id is a fingerprint input, D-053). Noted so a
     future pack bump / rename weighs the fingerprint churn.
-  - **`formatted-sql-string` per-file Timeout on very large files:** measured on the real `ib-api` repo —
-    `java.lang.security.audit.formatted-sql-string` exceeded Opengrep's default per-rule-per-file timeout
-    (5 s) on 1–2 large files under the heavier 10-pack + `--taint-intrafile` run, dropping those files' matches
-    (24→14 hits on that repo; errors array showed `Timeout` for that rule). Pre-existing (the 4-pack baseline
-    already timed out on one file), aggravated by the heavier run. A recall gap on very large files only, not an
-    exclusion/taint-logic effect. Deferred: consider raising `--timeout` (scan-time cost) or per-rule timeout if
-    it recurs on real repos; needs a timing/recall trade-off decision.
+  - **`formatted-sql-string` per-file Timeout on very large files — RESOLVED (M8.15 S6 follow-up):** measured on
+    the real `ib-api` repo, `java.lang.security.audit.formatted-sql-string` exceeded Opengrep's default 5 s
+    per-rule timeout on 1–2 large files, dropping their matches. Fixed by running with `--timeout 60`
+    (0 timeout-skipped files on ib-api; findings 70→88) and, as a safety net for any file that still times out
+    or parse-errors on another repo, the skipped-file FREEZE (those files' findings are never false-solved) +
+    `SAST_FILES_SKIPPED` warning. See the D-104 "per-rule timeout + skipped files" decision above.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;

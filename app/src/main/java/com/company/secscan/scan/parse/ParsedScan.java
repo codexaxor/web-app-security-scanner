@@ -12,7 +12,8 @@ import java.util.Map;
 public record ParsedScan(boolean cloneFailed, String commit, Map<String, String> toolVersions,
                          List<ScannerTaskResult> tasks, List<RawFinding> findings, List<ScanWarning> warnings,
                          SecscanConfig config, List<DeclaredScope> declaredScopes, String scopeInventoryStatus,
-                         List<String> unreadableScopeManifests, List<String> languages) {
+                         List<String> unreadableScopeManifests, List<String> languages,
+                         List<SastSkippedFile> sastSkippedFiles) {
 
     /** The scope inventory ran cleanly; {@code "ok"} means dev/test scope state is authoritative this scan (S3). */
     public static final String SCOPE_STATUS_OK = "ok";
@@ -24,6 +25,9 @@ public record ParsedScan(boolean cloneFailed, String commit, Map<String, String>
         // M8.5 (D-081): the content-detected languages; empty when detection failed or found none (the worker
         // then leaves repository.languages unchanged).
         languages = languages == null ? List.of() : List.copyOf(languages);
+        // M8.15 S6 follow-up (D-104): files Opengrep could not fully analyze (errors[]); the worker freezes their
+        // SAST findings and raises SAST_FILES_SKIPPED. Paths + error-type classifications only (D-053/S1).
+        sastSkippedFiles = sastSkippedFiles == null ? List.of() : List.copyOf(sastSkippedFiles);
     }
 
     /** True when the dev/test scope inventory failed GLOBALLY → the worker freezes all scope-derived triage (S3). */
@@ -33,6 +37,6 @@ public record ParsedScan(boolean cloneFailed, String commit, Map<String, String>
 
     public static ParsedScan cloneFailure() {
         return new ParsedScan(true, null, Map.of(), List.of(), List.of(), List.of(), SecscanConfig.absent(),
-                List.of(), SCOPE_STATUS_OK, List.of(), List.of());
+                List.of(), SCOPE_STATUS_OK, List.of(), List.of(), List.of());
     }
 }

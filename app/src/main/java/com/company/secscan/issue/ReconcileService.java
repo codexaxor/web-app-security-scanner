@@ -156,6 +156,11 @@ public class ReconcileService {
         // product in the same scan is uncovered). Both partitions keep every other finding reconciling normally.
         Set<String> frozenFingerprints = new HashSet<>(secretKeyGuard(existingSubs));
         frozenFingerprints.addAll(eolCoverageGuard(existingSubs));
+        // M8.15 S6 follow-up (D-104): any file Opengrep could not FULLY analyze this scan (a per-rule/-file
+        // Timeout, a ParseError, …) is only partially covered, so its open SAST findings are FROZEN — never
+        // false-solved because a rule did not get to run on them (domain rule 3). Other SAST findings, and SAST
+        // findings in fully-scanned files, reconcile normally.
+        frozenFingerprints.addAll(sastSkippedFileGuard(existingSubs, triage.sastSkippedFilesNormalized()));
 
         List<Existing> existing = new ArrayList<>(existingSubs.size());
         for (SubIssue s : existingSubs) {
@@ -307,6 +312,38 @@ public class ReconcileService {
             log.info("EOL coverage guard: {} open EOL finding(s) have no eol_cycle coverage and are frozen "
                     + "(never false-solved) this scan; covered EOL findings reconcile normally (BUG 1).",
                     frozen.size());
+        }
+        return frozen;
+    }
+
+    /**
+     * M8.15 S6 follow-up — never false-solve a partially-analyzed file. Any file Opengrep reported in its
+     * {@code errors[]} this scan (a per-rule/-file {@code Timeout}, a {@code ParseError}, …) had some rules fail
+     * to run on it, so a real SAST finding there could be absent from this scan for a NON-fix reason. Every OPEN
+     * SAST sub-issue whose {@code file_path} is one of those skipped files is FROZEN (left untouched — never
+     * solved/reopened, no event), exactly like the EOL coverage guard. SAST findings in fully-scanned files
+     * reconcile normally. New detections in a skipped file still open (a rule that DID run found them).
+     *
+     * @return the SAST fingerprints to freeze this scan (empty when no file was skipped)
+     */
+    private Set<String> sastSkippedFileGuard(List<SubIssue> existingSubs, Set<String> skippedNormalized) {
+        if (skippedNormalized.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> frozen = new HashSet<>();
+        for (SubIssue s : existingSubs) {
+            if (com.company.secscan.finding.RawFinding.TYPE_SAST.equals(s.getType())
+                    && SubIssue.STATUS_OPEN.equals(s.getStatus())
+                    && s.getFilePath() != null
+                    && skippedNormalized.contains(
+                            com.company.secscan.triage.PathExclusion.normalize(s.getFilePath()))) {
+                frozen.add(s.getFingerprint());
+            }
+        }
+        if (!frozen.isEmpty()) {
+            log.info("SAST skipped-file guard: {} open SAST finding(s) sit in {} file(s) Opengrep could not fully "
+                    + "analyze this scan and are frozen (never false-solved); other findings reconcile normally.",
+                    frozen.size(), skippedNormalized.size());
         }
         return frozen;
     }

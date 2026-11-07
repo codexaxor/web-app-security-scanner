@@ -53,6 +53,7 @@ public class ScannerOutputParser {
         // MISSING_NUGET_LOCKFILE (no sibling packages.lock.json on disk) keep their .csproj-sourced SCA findings;
         // see parseOsv (D-035).
         List<ScanWarning> warnings = new ArrayList<>();
+        List<SastSkippedFile> sastSkippedFiles = List.of();
         java.util.Set<String> csprojMissingLockfile = new java.util.HashSet<>();
         if (m.warnings != null) {
             for (ManifestWarning w : m.warnings) {
@@ -96,6 +97,7 @@ public class ScannerOutputParser {
                         warnings, syntheticPoms));
             } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
+                sastSkippedFiles = parseOpengrepSkippedFiles(outDir.resolve(s.findingsFile), m.checkoutPath);
             } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
                 findings.addAll(parseCheckov(outDir.resolve(s.findingsFile), warnings));
             } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
@@ -109,7 +111,7 @@ public class ScannerOutputParser {
                 : List.copyOf(m.unreadableScopeManifests);
         List<String> languages = readLanguages(outDir.resolve("languages.json"));
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages, sastSkippedFiles);
     }
 
     /**
@@ -316,6 +318,39 @@ public class ScannerOutputParser {
             String label = sastSeverityLabel(r.extra);
             List<String> cwe = r.extra == null ? List.of() : cweOf(r.extra.metadata);
             out.add(RawFinding.sast(r.checkId, filePath, line, snippetHash, label, rawLevel, cwe));
+        }
+        return out;
+    }
+
+    /**
+     * Reads the {@code skippedFiles} that run-scan.sh distilled from Opengrep's {@code errors[]} (M8.15 S6
+     * follow-up, D-104): the repo-relative files some rule could not finish analyzing (per-file {@code Timeout},
+     * {@code ParseError}, …) with their error-TYPE classifications only — never a message or source text
+     * (D-053/S1). A path that is absolute or escapes the checkout is dropped (defense in depth — it must never
+     * drive a freeze against the wrong file). Paths are already repo-relative in the sanitized report; we
+     * relativize defensively in case a future report ships absolute paths.
+     */
+    List<SastSkippedFile> parseOpengrepSkippedFiles(Path json, String checkoutPath) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        if (report == null || report.skippedFiles == null) {
+            return List.of();
+        }
+        List<SastSkippedFile> out = new ArrayList<>();
+        for (OpengrepSkippedFile sf : report.skippedFiles) {
+            if (sf == null || sf.path == null) {
+                continue;
+            }
+            String rel = relativize(sf.path, checkoutPath);
+            if (isPathOutsideCheckout(rel)) {
+                log.warn("Dropping Opengrep skipped-file entry with a path outside the checkout: {}", sf.path);
+                continue;
+            }
+            List<String> types = sf.errorTypes == null ? List.of()
+                    : sf.errorTypes.stream().filter(java.util.Objects::nonNull).toList();
+            out.add(new SastSkippedFile(rel, types));
         }
         return out;
     }
@@ -980,6 +1015,13 @@ public class ScannerOutputParser {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static final class OpengrepReport {
         public List<OpengrepResult> results;
+        public List<OpengrepSkippedFile> skippedFiles;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepSkippedFile {
+        public String path;
+        public List<String> errorTypes;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

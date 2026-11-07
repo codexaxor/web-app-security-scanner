@@ -74,6 +74,15 @@ describe("coverageBanners", () => {
     ).toEqual([WARNING_BANNERS.MISSING_GRADLE_LOCKFILE, message]);
   });
 
+  it("maps SAST_FILES_SKIPPED to its fixed banner text once", () => {
+    expect(
+      coverageBanners({
+        tasks: [],
+        warnings: w("SAST_FILES_SKIPPED", "SAST_FILES_SKIPPED"),
+      }),
+    ).toEqual([WARNING_BANNERS.SAST_FILES_SKIPPED]);
+  });
+
   it("never tells the user to change the repository (D-030)", () => {
     const all = Object.values(WARNING_BANNERS).join(" ").toLowerCase();
     for (const banned of ["add a lockfile", "commit", "fix the", "edit the repository", "push"]) {

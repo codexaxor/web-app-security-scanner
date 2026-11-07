@@ -141,7 +141,7 @@ class BranchMissingIT extends AbstractScanWorkerIT {
         scans.save(scan);
         ScannerTaskResult sca = new ScannerTaskResult("sca", "ok", 0, 5L, "osv.json", false);
         ParsedScan parsed = new ParsedScan(false, "commit-ok", Map.of(), List.of(sca), List.of(), List.of(),
-                SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), List.of());
+                SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), List.of(), List.of());
         state.recordSuccess(WORKSPACE, scan.getId(), UUID.randomUUID(), repo.getId(), parsed, null,
                 Scan.STATUS_COMPLETED);
 
