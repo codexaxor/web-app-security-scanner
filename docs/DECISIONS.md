@@ -1831,6 +1831,13 @@ Decision: `workspace_id` on every business table from day one.
     later milestone once the single-engine coverage + noise profile is understood from the scorecard.
   - **Thicker Kotlin/Scala rule coverage:** the stock packs are thin (Kotlin 14, Scala 27 rules). Custom MIT
     rules for common Kotlin/Scala (e.g. Ktor/Spring-Kotlin, Play/Akka) weaknesses are a later add.
+  - **Four C# `ssrf` rules share one check_id (`opengrep-rules.csharp.lang.security.ssrf.ssrf`)** — pre-existing
+    in the D-053 `csharp` pack (four `ssrf.yaml` files under `csharp/lang/security/ssrf/`, all `id: ssrf`;
+    the filename is not part of the check_id). Opengrep loads four rule definitions but one distinct check_id,
+    so hits on the identical normalized snippet at the same file merge to one SAST fingerprint, and distinct
+    snippets stay distinct findings under the shared rule id. Left as-is: giving each a unique id would change
+    the check_id and churn existing SAST fingerprints (check_id is a fingerprint input, D-053). Noted so a
+    future pack bump / rename weighs the fingerprint churn.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;
