@@ -340,8 +340,34 @@ val sastRecallInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-104 gate (M8.15 S7): the custom MIT rules (scorecard-driven) must fire on their positive fixture and stay
+// silent on their negative, inside the built image, in the default build. --user 0 logic-only (like the sibling
+// in-image tests); production hardening unchanged.
+val customRulesInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the custom MIT SAST rules fire on positives + stay silent on negatives (D-104, M8.15 S7)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-custom")
+    inputs.file(scannerDir.resolve("custom_rules_in_image_test.py")).withPropertyName("customRulesTest")
+    inputs.dir(scannerDir.resolve("opengrep-rules-custom")).withPropertyName("customRules")
+    inputs.dir(fixtureDir).withPropertyName("customFixtures")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("custom-rules-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/custom_rules_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
         branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
-        opengrepLocaleInImageTest, sastRecallInImageTest)
+        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest)
 }

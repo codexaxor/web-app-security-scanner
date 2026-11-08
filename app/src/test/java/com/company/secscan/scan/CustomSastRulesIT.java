@@ -45,7 +45,14 @@ class CustomSastRulesIT extends AbstractScanWorkerIT {
             new String[] {"spring-spel-injection", "positive/Eval.java"},
             new String[] {"spring-actuator-exposed", "positive/application.properties"},
             new String[] {"hardcoded-connection-string", "positive/appsettings.json"},
-            new String[] {"aspnet-allowanonymous-admin", "positive/AdminController.cs"});
+            new String[] {"aspnet-allowanonymous-admin", "positive/AdminController.cs"},
+            // M8.15 S7 scorecard-driven MIT rules
+            new String[] {"servlet-trust-boundary-session", "positive/ServletVulns.java"},
+            new String[] {"servlet-reflected-xss-inline", "positive/ServletVulns.java"},
+            new String[] {"mybatis-dollar-sql-injection", "positive/OrderMapper.java"},
+            new String[] {"nodejs-nosql-where-injection", "positive/nosql.js"},
+            new String[] {"nodejs-ssrf-http-client", "positive/ssrf.js"},
+            new String[] {"nodejs-unsafe-yaml-load", "positive/unsafeyaml.js"});
 
     static Path workRoot;
     static Path fixtureRepo;

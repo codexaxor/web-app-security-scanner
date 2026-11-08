@@ -127,6 +127,18 @@ Decision (extends D-053; does NOT supersede it):
   (a scanner that did not fully cover a file closes nothing there)
   at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
   fingerprint)` set both runs.
+- **Scorecard + custom MIT rules (S7):** `scorecard/score_benchmark.py` (committed; benchmarks never committed)
+  scores the production config against OWASP BenchmarkJava v1.2 (`d4f6f3a`, GPL-2.0), Juice Shop (`717f5ef`, MIT)
+  and NodeGoat (`c5cb68a`, Apache-2.0), static only. Six MIT rules in `scanner-image/opengrep-rules-custom/` cover
+  the weakest **addressable** categories (full tables in `docs/reports/SAST_SCORECARD.md`): Java
+  `servlet-trust-boundary-session` (CWE-501, the weakest category 0.22 → 0.33), `mybatis-dollar-sql-injection`
+  (CWE-89), `servlet-reflected-xss-inline` (CWE-79); JS `nodejs-nosql-where-injection` (CWE-943),
+  `nodejs-ssrf-http-client` (CWE-918), `nodejs-unsafe-yaml-load` (CWE-502) — the three JS classes were 0-detection
+  on Juice Shop/NodeGoat before. Categories whose weakness is existing-rule **FPR** (sqli/cmdi/ldapi/pathtraver)
+  are NOT targeted — adding rules can't lower FPR and retiring a pack rule is out of scope (`rule retired ≠
+  fixed`). Real-world noise check: all three Java rules fire **0** times on ib-api (0 FP). Each rule has a
+  positive + negative fixture in `fixtures/sast-custom/`, asserted in the default build by
+  `:app:customRulesInImageTest` (+ the live `CustomSastRulesIT`).
 - **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
   **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
   stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer

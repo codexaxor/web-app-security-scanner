@@ -1,0 +1,24 @@
+rules:
+  - id: nodejs-ssrf-http-client
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "A server-side HTTP request is sent to a URL built from request data (SSRF, CWE-918). Validate the URL against an allowlist of hosts before requesting it."
+    metadata:
+      cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+      category: security
+      license: MIT
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+    pattern-sinks:
+      - pattern: needle.get($URL, ...)
+      - pattern: needle.request($M, $URL, ...)
+      - pattern: http.get($URL, ...)
+      - pattern: https.get($URL, ...)
+      - pattern: http.request($URL, ...)
+      - pattern: https.request($URL, ...)
+      - pattern: axios.get($URL, ...)
+      - pattern: axios($URL, ...)
+      - pattern: fetch($URL, ...)
