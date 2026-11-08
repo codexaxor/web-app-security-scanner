@@ -352,10 +352,12 @@ set +e
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG $OPENGREP_TIMEOUT_ARGS \
-    --json-output="$SAST_RAW" \
+    --verbose --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
     >"$WORK/opengrep.log" 2>&1
 SAST_EXIT=$?
+# --verbose makes Opengrep populate paths.skipped[{path, reason}] in the JSON (it is otherwise omitted); it adds
+# per-file progress to the run log only (tmpfs /work, never /out). We need it to detect size/unreadable skips.
 set -e
 END="$(date +%s)"
 SAST_DUR_MS=$(( (END - START) * 1000 ))
@@ -386,14 +388,21 @@ if [ "$SAST_STATUS" = "ok" ]; then
             >> "$WORK/sast.ndjson"
     done
 fi
-# Skipped files (D-104, M8.15 S6 follow-up): distill Opengrep's errors[] into the repo-relative files it could
-# not fully analyze, carrying ONLY the path and the error-TYPE classifications (Timeout/ParseError/…) — never a
-# message or any source text (D-053/S1). The worker freezes these files' SAST findings (never false-solved) and
-# raises SAST_FILES_SKIPPED. The $CHECKOUT prefix is stripped to a repo-relative path here.
+# Skipped files (D-104, M8.15 S6 follow-up): the repo-relative files Opengrep could not fully analyze, carrying
+# ONLY the path and the error-TYPE / skip-reason classifications — never a message or source text (D-053/S1).
+# Two sources, merged by path: (a) errors[] (a per-rule Timeout, a ParseError, …); (b) paths.skipped[] entries
+# whose reason is a SIZE limit or a READ/PARSE failure — exceeded_size_limit, insufficient_permissions,
+# analysis_failed_parser_or_internal_error. Skips BY DESIGN are NOT frozen: gitignore/semgrepignore/cli-flag
+# matches, always_skipped, and wrong_language (no rule applies → nothing to lose) are excluded here, and our own
+# EXCLUDED_PATH/D-059 path exclusions are a worker-side triage concern, never an Opengrep skip. The worker
+# freezes these files' SAST findings (never false-solved) and raises SAST_FILES_SKIPPED.
 SAST_SKIPPED="$WORK/sast-skipped.json"
-jq -c --arg co "$CHECKOUT/" \
-    '[.errors[]? | (.location.path // .path) as $p | select($p != null)
-      | {path: ($p | ltrimstr($co)), type: ((.type // .error_type // "error") | tostring)}]
+SAST_FREEZE_REASONS="exceeded_size_limit|insufficient_permissions|analysis_failed_parser_or_internal_error"
+jq -c --arg co "$CHECKOUT/" --arg fr "$SAST_FREEZE_REASONS" \
+    '([.errors[]? | (.location.path // .path) as $p | select($p != null)
+       | {path: ($p | ltrimstr($co)), type: ((.type // .error_type // "error") | tostring)}]
+      + [.paths.skipped[]? | select(.reason != null and (.reason | test($fr)))
+         | {path: (.path | ltrimstr($co)), type: (.reason | tostring)}])
      | group_by(.path)
      | map({path: .[0].path, errorTypes: (map(.type) | unique)})' \
     "$SAST_RAW" 2>/dev/null > "$SAST_SKIPPED" || printf '[]' > "$SAST_SKIPPED"

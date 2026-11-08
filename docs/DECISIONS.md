@@ -112,10 +112,19 @@ Decision (extends D-053; does NOT supersede it):
   pathological rule×file is still bounded far under the 30-min container timeout; threshold 3 kept as a safety
   valve). Any file Opengrep still reports in `errors[]` (any type) is carried to the worker as a **skipped file**
   — PATHS + error-TYPE classifications only, never a message or source (D-053/S1) — in `opengrep.json`
-  `skippedFiles[]`. At reconcile, every OPEN SAST finding whose file is skipped is **frozen** (left untouched —
+  `skippedFiles[]`. The skipped set is **two sources merged**: Opengrep's `errors[]` (per-rule `Timeout`,
+  `ParseError`) AND `paths.skipped[]` entries whose reason is a **size limit or read/parse failure**
+  (`exceeded_size_limit`, `insufficient_permissions`, `analysis_failed_parser_or_internal_error`). Skips BY
+  DESIGN are NOT frozen — gitignore/semgrepignore/cli-flag matches, `always_skipped`, and `wrong_language`
+  (no rule applies → nothing to lose), plus our own `EXCLUDED_PATH`/D-059 path exclusions (a worker-side triage
+  concern, never an Opengrep skip). (`paths.skipped` is only emitted when `opengrep scan` runs with `--verbose`,
+  which run-scan.sh now passes; it adds per-file progress to the run log only, never to `/out`.) At reconcile,
+  every OPEN SAST finding whose file is skipped is **frozen** (left untouched —
   never solved/reopened, no `triage_event`), exactly like the EOL coverage guard; SAST findings in fully-scanned
-  files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types), mapped in the coverage
-  banner (D-030). This enforces domain rule 3 (a scanner that did not fully cover a file closes nothing there)
+  files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types + up to 10 repo-relative
+  paths, then "and N more"; paths are a fingerprint input and shown throughout the UI, so they are not withheld —
+  only the message/snippet are, D-053/S1), mapped in the coverage banner (D-030). This enforces domain rule 3
+  (a scanner that did not fully cover a file closes nothing there)
   at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
   fingerprint)` set both runs.
 - **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a

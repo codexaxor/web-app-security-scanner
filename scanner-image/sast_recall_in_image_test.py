@@ -79,6 +79,10 @@ CANARIES = {
     "L3AKflaskCanary5555": "python/flask_secret.py",  # python flask avoid_hardcoded_config_SECRET_KEY
 }
 
+# A tracked >1MB file planted at scan time; Opengrep skips it for size, so run-scan.sh must report it in
+# skippedFiles with reason exceeded_size_limit and it must yield no finding (M8.15 S6 follow-up size-skip freeze).
+OVERSIZED_FILE = "java/Oversized.java"
+
 failures = []
 
 
@@ -114,6 +118,12 @@ def run_production_scan():
     repo = "/tmp/repo"
     shutil.rmtree(repo, ignore_errors=True)
     shutil.copytree(FIXTURE, repo)
+    # Plant a tracked >1MB Java file carrying a would-be finding. Opengrep skips it for size
+    # (reason exceeded_size_limit), so run-scan.sh must list it in skippedFiles and it must NOT produce a finding
+    # — proving the size-skip freeze path end-to-end (D-104 S6 follow-up). Generated at runtime, never committed.
+    big_body = "class Oversized { String q(String id){ return \"x\"; } }\n// " + ("A" * 1_100_000) + "\n"
+    with open(os.path.join(repo, "java", OVERSIZED_FILE.split("/", 1)[1]), "w", encoding="utf-8") as fh:
+        fh.write("public " + big_body)
     git(["init", "-q", "-b", "main"], repo)
     git(["config", "user.email", "t@example.com"], repo)
     git(["config", "user.name", "t"], repo)
@@ -169,6 +179,20 @@ def main():
         fail("denied/category-excluded id appeared in output: " + ", ".join(leaked_rules))
     else:
         print(f"exclusions OK: none of the {len(excluded)} excluded ids appear in the output")
+
+    # 3b. size-skip: the planted >1MB file is reported in skippedFiles (reason exceeded_size_limit) and yields no
+    # finding — proving run-scan.sh carries size/parse/read skips (not just errors[]) to the worker (D-104 S6).
+    with open(os.path.join(OUT, "opengrep.json"), encoding="utf-8") as fh:
+        skipped = json.load(fh).get("skippedFiles", [])
+    skipped_by_path = {sf.get("path"): (sf.get("errorTypes") or []) for sf in skipped}
+    if OVERSIZED_FILE not in skipped_by_path:
+        fail(f"oversized file {OVERSIZED_FILE} not reported in skippedFiles (size skip not carried through)")
+    elif "exceeded_size_limit" not in skipped_by_path[OVERSIZED_FILE]:
+        fail(f"oversized file skip reason is {skipped_by_path[OVERSIZED_FILE]}, expected exceeded_size_limit")
+    elif any(p == OVERSIZED_FILE for (_c, p) in present):
+        fail(f"oversized file {OVERSIZED_FILE} unexpectedly produced a finding")
+    else:
+        print(f"size-skip OK: {OVERSIZED_FILE} reported skipped (exceeded_size_limit), no finding")
 
     # 4. canaries — each planted secret must not reach /out or the scanner logs
     out_blobs = {}

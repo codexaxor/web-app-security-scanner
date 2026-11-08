@@ -88,8 +88,29 @@ class SastSkippedFileReconcileIT extends TriageSeedSupport {
         List<ScanWarning> skippedWarnings = scanWarnings.findByScanId(scan2).stream()
                 .filter(w -> "SAST_FILES_SKIPPED".equals(w.getCode())).toList();
         assertThat(skippedWarnings).hasSize(1);
+        // Message names the count, the error type, and the repo-relative path(s) — but never source text.
         assertThat(skippedWarnings.get(0).getMessage())
-                .contains("1 file", "Timeout").doesNotContain(SKIP_FILE);
+                .contains("1 file", "Timeout", SKIP_FILE);
+    }
+
+    @Test
+    void aSizeSkippedFileAlsoFreezesAndWarnsWithTheSizeReason() {
+        // run-scan.sh classifies a file over Opengrep's size limit as skipped (reason exceeded_size_limit); the
+        // worker must freeze its findings and name the size reason in the warning, exactly like a Timeout.
+        UUID repo = seedRepo();
+        record(repo, List.of(sast(SKIP_FILE, "hashSkip")), List.of());
+        SubIssue skip = byFile(repo, SKIP_FILE);
+
+        UUID scan2 = record(repo, List.of(),
+                List.of(new SastSkippedFile(SKIP_FILE, List.of("exceeded_size_limit"))));
+
+        assertThat(subIssues.findByIdAndWorkspaceId(skip.getId(), WORKSPACE).orElseThrow().getStatus())
+                .isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(eventsFor(skip.getId(), scan2)).isZero();
+        List<ScanWarning> warn = scanWarnings.findByScanId(scan2).stream()
+                .filter(w -> "SAST_FILES_SKIPPED".equals(w.getCode())).toList();
+        assertThat(warn).hasSize(1);
+        assertThat(warn.get(0).getMessage()).contains("exceeded_size_limit", SKIP_FILE);
     }
 
     @Test

@@ -163,12 +163,19 @@ public class ScanStateService {
             java.util.TreeSet<String> types = new java.util.TreeSet<>();
             skipped.forEach(sf -> types.addAll(sf.errorTypes()));
             String typeList = types.isEmpty() ? "errors" : String.join(", ", types);
+            // Up to 10 repo-relative paths, then "and N more" (paths are not source text; D-053/S1 keeps only the
+            // message/snippet out — file paths are already a fingerprint input and shown throughout the UI).
+            List<String> paths = skipped.stream().map(
+                    com.company.secscan.scan.parse.SastSkippedFile::path).sorted().toList();
+            int shown = Math.min(10, paths.size());
+            String pathList = String.join(", ", paths.subList(0, shown))
+                    + (paths.size() > shown ? ", and " + (paths.size() - shown) + " more" : "");
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_FILES_SKIPPED",
                     "Opengrep could not fully analyze " + skipped.size() + " file"
                             + (skipped.size() == 1 ? "" : "s") + " in the last scan (" + typeList
                             + "); existing code findings in "
                             + (skipped.size() == 1 ? "that file" : "those files")
-                            + " were left unchanged (not marked solved).", null));
+                            + " were left unchanged (not marked solved): " + pathList + ".", null));
         }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
