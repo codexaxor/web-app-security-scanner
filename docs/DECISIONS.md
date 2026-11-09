@@ -1931,6 +1931,20 @@ Decision: `workspace_id` on every business table from day one.
     (0 timeout-skipped files on ib-api; findings 70→88) and, as a safety net for any file that still times out
     or parse-errors on another repo, the skipped-file FREEZE (those files' findings are never false-solved) +
     `SAST_FILES_SKIPPED` warning. See the D-104 "per-rule timeout + skipped files" decision above.
+  - **`django.*` rules fire on non-Django (Flask) code — framework gating per repo:** on the Flask app
+    `plexicus/simplest-sast-vulnerable`, Django injection rules (`django…tainted-sql-string`,
+    `django…raw-html-format`, `django…sql-injection-db-cursor-execute`) fire alongside the Flask ones. M8.15
+    handles the SAME-LINE duplicates via the D-061 winner map (keep Flask, drop Django), but
+    `django…sql-injection-db-cursor-execute` fires **alone** (plexicus `app.py:49`, no same-line winner) so it
+    can't be de-duplicated safely and stays as a Django-on-Flask false positive. Proper fix: gate framework rule
+    packs by the repo's detected framework (e.g. don't run `django.*` when only Flask is imported) — needs a
+    per-repo framework detector; deferred.
+  - **OD-2 Java SAST depth:** the scorecard (`docs/reports/SAST_SCORECARD.md`) shows the Java weakness is driven
+    by **existing-rule false positives** in `sqli`/`cmdi` (FPR 0.52/0.54, recall already ~1.0) and by **missed
+    cross-file (inter-procedural, inter-file) taint flows**, neither of which M8.15's additive custom rules can
+    fix. Decide — on the scorecard numbers — between a **Joern** (CPG, inter-procedural) trial, **Opengrep
+    interfile** analysis (`--interfile`, heavier/slower), and **CodeQL** (rejected on licence so far); and whether
+    to retire/tune noisy pack rules once the `rule retired ≠ fixed` decision lands.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;

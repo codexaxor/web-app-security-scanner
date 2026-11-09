@@ -18,7 +18,13 @@ class DuplicateRuleIT extends TriageSeedSupport {
     private static final String CUSTOM = "opengrep-rules.custom.spring-csrf-disabled";
     private static final String FILE = "src/main/java/SecurityConfig.java";
 
+    // M8.15 addition: a Flask app's SQLi — the Django twin loses to the Flask-specific rule (same file).
+    private static final String DJANGO_SQLI = "opengrep-rules.python.django.security.injection.tainted-sql-string";
+    private static final String FLASK_SQLI = "opengrep-rules.python.flask.security.injection.tainted-sql-string";
+    private static final String PY_FILE = "app.py";
+
     @Autowired ReconcileService reconcile;
+    @Autowired TriageEventRepository events;
 
     @Test
     void stockCsrfIsAutoIgnoredWhenCustomWinsForTheSameFile() {
@@ -45,6 +51,32 @@ class DuplicateRuleIT extends TriageSeedSupport {
         reconcile.reconcile(scan, WORKSPACE);
 
         assertThat(subByRule(repo, STOCK).getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+    }
+
+    @Test
+    void djangoSqliLoserIsIgnoredWithEventWhenFlaskWinnerFiresForTheSameFile() {
+        UUID repo = seedRepo();
+        UUID scan = seedScan(repo);
+        seedSast(scan, repo, DJANGO_SQLI, PY_FILE, "h-django");
+        seedSast(scan, repo, FLASK_SQLI, PY_FILE, "h-flask");
+
+        reconcile.reconcile(scan, WORKSPACE);
+
+        SubIssue loser = subByRule(repo, DJANGO_SQLI);
+        SubIssue winner = subByRule(repo, FLASK_SQLI);
+        assertThat(loser.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+        assertThat(loser.getIgnoreReason()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
+        assertThat(winner.getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+        // the auto-ignore is audited with a triage_event (DUPLICATE_RULE → ignored) for the loser only.
+        assertThat(events.findAll()).anySatisfy(e -> {
+            assertThat(e.getSubIssueId()).isEqualTo(loser.getId());
+            assertThat(e.getReasonCode()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
+            assertThat(e.getToStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+        });
+        assertThat(events.findAll()).noneSatisfy(e -> {
+            assertThat(e.getSubIssueId()).isEqualTo(winner.getId());
+            assertThat(e.getReasonCode()).isEqualTo(ReasonCode.DUPLICATE_RULE.code());
+        });
     }
 
     private SubIssue subByRule(UUID repo, String ruleId) {
