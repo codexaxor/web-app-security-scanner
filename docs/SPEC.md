@@ -557,7 +557,9 @@ Out of scope (D-104): generic hardcoded-password SAST detection (product decisio
   (M8.15 review S2). Classification is proven on real Opengrep output and fails closed
   (`sastSkippedFilesInImageTest`, `ScannerOutputParserSastSkippedTest`). Opengrep runs with a raised per-rule
   `--timeout` so real repos skip no files.
-- The existing four packs' loaded check_id set is unchanged by the YAML-only bake (asserted in the build).
+- The existing four packs' loaded check_id set is unchanged by the YAML-only bake (asserted in the build:
+  `opengrepExclusionsInImageTest` diffs Opengrep's loaded ids against the 388-id golden
+  `scanner-image/opengrep-existing-packs-check-ids.txt`, M8.15 review S4).
 - A repo whose detected language has no SAST pack raises `SAST_LANGUAGE_UNCOVERED` listing those languages, shown
   in the coverage banner (D-030).
 - Opengrep runs under C.UTF-8 and loads a non-ASCII rule without crashing (`opengrepLocaleInImageTest`).

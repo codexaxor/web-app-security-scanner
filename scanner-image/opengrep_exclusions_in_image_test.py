@@ -6,10 +6,16 @@ baked rules + exclusion lists. Proves:
      scanner-image/opengrep-excluded-by-category.txt byte-for-byte (else category coverage changed unreviewed).
   2. NO DEAD IDS: every id in the deny-list and the category list is a real loaded check_id (a typo would make
      --exclude-rule a silent no-op).
-  3. NEW-PACKS-ONLY: no excluded id belongs to java/csharp/javascript/typescript (removing an existing rule
-     would make reconcile "solve" its live findings).
+  3. NEW-PACKS-ONLY (ALLOW-LIST, M8.15 review S5): every excluded id must belong to one of the six NEW packs
+     (python/go/php/ruby/kotlin/scala). ANY other pack prefix — java/csharp/javascript/typescript, custom,
+     aikido, or a future pack — fails the build (removing a rule that already has live findings would make
+     reconcile "solve" them, i.e. "rule retired ≠ fixed").
   4. EXCLUSION WORKS end-to-end: a trigger file that hits excluded rules yields those ids with NO excludes,
      and yields NONE of them when scanned the production way (--exclude-rule for every listed id).
+  5. EXISTING PACKS FROZEN (M8.15 review S4): the java/csharp/javascript/typescript check_ids Opengrep itself
+     LOADS from the built image (its --verbose "Rules:" list) equal the committed golden
+     scanner-image/opengrep-existing-packs-check-ids.txt (388 distinct) — so the YAML-only bake, a rules-SHA bump
+     or a Dockerfile copy change can never silently change a fingerprint input of an existing finding.
 
 Run (as the gradle task does), mounting scanner-image at /host:ro, inside the image:
     python3 -I /host/opengrep_exclusions_in_image_test.py
@@ -26,7 +32,11 @@ HOST = os.environ.get("HOST", "/host")
 DENY_FILE = HOST + "/opengrep-denylist.txt"
 CAT_FILE = HOST + "/opengrep-excluded-by-category.txt"
 GEN = HOST + "/gen_category_exclusions.py"
+# ALLOW-LIST (S5): the only packs an excluded id may come from — the six packs NEW in M8.15 (D-104).
+NEW_PACKS = ("python", "go", "php", "ruby", "kotlin", "scala")
+# The four ORIGINAL opengrep-rules packs whose loaded check_id set is frozen by the golden file (S4).
 EXISTING_PACKS = ("java", "csharp", "javascript", "typescript")
+GOLDEN_EXISTING = HOST + "/opengrep-existing-packs-check-ids.txt"
 failures = []
 
 
@@ -67,6 +77,23 @@ def loaded_check_ids():
     return out
 
 
+def opengrep_loaded_existing_ids():
+    """The java/csharp/javascript/typescript check_ids Opengrep ITSELF loads from the baked rules (authoritative —
+    its --verbose 'Rules:' list), not a re-implementation of its loader."""
+    import re
+    idre = re.compile(r"opengrep-rules\.(?:" + "|".join(EXISTING_PACKS) + r")\.[A-Za-z0-9_.-]*[A-Za-z0-9_-]")
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "a.py"), "w", encoding="utf-8") as fh:
+            fh.write("x = 1\n")
+        out = os.path.join(d, "o.json")
+        env = dict(os.environ, HOME="/tmp", TMPDIR="/tmp", XDG_CACHE_HOME="/tmp", LANG="C.UTF-8", LC_ALL="C.UTF-8")
+        proc = subprocess.run(["opengrep", "scan", "--config", "opengrep-rules", "--verbose",
+                               "--max-log-list-entries", "100000", "--json-output=" + out,
+                               "--disable-version-check", d],
+                              cwd="/etc/secscan", env=env, capture_output=True, text=True, check=False)
+    return set(idre.findall(proc.stdout + proc.stderr))
+
+
 def scan(target, exclude_ids):
     out = tempfile.mkstemp(suffix=".json")[1]
     cmd = ["opengrep", "scan", "--config", "opengrep-rules", "--json-output=" + out,
@@ -104,9 +131,10 @@ def main():
     for cid in sorted(exclude):
         if cid not in loaded:
             fail(f"excluded id is not a loaded check_id (dead/typo): {cid}")
-        pack = cid.split(".")[1] if cid.startswith("opengrep-rules.") else "?"
-        if pack in EXISTING_PACKS:
-            fail(f"excluded id belongs to an EXISTING pack {pack} (forbidden): {cid}")
+        pack = cid.split(".")[1] if cid.startswith("opengrep-rules.") and cid.count(".") >= 2 else "?"
+        if pack not in NEW_PACKS:
+            fail(f"excluded id is not from one of the six NEW packs {NEW_PACKS} (pack {pack!r}; forbidden): "
+                 f"{cid}")
 
     # 4. end-to-end exclusion on a synthetic trigger dir
     with tempfile.TemporaryDirectory() as d:
@@ -138,10 +166,27 @@ def main():
         if expect not in base_ids:
             fail(f"expected trigger id not seen in baseline (rule set changed?): {expect}")
 
+    # 5. existing four packs' loaded check_ids == golden (S4)
+    golden = read_ids(GOLDEN_EXISTING)
+    loaded_existing = opengrep_loaded_existing_ids()
+    if len(golden) != 388:
+        fail(f"golden {GOLDEN_EXISTING} has {len(golden)} ids, expected 388")
+    if not loaded_existing:
+        fail("could not read Opengrep's loaded rule list — golden check is vacuous")
+    elif loaded_existing != golden:
+        for cid in sorted(loaded_existing - golden):
+            fail(f"existing-pack check_id loaded but NOT in golden (fingerprint input added/renamed): {cid}")
+        for cid in sorted(golden - loaded_existing):
+            fail(f"golden existing-pack check_id NOT loaded any more (fingerprint input removed/renamed): {cid}")
+    else:
+        print(f"golden OK: the {len(golden)} java/csharp/javascript/typescript check_ids Opengrep loads equal "
+              f"the committed golden")
+
     if failures:
         print(f"\n{len(failures)} failure(s).")
         sys.exit(1)
-    print("\nOK: diff gate clean, no dead/existing-pack ids, --exclude-rule removes every listed id.")
+    print("\nOK: diff gate clean, no dead ids, every excluded id from a NEW pack (allow-list), --exclude-rule "
+          "removes every listed id, existing-pack check_ids == golden.")
 
 
 if __name__ == "__main__":

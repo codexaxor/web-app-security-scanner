@@ -273,6 +273,7 @@ val opengrepExclusionsInImageTest by tasks.registering(Exec::class) {
     inputs.file(scannerDir.resolve("opengrep-denylist.txt")).withPropertyName("denylist")
     inputs.file(scannerDir.resolve("opengrep-excluded-by-category.txt")).withPropertyName("categoryExclusions")
     inputs.file(scannerDir.resolve("opengrep_exclusions_in_image_test.py")).withPropertyName("exclusionsTest")
+    inputs.file(scannerDir.resolve("opengrep-existing-packs-check-ids.txt")).withPropertyName("existingPacksGolden")
     // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
     inputs.property("scannerImageContentHash", scannerImageContentHash)
     val marker = layout.buildDirectory.file("opengrep-exclusions-in-image-test.ok")
