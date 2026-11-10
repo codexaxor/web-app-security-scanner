@@ -12,10 +12,11 @@ run-scan.sh over a file:// clone of the fixture, so the deny-list, category excl
   3. EXCLUSIONS HOLD: no denied or category-excluded check_id ever appears in the output (the S6 end-to-end
      guard promised in the S2 plan).
   4. CANARY (BLOCKER): unique fake secrets planted in several hardcoded-secret cases (ruby/secret.rb,
-     java/application.properties, python/flask_secret.py) appear NOWHERE in /out or in the scanner's
-     stdout/stderr — proving the sanitize keeps matched source values (extra.lines/metavars) out of the results,
-     even though Opengrep can interpolate metavars into extra.message (D-053/S1). A leak fails the build and must
-     be fixed by sanitizing messages in-container.
+     java/application.properties, python/flask_secret.py) AND in the three other source-carrying Opengrep fields
+     (M8.15 review B1: ruby/config/secrets.production.yml — check-rails-secret-yaml interpolates the VALUE into
+     extra.message; java/TraceCanary.java — taint extra.dataflow_trace; java/FixCanary.java — autofix extra.fix)
+     appear NOWHERE in /out or in the scanner's stdout/stderr. The sanitize is an ALLOW-LIST of the fields the
+     worker reads (3c asserts it structurally), so a new source-carrying field is dropped by default.
 
 Run (as the gradle task does), mounting fixtures/sast-recall at /fixture:ro, inside the image:
     SCAN_CLONE_URL=file:///tmp/repo python3 -I /host/sast_recall_in_image_test.py
@@ -54,6 +55,11 @@ EXPECTED = {
     ("opengrep-rules.scala.lang.security.audit.dangerous-seq-run", "scala/Vuln.scala"),
     ("opengrep-rules.scala.lang.security.audit.insecure-random", "scala/Vuln.scala"),
     ("opengrep-rules.python.flask.security.audit.avoid_hardcoded_config_SECRET_KEY", "python/flask_secret.py"),
+    # B1 canary carriers (M8.15 review): message interpolation, taint dataflow_trace, autofix text
+    ("opengrep-rules.ruby.rails.security.brakeman.check-rails-secret-yaml", "ruby/config/secrets.production.yml"),
+    ("opengrep-rules.custom.servlet-trust-boundary-session", "java/TraceCanary.java"),
+    ("opengrep-rules.java.lang.security.audit.xxe.documentbuilderfactory-disallow-doctype-decl-missing",
+     "java/FixCanary.java"),
     # --- EXISTING java pack (incl. Spring) ---
     ("opengrep-rules.java.lang.security.audit.sqli.jdbc-sqli", "java/SqlAndCmd.java"),
     ("opengrep-rules.java.lang.security.audit.sqli.jpa-sqli", "java/SqlAndCmd.java"),
@@ -77,7 +83,17 @@ CANARIES = {
     "L3AKcanaryZZZ9000": "ruby/secret.rb",            # ruby brakeman check-secrets
     "L3AKjdbcCanary7777": "java/application.properties",  # custom.hardcoded-connection-string
     "L3AKflaskCanary5555": "python/flask_secret.py",  # python flask avoid_hardcoded_config_SECRET_KEY
+    # M8.15 review B1: Opengrep fields OTHER than extra.lines/metavars that carry source text.
+    "L3AKrailsSecretCanary4242": "ruby/config/secrets.production.yml",  # interpolated into extra.message
+    "L3AKtraceCanary3131": "java/TraceCanary.java",  # taint extra.dataflow_trace source/sink snippet
+    "L3AKfixCanary6060": "java/FixCanary.java",  # autofix extra.fix rewritten from the matched source
 }
+
+# The ONLY keys a sanitized /out result may carry (run-scan.sh allow-list, M8.15 review B1). Anything else
+# (message, fix, dataflow_trace, lines, metavars, a future Opengrep field) is a potential source-text leak.
+ALLOWED_RESULT_KEYS = {"check_id", "path", "start", "end", "extra"}
+ALLOWED_EXTRA_KEYS = {"severity", "metadata", "snippet_sha256"}
+ALLOWED_POS_KEYS = {"line", "col", "offset"}
 
 # A tracked >1MB file planted at scan time; Opengrep skips it for size, so run-scan.sh must report it in
 # skippedFiles with reason exceeded_size_limit and it must yield no finding (M8.15 S6 follow-up size-skip freeze).
@@ -193,6 +209,22 @@ def main():
         fail(f"oversized file {OVERSIZED_FILE} unexpectedly produced a finding")
     else:
         print(f"size-skip OK: {OVERSIZED_FILE} reported skipped (exceeded_size_limit), no finding")
+
+    # 3c. allow-list: every sanitized result carries ONLY the allow-listed keys (B1) — so a source-carrying
+    # Opengrep field (message/fix/dataflow_trace/…) can never ride along, even one no canary exercises.
+    bad_keys = set()
+    for r in results:
+        bad_keys |= {"result." + k for k in set(r) - ALLOWED_RESULT_KEYS}
+        bad_keys |= {"extra." + k for k in set(r.get("extra") or {}) - ALLOWED_EXTRA_KEYS}
+        for pos in ("start", "end"):
+            bad_keys |= {pos + "." + k for k in set(r.get(pos) or {}) - ALLOWED_POS_KEYS}
+    if bad_keys:
+        fail("sanitized /out results carry non-allow-listed keys: " + ", ".join(sorted(bad_keys)))
+    elif not results:
+        fail("no results to check the allow-list against — vacuous")
+    else:
+        print(f"allow-list OK: all {len(results)} results carry only {sorted(ALLOWED_RESULT_KEYS)} "
+              f"/ extra {sorted(ALLOWED_EXTRA_KEYS)}")
 
     # 4. canaries — each planted secret must not reach /out or the scanner logs
     out_blobs = {}

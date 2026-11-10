@@ -100,9 +100,15 @@ Decision (extends D-053; does NOT supersede it):
   `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
   `(check_id, file)` fires (29, across all six new packs + java/javascript/typescript), no finding on a
   `negative/` file, NO denied/category-excluded id ever appears, and **no canary value appears anywhere in
-  `/out` or the scanner logs** — the D-053/S1 sanitize (strips `extra.lines`/`extra.metavars`) holds; Opengrep
-  did NOT interpolate a matched secret into `extra.message` for the firing rules, so no in-container message
-  sanitization was needed.
+  `/out` or the scanner logs**. **Corrected in the M8.15 review (B1):** stripping only `extra.lines`/
+  `extra.metavars` was NOT enough — three more Opengrep fields carry scanned source text: `extra.message` (rules
+  interpolate metavariables; `ruby…brakeman.check-rails-secret-yaml` puts the `secret_key_base` VALUE into it),
+  `extra.fix` (autofix text rewritten from the match) and `extra.dataflow_trace` (taint source/sink snippets;
+  also emitted by the four original packs). The `run-scan.sh` sanitize is now an **allow-list** of the fields the
+  worker reads (`check_id`, `path`, `start`/`end` positions, `extra.severity`, `extra.metadata`,
+  `extra.snippet_sha256`), so an unknown/new field is dropped by default; `sastRecallInImageTest` asserts the
+  allow-list structurally and plants a canary in each of the three fields. No fingerprint input changes (the
+  snippet hash is still computed from `extra.lines` in-container; the worker never read the dropped fields).
 - **Per-rule timeout + skipped files close nothing (S6 follow-up):** Opengrep's default per-rule timeout is
   **5.0 s** (`--timeout`; max seconds one rule may run on one file, 0 = no limit) with `--timeout-threshold 3`
   (max rules that may time out on a file before the WHOLE file is skipped, 0 = no limit). At 5 s a slow rule

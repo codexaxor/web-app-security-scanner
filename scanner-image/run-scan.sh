@@ -370,8 +370,9 @@ else
 fi
 # --- Sanitize SAST (mirror the secret sanitize, D-023/S1): per result, compute the NORMALIZED-snippet SHA-256
 # (lines trimmed, internal whitespace collapsed, blank lines dropped — same algorithm as the old Java
-# SnippetNormalizer, which this replaces) and emit a cleaned result with extra.lines/metavars/fingerprint
-# REMOVED and extra.snippet_sha256 added. The raw matched lines never reach /out. ---
+# SnippetNormalizer, which this replaces) and emit a cleaned result built from an ALLOW-LIST of fields (M8.15
+# review B1) with extra.snippet_sha256 added. The raw matched lines — and every other source-carrying field
+# (message, fix, dataflow_trace) — never reach /out. ---
 : > "$WORK/sast.ndjson"
 if [ "$SAST_STATUS" = "ok" ]; then
     # Post-filter fallback (D-104): drop any result whose check_id is in the exclude list, in case
@@ -383,8 +384,17 @@ if [ "$SAST_STATUS" = "ok" ]; then
         snippet="$(printf '%s' "$result" | jq -r '.extra.lines // ""')"
         hash="$(printf '%s' "$snippet" | awk 'NF>0{$1=$1;print}' | sha256sum | cut -d' ' -f1)"
         unset snippet
+        # ALLOW-LIST (M8.15 review B1): emit ONLY the fields the worker reads — check_id, path, start/end
+        # positions, extra.severity, extra.metadata (static rule metadata) and the snippet hash. Every other
+        # Opengrep field can carry scanned SOURCE text and is dropped: extra.lines/metavars (matched lines),
+        # extra.message (rules interpolate metavariables, e.g. ruby check-rails-secret-yaml puts the
+        # secret_key_base VALUE into it), extra.fix (autofix text rewritten from the matched source) and
+        # extra.dataflow_trace (taint source/sink/intermediate source snippets). A new Opengrep field is
+        # therefore dropped by default instead of leaking.
         printf '%s' "$result" | jq -c --arg h "$hash" \
-            'del(.extra.lines, .extra.metavars, .extra.fingerprint) | .extra.snippet_sha256 = $h' \
+            '{check_id, path,
+              start: (.start | {line, col, offset}), end: (.end | {line, col, offset}),
+              extra: {severity: .extra.severity, metadata: .extra.metadata, snippet_sha256: $h}}' \
             >> "$WORK/sast.ndjson"
     done
 fi
