@@ -145,6 +145,27 @@ Decision (extends D-053; does NOT supersede it):
   (a scanner that did not fully cover a file closes nothing there)
   at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
   fingerprint)` set both runs.
+  **Refined in the M8.15 review (S1/S2/S3; S2 = owner decision), from REAL Opengrep 1.31.0 output
+  (`app/src/test/resources/samples/opengrep/skipped/`):** Opengrep lists EVERY errored file — including one it only
+  partially parsed — as `paths.skipped` `analysis_failed_parser_or_internal_error`, so that reason alone is not a
+  full-failure signal, and `PartialParsing` means the file WAS analyzed. Classification (`sast_skipped_files` in
+  `secscan-lib.sh`): **FROZEN** = an `errors[]` type other than `PartialParsing` (`Timeout`, the full parse failures
+  `Syntax error`/`Other syntax error`, `Too many matches`, out-of-memory, any unknown type — fail safe), a
+  `paths.skipped` `exceeded_size_limit`/`insufficient_permissions`, or `analysis_failed_parser_or_internal_error`
+  on a path with NO `errors[]` entry (unexplained — fail safe). **PARTIALLY PARSED** (`PartialParsing` and nothing
+  that freezes) = scanned → NOT frozen, reconciled normally, only COUNTED (`partiallyParsedFiles`); it is
+  mentioned inside `SAST_FILES_SKIPPED` only as "partially parsed (N)" and never raises the warning on its own (so
+  the banner's "findings were left unchanged" stays true). `Too many matches`/out-of-memory are not in the owner's
+  literal list but are analysis failures that drop matches for a non-fix reason, so they freeze (flagged in the
+  review report). Error types are reduced to their variant NAME (`["PartialParsing",[<container paths + line
+  ranges>]]` → `PartialParsing`; leading `[A-Za-z0-9 _.-]` run, ≤48 chars — in-container and again in the parser),
+  deduped, and capped at 5 in the message ("+N more"), so no container path or line range reaches any message.
+  Only paths under the checkout are kept. **Fail closed:** a report that cannot be classified (unparsable,
+  `errors` not an array, `paths.skipped` absent — it is always an array under `--verbose`) marks SAST **failed**
+  (closes nothing, no results emitted), never "ok with nothing skipped". A failed SAST task carries no skipped
+  files (the parser reads them only from a succeeded task), so `SAST_FILES_SKIPPED` never fires on a failed run.
+  Proven by `sastSkippedFilesInImageTest` (real sample, fail-closed unit + end-to-end), `ScannerOutputParserSastSkippedTest`
+  and `SastSkippedFileReconcileIT`.
 - **Scorecard + custom MIT rules (S7):** `scorecard/score_benchmark.py` (committed; benchmarks never committed)
   scores the production config against OWASP BenchmarkJava v1.2 (`d4f6f3a`, GPL-2.0), Juice Shop (`717f5ef`, MIT)
   and NodeGoat (`c5cb68a`, Apache-2.0), static only. Six MIT rules in `scanner-image/opengrep-rules-custom/` cover

@@ -154,28 +154,36 @@ public class ScanStateService {
                             + ", so code in " + (uncoveredLangs.size() == 1 ? "that language" : "those languages")
                             + " was not analyzed for code issues.", null));
         }
-        // SAST partial coverage (M8.15 S6 follow-up, D-104/D-030): files Opengrep could not fully analyze this
-        // scan (errors[] — Timeout/ParseError/…). Surface a coverage warning (count + distinct error TYPES only —
-        // no path or source text) so the gap is shown, not hidden; the freeze that keeps their findings from
-        // false-solving is applied in reconcile (via TriageContext below).
+        // SAST partial coverage (M8.15 S6 follow-up, D-104/D-030; review S1/S2/N2). FROZEN files — Opengrep could
+        // not fully analyze them (Timeout, full parse error, size limit, unreadable, other analysis error), so their
+        // findings closed nothing in reconcile (via TriageContext below) — raise SAST_FILES_SKIPPED naming the count,
+        // the DISTINCT normalized error types (at most 5, then "+N more") and up to 10 repo-relative paths (then
+        // "and N more"). Repo-relative paths are shown (a fingerprint input, shown throughout the UI); never a
+        // container path, line range, message or source text (D-053/S1). Files Opengrep only PARTIALLY parsed were
+        // analyzed and reconciled normally: they never raise this warning on their own and are mentioned inside it
+        // only as "partially parsed (N)" (owner decision, review S2). A failed SAST run carries no skipped files.
         List<com.company.secscan.scan.parse.SastSkippedFile> skipped = parsed.sastSkippedFiles();
         if (!skipped.isEmpty()) {
-            java.util.TreeSet<String> types = new java.util.TreeSet<>();
-            skipped.forEach(sf -> types.addAll(sf.errorTypes()));
-            String typeList = types.isEmpty() ? "errors" : String.join(", ", types);
-            // Up to 10 repo-relative paths, then "and N more" (paths are not source text; D-053/S1 keeps only the
-            // message/snippet out — file paths are already a fingerprint input and shown throughout the UI).
+            List<String> types = skipped.stream().flatMap(sf -> sf.errorTypes().stream())
+                    .distinct().sorted().toList();
+            int shownTypes = Math.min(5, types.size());
+            String typeList = types.isEmpty() ? "errors"
+                    : String.join(", ", types.subList(0, shownTypes))
+                            + (types.size() > shownTypes ? ", +" + (types.size() - shownTypes) + " more" : "");
             List<String> paths = skipped.stream().map(
                     com.company.secscan.scan.parse.SastSkippedFile::path).sorted().toList();
             int shown = Math.min(10, paths.size());
             String pathList = String.join(", ", paths.subList(0, shown))
                     + (paths.size() > shown ? ", and " + (paths.size() - shown) + " more" : "");
+            int partial = parsed.sastPartiallyParsedFiles();
             warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_FILES_SKIPPED",
                     "Opengrep could not fully analyze " + skipped.size() + " file"
                             + (skipped.size() == 1 ? "" : "s") + " in the last scan (" + typeList
                             + "); existing code findings in "
                             + (skipped.size() == 1 ? "that file" : "those files")
-                            + " were left unchanged (not marked solved): " + pathList + ".", null));
+                            + " were left unchanged (not marked solved): " + pathList + "."
+                            + (partial > 0 ? " Also partially parsed (" + partial
+                                    + "): analyzed, findings reconciled normally." : ""), null));
         }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());

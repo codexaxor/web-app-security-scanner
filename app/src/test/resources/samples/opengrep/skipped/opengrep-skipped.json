@@ -1,0 +1,37 @@
+{
+  "results": [],
+  "errors": [],
+  "skippedFiles": [
+    {
+      "path": "src/Garbage.java",
+      "errorTypes": [
+        "Syntax error"
+      ]
+    },
+    {
+      "path": "src/Garbage.scala",
+      "errorTypes": [
+        "Other syntax error"
+      ]
+    },
+    {
+      "path": "src/Huge.java",
+      "errorTypes": [
+        "exceeded_size_limit"
+      ]
+    },
+    {
+      "path": "src/noperm.py",
+      "errorTypes": [
+        "insufficient_permissions"
+      ]
+    },
+    {
+      "path": "src/slow.py",
+      "errorTypes": [
+        "Timeout"
+      ]
+    }
+  ],
+  "partiallyParsedFiles": 1
+}

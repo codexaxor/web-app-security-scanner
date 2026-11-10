@@ -1,0 +1,103 @@
+{
+  "version": "1.31.0",
+  "results": [],
+  "errors": [
+    {
+      "code": 2,
+      "level": "warn",
+      "type": "Timeout",
+      "rule_id": "opengrep-rules.python.django.security.injection.command.subprocess-injection",
+      "message": "Timeout when running opengrep-rules.python.django.security.injection.command.subprocess-injection on /work/checkout/src/slow.py:\n ",
+      "path": "/work/checkout/src/slow.py"
+    },
+    {
+      "code": 2,
+      "level": "warn",
+      "type": "Timeout",
+      "rule_id": "opengrep-rules.python.sqlalchemy.security.sqlalchemy-execute-raw-query",
+      "message": "Timeout when running opengrep-rules.python.sqlalchemy.security.sqlalchemy-execute-raw-query on /work/checkout/src/slow.py:\n ",
+      "path": "/work/checkout/src/slow.py"
+    },
+    {
+      "code": 3,
+      "level": "warn",
+      "type": [
+        "PartialParsing",
+        [
+          {
+            "path": "/work/checkout/src/partial.py",
+            "start": {
+              "line": 9,
+              "col": 5,
+              "offset": 0
+            },
+            "end": {
+              "line": 9,
+              "col": 13,
+              "offset": 8
+            }
+          }
+        ]
+      ],
+      "message": "Syntax error at line /work/checkout/src/partial.py:9:\n `pass )))` was unexpected",
+      "path": "/work/checkout/src/partial.py",
+      "spans": [
+        {
+          "file": "/work/checkout/src/partial.py",
+          "start": {
+            "line": 9,
+            "col": 5,
+            "offset": 0
+          },
+          "end": {
+            "line": 9,
+            "col": 13,
+            "offset": 8
+          }
+        }
+      ]
+    },
+    {
+      "code": 3,
+      "level": "warn",
+      "type": "Syntax error",
+      "message": "Syntax error at line /work/checkout/src/Garbage.java:1:\n `}}}} {{{ ((( %% @@@ ;;; <<< >>> ??? \"\"\" ''' `` \n` was unexpected",
+      "path": "/work/checkout/src/Garbage.java"
+    },
+    {
+      "code": 2,
+      "level": "warn",
+      "type": "Other syntax error",
+      "message": "Other syntax error at line /work/checkout/src/Garbage.scala:1:\n Failure: unexpected empty list",
+      "path": "/work/checkout/src/Garbage.scala"
+    }
+  ],
+  "paths": {
+    "skipped": [
+      {
+        "path": "/work/checkout/src/Garbage.java",
+        "reason": "analysis_failed_parser_or_internal_error"
+      },
+      {
+        "path": "/work/checkout/src/Garbage.scala",
+        "reason": "analysis_failed_parser_or_internal_error"
+      },
+      {
+        "path": "/work/checkout/src/Huge.java",
+        "reason": "exceeded_size_limit"
+      },
+      {
+        "path": "/work/checkout/src/noperm.py",
+        "reason": "insufficient_permissions"
+      },
+      {
+        "path": "/work/checkout/src/partial.py",
+        "reason": "analysis_failed_parser_or_internal_error"
+      },
+      {
+        "path": "/work/checkout/src/slow.py",
+        "reason": "analysis_failed_parser_or_internal_error"
+      }
+    ]
+  }
+}

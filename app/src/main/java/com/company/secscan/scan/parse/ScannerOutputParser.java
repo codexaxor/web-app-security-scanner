@@ -54,6 +54,7 @@ public class ScannerOutputParser {
         // see parseOsv (D-035).
         List<ScanWarning> warnings = new ArrayList<>();
         List<SastSkippedFile> sastSkippedFiles = List.of();
+        int sastPartiallyParsed = 0;
         java.util.Set<String> csprojMissingLockfile = new java.util.HashSet<>();
         if (m.warnings != null) {
             for (ManifestWarning w : m.warnings) {
@@ -97,7 +98,10 @@ public class ScannerOutputParser {
                         warnings, syntheticPoms));
             } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
+                // Only for a SUCCEEDED sast task (the loop `continue`s on a failed one): a failed SAST run carries no
+                // skipped files / partial count, so it never raises SAST_FILES_SKIPPED (review N5).
                 sastSkippedFiles = parseOpengrepSkippedFiles(outDir.resolve(s.findingsFile), m.checkoutPath);
+                sastPartiallyParsed = parseOpengrepPartiallyParsed(outDir.resolve(s.findingsFile));
             } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
                 findings.addAll(parseCheckov(outDir.resolve(s.findingsFile), warnings));
             } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
@@ -111,7 +115,8 @@ public class ScannerOutputParser {
                 : List.copyOf(m.unreadableScopeManifests);
         List<String> languages = readLanguages(outDir.resolve("languages.json"));
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages, sastSkippedFiles);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages, sastSkippedFiles,
+                sastPartiallyParsed);
     }
 
     /**
@@ -323,10 +328,12 @@ public class ScannerOutputParser {
     }
 
     /**
-     * Reads the {@code skippedFiles} that run-scan.sh distilled from Opengrep's {@code errors[]} (M8.15 S6
-     * follow-up, D-104): the repo-relative files some rule could not finish analyzing (per-file {@code Timeout},
-     * {@code ParseError}, …) with their error-TYPE classifications only — never a message or source text
-     * (D-053/S1). A path that is absolute or escapes the checkout is dropped (defense in depth — it must never
+     * Reads the {@code skippedFiles} that run-scan.sh ({@code sast_skipped_files}) classified from Opengrep's
+     * {@code errors[]} + {@code paths.skipped} (M8.15 S6 follow-up, D-104; review S1/S2): the repo-relative files
+     * whose SAST findings must be FROZEN (Timeout, full parse error, size limit, unreadable, other analysis error)
+     * with their normalized error-TYPE names only — never a message or source text (D-053/S1). Each type is
+     * re-normalized here (defense in depth: the leading {@code [A-Za-z0-9 _.-]} name only, at most 48 chars, blanks dropped), so
+     * a container path or line range can never reach a warning message even from a malformed report. A path that is absolute or escapes the checkout is dropped (defense in depth — it must never
      * drive a freeze against the wrong file). Paths are already repo-relative in the sanitized report; we
      * relativize defensively in case a future report ships absolute paths.
      */
@@ -349,10 +356,39 @@ public class ScannerOutputParser {
                 continue;
             }
             List<String> types = sf.errorTypes == null ? List.of()
-                    : sf.errorTypes.stream().filter(java.util.Objects::nonNull).toList();
+                    : sf.errorTypes.stream().filter(java.util.Objects::nonNull)
+                            .map(ScannerOutputParser::normalizeSastErrorType).filter(t -> !t.isEmpty())
+                            .distinct().toList();
             out.add(new SastSkippedFile(rel, types));
         }
         return out;
+    }
+
+    private static final java.util.regex.Pattern SAST_TYPE_NAME =
+            java.util.regex.Pattern.compile("^[\\[\"\\s]*([A-Za-z0-9 _.-]*)");
+
+    /**
+     * An Opengrep error-type NAME (review S1): only the LEADING run of {@code [A-Za-z0-9 _.-]} characters (after
+     * any leading {@code [}/{@code "}), at most 48 chars — so a stringified payload such as
+     * {@code ["PartialParsing",[{"path":"/work/checkout/…","start":{"line":6…}}]]} yields {@code PartialParsing}
+     * and never a container path or line range.
+     */
+    static String normalizeSastErrorType(String type) {
+        java.util.regex.Matcher m = SAST_TYPE_NAME.matcher(type);
+        String t = m.find() ? m.group(1).strip() : "";
+        return t.length() > 48 ? t.substring(0, 48).strip() : t;
+    }
+
+    /**
+     * The number of files Opengrep only PARTIALLY parsed ({@code partiallyParsedFiles}, review S2): analyzed and
+     * reconciled normally (NOT frozen); surfaced only as "partially parsed (N)". 0 when absent or invalid.
+     */
+    int parseOpengrepPartiallyParsed(Path json) {
+        if (!Files.exists(json)) {
+            return 0;
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        return report == null || report.partiallyParsedFiles == null ? 0 : Math.max(0, report.partiallyParsedFiles);
     }
 
     /**
@@ -1016,6 +1052,7 @@ public class ScannerOutputParser {
     private static final class OpengrepReport {
         public List<OpengrepResult> results;
         public List<OpengrepSkippedFile> skippedFiles;
+        public Integer partiallyParsedFiles;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

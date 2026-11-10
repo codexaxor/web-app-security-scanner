@@ -549,10 +549,14 @@ Out of scope (D-104): generic hardcoded-password SAST detection (product decisio
 - Scanning a Python/Go/PHP/Ruby/Kotlin/Scala **and** Java/JavaScript/TypeScript fixture yields its expected
   `(rule_id, file)` SAST findings and none on the negatives, through the real image in the default build
   (`sastRecallInImageTest`); no raw source line/metavar and no planted canary value leaves `/out` (D-053 S1).
-- A file Opengrep cannot fully analyze (reported in its `errors[]` — a per-rule `Timeout`, a `ParseError`, …)
-  CLOSES NOTHING: its existing SAST findings are left untouched at reconcile (not solved, no `triage_event`) and
-  the scan raises a `SAST_FILES_SKIPPED` coverage warning (count + error types), shown in the banner
-  (`SastSkippedFileReconcileIT`). Opengrep runs with a raised per-rule `--timeout` so real repos skip no files.
+- A file Opengrep cannot fully analyze (a per-rule `Timeout`, a FULL parse failure, a size-limit or unreadable
+  skip, another analysis error) CLOSES NOTHING: its existing open or ignored SAST findings are left untouched at
+  reconcile (not solved, no `triage_event`) and the scan raises a `SAST_FILES_SKIPPED` coverage warning (count +
+  normalized error types + repo-relative paths), shown in the banner (`SastSkippedFileReconcileIT`). A file
+  Opengrep only PARTIALLY parsed was analyzed: it reconciles normally and is only counted ("partially parsed (N)")
+  (M8.15 review S2). Classification is proven on real Opengrep output and fails closed
+  (`sastSkippedFilesInImageTest`, `ScannerOutputParserSastSkippedTest`). Opengrep runs with a raised per-rule
+  `--timeout` so real repos skip no files.
 - The existing four packs' loaded check_id set is unchanged by the YAML-only bake (asserted in the build).
 - A repo whose detected language has no SAST pack raises `SAST_LANGUAGE_UNCOVERED` listing those languages, shown
   in the coverage banner (D-030).

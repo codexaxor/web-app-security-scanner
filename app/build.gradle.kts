@@ -393,8 +393,38 @@ val sastFailureCanaryInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// M8.15 review S1/S2/S3 gate: SAST skipped-file classification in the built image against REAL Opengrep 1.31.0
+// output (app/src/test/resources/samples/opengrep/skipped/) — real-sample equality with the parser test's
+// sanitized sample, unexplained-failure freeze, normalized types, fail-closed (unit + end-to-end via run-scan.sh).
+// --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastSkippedFilesInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify SAST skipped-file classification on real Opengrep output (M8.15 review S1/S2/S3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val samplesDir = project.file("src/test/resources/samples/opengrep/skipped")
+    val fixtureDir = rootProject.file("fixtures/sast-fail-canary")
+    inputs.file(scannerDir.resolve("sast_skipped_in_image_test.py")).withPropertyName("skippedTest")
+    inputs.dir(samplesDir).withPropertyName("skippedSamples")
+    inputs.dir(fixtureDir).withPropertyName("failCanaryFixture")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-skipped-files-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "SAMPLES=/samples", "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", samplesDir.absolutePath + ":/samples:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_skipped_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
         branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
-        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest, sastFailureCanaryInImageTest)
+        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest, sastFailureCanaryInImageTest,
+        sastSkippedFilesInImageTest)
 }

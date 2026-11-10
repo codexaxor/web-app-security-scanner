@@ -370,6 +370,21 @@ if { [ "$SAST_EXIT" -eq 0 ] || [ "$SAST_EXIT" -eq 1 ]; } \
 else
     SAST_STATUS=failed
 fi
+# Skipped / partially-analyzed files (D-104, M8.15 S6 follow-up; review S1/S2/S3): classified by
+# sast_skipped_files (secscan-lib.sh) from errors[] + paths.skipped into FROZEN files (Timeout, full parse error,
+# size limit, unreadable, other/unknown analysis error → the worker freezes their SAST findings and raises
+# SAST_FILES_SKIPPED) and a COUNT of files Opengrep only partially parsed (PartialParsing = analyzed → reconciled
+# normally). Repo-relative paths + normalized error-type NAMES only — never a message, line range or source text
+# (D-053/S1). Skips BY DESIGN are never frozen (gitignore/semgrepignore/cli-flag matches, always_skipped,
+# wrong_language; our EXCLUDED_PATH/D-059 exclusions are worker-side triage). FAIL CLOSED: if the report cannot be
+# classified, SAST is marked FAILED (closes nothing) — never "ok with nothing skipped". Runs BEFORE the sanitize
+# below, so a failed classification also emits no results.
+SAST_SKIPPED="$WORK/sast-skipped.json"
+if [ "$SAST_STATUS" = "ok" ] && ! sast_skipped_files "$SAST_RAW" "$CHECKOUT/" "$SAST_SKIPPED" 2>/dev/null; then
+    echo "opengrep: could not classify skipped/partially-analyzed files; SAST marked failed so it closes nothing" >&2
+    SAST_STATUS=failed
+fi
+[ "$SAST_STATUS" = "ok" ] || printf '{"skippedFiles":[],"partiallyParsedFiles":0}' > "$SAST_SKIPPED"
 # --- Sanitize SAST (mirror the secret sanitize, D-023/S1): per result, compute the NORMALIZED-snippet SHA-256
 # (lines trimmed, internal whitespace collapsed, blank lines dropped — same algorithm as the old Java
 # SnippetNormalizer, which this replaces) and emit a cleaned result built from an ALLOW-LIST of fields (M8.15
@@ -400,26 +415,9 @@ if [ "$SAST_STATUS" = "ok" ]; then
             >> "$WORK/sast.ndjson"
     done
 fi
-# Skipped files (D-104, M8.15 S6 follow-up): the repo-relative files Opengrep could not fully analyze, carrying
-# ONLY the path and the error-TYPE / skip-reason classifications — never a message or source text (D-053/S1).
-# Two sources, merged by path: (a) errors[] (a per-rule Timeout, a ParseError, …); (b) paths.skipped[] entries
-# whose reason is a SIZE limit or a READ/PARSE failure — exceeded_size_limit, insufficient_permissions,
-# analysis_failed_parser_or_internal_error. Skips BY DESIGN are NOT frozen: gitignore/semgrepignore/cli-flag
-# matches, always_skipped, and wrong_language (no rule applies → nothing to lose) are excluded here, and our own
-# EXCLUDED_PATH/D-059 path exclusions are a worker-side triage concern, never an Opengrep skip. The worker
-# freezes these files' SAST findings (never false-solved) and raises SAST_FILES_SKIPPED.
-SAST_SKIPPED="$WORK/sast-skipped.json"
-SAST_FREEZE_REASONS="exceeded_size_limit|insufficient_permissions|analysis_failed_parser_or_internal_error"
-jq -c --arg co "$CHECKOUT/" --arg fr "$SAST_FREEZE_REASONS" \
-    '([.errors[]? | (.location.path // .path) as $p | select($p != null)
-       | {path: ($p | ltrimstr($co)), type: ((.type // .error_type // "error") | tostring)}]
-      + [.paths.skipped[]? | select(.reason != null and (.reason | test($fr)))
-         | {path: (.path | ltrimstr($co)), type: (.reason | tostring)}])
-     | group_by(.path)
-     | map({path: .[0].path, errorTypes: (map(.type) | unique)})' \
-    "$SAST_RAW" 2>/dev/null > "$SAST_SKIPPED" || printf '[]' > "$SAST_SKIPPED"
-[ -s "$SAST_SKIPPED" ] || printf '[]' > "$SAST_SKIPPED"
-jq -s --slurpfile sk "$SAST_SKIPPED" '{results: ., errors: [], skippedFiles: ($sk[0] // [])}' \
+jq -s --slurpfile sk "$SAST_SKIPPED" \
+    '{results: ., errors: [], skippedFiles: ($sk[0].skippedFiles // []),
+      partiallyParsedFiles: ($sk[0].partiallyParsedFiles // 0)}' \
     "$WORK/sast.ndjson" > "$SAST_JSON"
 if [ "$SAST_STATUS" = "failed" ]; then
     # B3: ONLY a sanitized summary — the exit code and the distinct NORMALIZED Opengrep error-type names

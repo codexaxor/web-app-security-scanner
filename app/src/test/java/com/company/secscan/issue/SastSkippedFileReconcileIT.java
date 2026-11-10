@@ -35,13 +35,17 @@ class SastSkippedFileReconcileIT extends TriageSeedSupport {
     private static final String RULE = "opengrep-rules.java.lang.security.audit.sqli.jdbc-sqli";
 
     private UUID record(UUID repo, List<RawFinding> findings, List<SastSkippedFile> skipped) {
+        return record(repo, findings, skipped, 0);
+    }
+
+    private UUID record(UUID repo, List<RawFinding> findings, List<SastSkippedFile> skipped, int partiallyParsed) {
         Scan scan = Scan.manual(WORKSPACE, repo);
         scan.markRunning();
         scan = scans.save(scan);
         ScannerTaskResult sast = new ScannerTaskResult("sast", "ok", 0, 5L, "opengrep.json", false);
         ParsedScan parsed = new ParsedScan(false, "commit-" + scan.getId(), Map.of(), List.of(sast), findings,
                 List.of(), SecscanConfig.absent(), List.of(), ParsedScan.SCOPE_STATUS_OK, List.of(), List.of(),
-                skipped);
+                skipped, partiallyParsed);
         scanState.recordSuccess(WORKSPACE, scan.getId(), UUID.randomUUID(), repo, parsed, null,
                 Scan.STATUS_COMPLETED);
         return scan.getId();
@@ -84,13 +88,14 @@ class SastSkippedFileReconcileIT extends TriageSeedSupport {
                 .isEqualTo(SubIssue.STATUS_SOLVED);
         assertThat(eventsFor(keep.getId(), scan2)).as("the solve wrote a triage_event").isEqualTo(1);
 
-        // The coverage warning is raised, naming the count and the error type (no path/source).
+        // The coverage warning is raised, naming the count, the error type and the repo-relative path.
         List<ScanWarning> skippedWarnings = scanWarnings.findByScanId(scan2).stream()
                 .filter(w -> "SAST_FILES_SKIPPED".equals(w.getCode())).toList();
         assertThat(skippedWarnings).hasSize(1);
         // Message names the count, the error type, and the repo-relative path(s) — but never source text.
         assertThat(skippedWarnings.get(0).getMessage())
-                .contains("1 file", "Timeout", SKIP_FILE);
+                .contains("1 file", "Timeout", SKIP_FILE)
+                .doesNotContain("partially parsed");
     }
 
     @Test
@@ -209,6 +214,57 @@ class SastSkippedFileReconcileIT extends TriageSeedSupport {
         assertThat(subIssues.findByIdAndWorkspaceId(solved.getId(), WORKSPACE).orElseThrow().getStatus())
                 .isEqualTo(SubIssue.STATUS_OPEN);
         assertThat(eventsFor(solved.getId(), scan3)).isEqualTo(1);
+    }
+
+    // --- M8.15 review S1/S2 (owner decision): full parse errors freeze; PartialParsing = scanned, only counted. ---
+
+    private static final String PARTIAL_FILE = "src/main/java/Partial.java";
+
+    @Test
+    void aFullParseErrorFreezesLikeATimeout() {
+        UUID repo = seedRepo();
+        record(repo, List.of(sast(SKIP_FILE, "hashSkip")), List.of());
+        SubIssue skip = byFile(repo, SKIP_FILE);
+
+        UUID scan2 = record(repo, List.of(), List.of(new SastSkippedFile(SKIP_FILE, List.of("Syntax error"))));
+
+        assertThat(subIssues.findByIdAndWorkspaceId(skip.getId(), WORKSPACE).orElseThrow().getStatus())
+                .isEqualTo(SubIssue.STATUS_OPEN);
+        assertThat(eventsFor(skip.getId(), scan2)).isZero();
+        assertThat(scanWarnings.findByScanId(scan2)).filteredOn(w -> "SAST_FILES_SKIPPED".equals(w.getCode()))
+                .singleElement().satisfies(w -> assertThat(w.getMessage()).contains("Syntax error", SKIP_FILE));
+    }
+
+    @Test
+    void aPartiallyParsedFileIsNotFrozenAndRaisesNoWarningOnItsOwn() {
+        // run-scan.sh never lists a PartialParsing-only file in skippedFiles; it only counts it. Its absent
+        // finding therefore SOLVES normally (the file was analyzed), and a count alone raises no warning.
+        UUID repo = seedRepo();
+        record(repo, List.of(sast(PARTIAL_FILE, "hashPartial")), List.of());
+        SubIssue partial = byFile(repo, PARTIAL_FILE);
+
+        UUID scan2 = record(repo, List.of(), List.of(), 1);
+
+        assertThat(subIssues.findByIdAndWorkspaceId(partial.getId(), WORKSPACE).orElseThrow().getStatus())
+                .as("a partially parsed file was scanned → its absent finding solves normally")
+                .isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(eventsFor(partial.getId(), scan2)).isEqualTo(1);
+        assertThat(scanWarnings.findByScanId(scan2)).noneMatch(w -> "SAST_FILES_SKIPPED".equals(w.getCode()));
+    }
+
+    @Test
+    void theWarningCapsTypesAndMentionsPartialParsingOnlyAsACount() {
+        UUID repo = seedRepo();
+        record(repo, List.of(sast(SKIP_FILE, "hashSkip")), List.of());
+
+        UUID scan2 = record(repo, List.of(), List.of(new SastSkippedFile(SKIP_FILE,
+                List.of("Timeout", "Syntax error", "Other syntax error", "OutOfMemory", "Too many matches",
+                        "exceeded_size_limit", "insufficient_permissions"))), 3);
+
+        String msg = scanWarnings.findByScanId(scan2).stream()
+                .filter(w -> "SAST_FILES_SKIPPED".equals(w.getCode())).findFirst().orElseThrow().getMessage();
+        assertThat(msg).contains("1 file", SKIP_FILE, ", +2 more)", "partially parsed (3)")
+                .doesNotContain("Partial.java").doesNotContain("/work").doesNotContain("[").doesNotContain("line");
     }
 
     @Test
