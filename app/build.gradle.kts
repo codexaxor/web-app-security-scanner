@@ -117,6 +117,10 @@ tasks.named<Test>("test") {
     dependsOn(buildScannerImage)
     // Re-run the suite (incl. the worker ITs that launch the scanner image) whenever the image content changes.
     inputs.property("scannerImageContentHash", scannerImageContentHash)
+    // The ITs read fixtures/ at run time (copied into temp git repos and scanned), so a fixture change must re-run
+    // them instead of leaving :app:test UP-TO-DATE (M8.15 review N3).
+    inputs.dir(rootProject.file("fixtures")).withPropertyName("fixtures")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // D-039 gate: the static Gradle resolver (scanner-image/gradle_resolver.py) is Python, so its unit tests run
