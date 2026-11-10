@@ -115,3 +115,25 @@ csproj_package_versions() {
     done
     unset _f _n _i _base _name _ver
 }
+
+# --- SAST (Opengrep) report helpers (M8.15 review B3/S1/S2/S3). Exercised in-image by
+# sast_failure_canary_in_image_test.py and sast_skipped_in_image_test.py against REAL Opengrep 1.31.0 output. ---
+
+# jq definition shared by the helpers below: an Opengrep error TYPE reduced to its variant NAME. A variant with a
+# payload is a JSON array — e.g. ["PartialParsing", [<locations: container paths + line ranges>]] — so we keep
+# only .[0]; of that we keep only the LEADING run of [A-Za-z0-9 _.-] characters (after any leading [ or "), capped
+# at 48 chars — so even a stringified payload can never carry a path, a line range or source text into a message.
+SAST_JQ_DEFS='def sast_type: (if type == "array" then .[0] else . end) | tostring | capture("^[\\[\" ]*(?<n>[A-Za-z0-9 _.-]*)").n | .[0:48] | rtrimstr(" ");'
+
+# sast_error_summary <opengrep-raw.json>
+#   The DISTINCT normalized Opengrep error types in the raw report, comma-separated, at most 5 then "+N more";
+#   "none" when there are none or the report is unreadable. Never a message, path or source text — this is the
+#   only Opengrep detail run-scan.sh prints when SAST fails (the --verbose run log is never printed, B3).
+sast_error_summary() {
+    _s="$(jq -r "$SAST_JQ_DEFS"'
+        [.errors[]? | .type | sast_type | select(length > 0)] | unique
+        | if length > 5 then (.[0:5] | join(", ")) + ", +" + ((length - 5) | tostring) + " more"
+          else join(", ") end' "$1" 2>/dev/null)" || _s=""
+    printf '%s' "${_s:-none}"
+    unset _s
+}

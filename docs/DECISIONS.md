@@ -124,7 +124,13 @@ Decision (extends D-053; does NOT supersede it):
   DESIGN are NOT frozen — gitignore/semgrepignore/cli-flag matches, `always_skipped`, and `wrong_language`
   (no rule applies → nothing to lose), plus our own `EXCLUDED_PATH`/D-059 path exclusions (a worker-side triage
   concern, never an Opengrep skip). (`paths.skipped` is only emitted when `opengrep scan` runs with `--verbose`,
-  which run-scan.sh now passes; it adds per-file progress to the run log only, never to `/out`.) At reconcile,
+  which run-scan.sh now passes. **M8.15 review B3:** the `--verbose` run log QUOTES scanned source on a parse
+  error, so it is written to `/work/opengrep-verbose.log` (tmpfs) and NEVER tailed/printed/copied; when SAST fails
+  run-scan.sh prints only `opengrep failed (exit N); error types: <normalized names>` — the previous
+  `tail -c 4000` of the log would have put source text into the stored `scan_task.log_excerpt`. Proven on the
+  failure path by `sastFailureCanaryInImageTest` (canary absent from `/out`/stdout/stderr, present only in the
+  in-container verbose log) and `SastFailureCanaryIT` (real worker pipeline, test-only image whose `opengrep`
+  exits 2 after a real scan: canary in no `scan`/`scan_task`/`scan_warning`/`scan_finding`/`sub_issue` row).) At reconcile,
   every OPEN **or IGNORED** SAST finding whose file is skipped is **frozen** (left untouched —
   never solved, no `triage_event`), exactly like the EOL coverage guard. (**M8.15 review B2:** IGNORED is
   included because the D-083 reconcile path solves an absent ignored finding held by a re-derivable cause —

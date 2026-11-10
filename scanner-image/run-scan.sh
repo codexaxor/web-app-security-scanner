@@ -354,10 +354,12 @@ set +e
     opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG $OPENGREP_TIMEOUT_ARGS \
     --verbose --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
-    >"$WORK/opengrep.log" 2>&1
+    >"$WORK/opengrep-verbose.log" 2>&1
 SAST_EXIT=$?
-# --verbose makes Opengrep populate paths.skipped[{path, reason}] in the JSON (it is otherwise omitted); it adds
-# per-file progress to the run log only (tmpfs /work, never /out). We need it to detect size/unreadable skips.
+# --verbose makes Opengrep populate paths.skipped[{path, reason}] in the JSON (it is otherwise omitted). Its run
+# log QUOTES SCANNED SOURCE (a parse error prints "`<source line>` was unexpected"), so it goes to
+# $WORK/opengrep-verbose.log (tmpfs, dies with the container) and is NEVER tailed, printed or copied — not to
+# /out and not to stdout/stderr, which the worker stores as the scan_task log excerpt (M8.15 review B3).
 set -e
 END="$(date +%s)"
 SAST_DUR_MS=$(( (END - START) * 1000 ))
@@ -419,9 +421,10 @@ jq -c --arg co "$CHECKOUT/" --arg fr "$SAST_FREEZE_REASONS" \
 [ -s "$SAST_SKIPPED" ] || printf '[]' > "$SAST_SKIPPED"
 jq -s --slurpfile sk "$SAST_SKIPPED" '{results: ., errors: [], skippedFiles: ($sk[0] // [])}' \
     "$WORK/sast.ndjson" > "$SAST_JSON"
-if [ "$SAST_STATUS" = "failed" ] && [ -s "$WORK/opengrep.log" ]; then
-    echo "opengrep failed (exit $SAST_EXIT); last output follows:" >&2
-    tail -c 4000 "$WORK/opengrep.log" >&2 || true
+if [ "$SAST_STATUS" = "failed" ]; then
+    # B3: ONLY a sanitized summary — the exit code and the distinct NORMALIZED Opengrep error-type names
+    # (sast_error_summary: never a message, path, line range or source text). The verbose run log stays in-container.
+    echo "opengrep failed (exit $SAST_EXIT); error types: $(sast_error_summary "$SAST_RAW")" >&2
 fi
 
 # --- IaC scan (Checkov over the clone; fully offline, D-054) ---

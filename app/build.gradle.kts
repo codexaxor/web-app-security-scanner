@@ -366,8 +366,35 @@ val customRulesInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// M8.15 review B3 gate: the SAST FAILURE path. Opengrep's --verbose run log quotes scanned source on a parse error;
+// it must never reach /out or run-scan.sh's stdout/stderr (= the stored scan_task log excerpt). Runs the REAL
+// run-scan.sh over fixtures/sast-fail-canary twice inside the built image — once normally, once with an opengrep
+// PATH shim that runs the real opengrep then exits 2 — and asserts the canary is only ever in the in-container
+// verbose log. --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastFailureCanaryInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the SAST failure path never leaks the verbose run log (M8.15 review B3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-fail-canary")
+    inputs.file(scannerDir.resolve("sast_failure_canary_in_image_test.py")).withPropertyName("failureCanaryTest")
+    inputs.dir(fixtureDir).withPropertyName("failCanaryFixture")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-failure-canary-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_failure_canary_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
     dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
         branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
-        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest)
+        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest, sastFailureCanaryInImageTest)
 }
