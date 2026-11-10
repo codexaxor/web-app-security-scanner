@@ -320,9 +320,12 @@ public class ReconcileService {
      * M8.15 S6 follow-up — never false-solve a partially-analyzed file. Any file Opengrep reported in its
      * {@code errors[]} this scan (a per-rule/-file {@code Timeout}, a {@code ParseError}, …) had some rules fail
      * to run on it, so a real SAST finding there could be absent from this scan for a NON-fix reason. Every OPEN
-     * SAST sub-issue whose {@code file_path} is one of those skipped files is FROZEN (left untouched — never
-     * solved/reopened, no event), exactly like the EOL coverage guard. SAST findings in fully-scanned files
-     * reconcile normally. New detections in a skipped file still open (a rule that DID run found them).
+     * <em>or IGNORED</em> SAST sub-issue whose {@code file_path} is one of those skipped files is FROZEN (left
+     * untouched — never solved, no event), exactly like the EOL coverage guard. IGNORED is included because the
+     * D-083 reconcile path ({@code TriageApplier}) solves an absent ignored finding held by a re-derivable cause
+     * (e.g. {@code DUPLICATE_RULE}, a path/rule ignore) unless its fingerprint is frozen (M8.15 review B2). A
+     * SOLVED sub-issue is NOT frozen, so a re-detection in a skipped file still reopens it (a rule that DID run
+     * found it). SAST findings in fully-scanned files reconcile normally; new detections in a skipped file open.
      *
      * @return the SAST fingerprints to freeze this scan (empty when no file was skipped)
      */
@@ -333,7 +336,7 @@ public class ReconcileService {
         Set<String> frozen = new HashSet<>();
         for (SubIssue s : existingSubs) {
             if (com.company.secscan.finding.RawFinding.TYPE_SAST.equals(s.getType())
-                    && SubIssue.STATUS_OPEN.equals(s.getStatus())
+                    && !SubIssue.STATUS_SOLVED.equals(s.getStatus()) // OPEN or IGNORED (B2)
                     && s.getFilePath() != null
                     && skippedNormalized.contains(
                             com.company.secscan.triage.PathExclusion.normalize(s.getFilePath()))) {
@@ -341,7 +344,7 @@ public class ReconcileService {
             }
         }
         if (!frozen.isEmpty()) {
-            log.info("SAST skipped-file guard: {} open SAST finding(s) sit in {} file(s) Opengrep could not fully "
+            log.info("SAST skipped-file guard: {} open/ignored SAST finding(s) sit in {} file(s) Opengrep could not fully "
                     + "analyze this scan and are frozen (never false-solved); other findings reconcile normally.",
                     frozen.size(), skippedNormalized.size());
         }

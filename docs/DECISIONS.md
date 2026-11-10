@@ -125,8 +125,14 @@ Decision (extends D-053; does NOT supersede it):
   (no rule applies → nothing to lose), plus our own `EXCLUDED_PATH`/D-059 path exclusions (a worker-side triage
   concern, never an Opengrep skip). (`paths.skipped` is only emitted when `opengrep scan` runs with `--verbose`,
   which run-scan.sh now passes; it adds per-file progress to the run log only, never to `/out`.) At reconcile,
-  every OPEN SAST finding whose file is skipped is **frozen** (left untouched —
-  never solved/reopened, no `triage_event`), exactly like the EOL coverage guard; SAST findings in fully-scanned
+  every OPEN **or IGNORED** SAST finding whose file is skipped is **frozen** (left untouched —
+  never solved, no `triage_event`), exactly like the EOL coverage guard. (**M8.15 review B2:** IGNORED is
+  included because the D-083 reconcile path solves an absent ignored finding held by a re-derivable cause —
+  `DUPLICATE_RULE`, a path/rule ignore — unless its fingerprint is frozen; a SOLVED finding is NOT frozen, so a
+  re-detection in a skipped file still reopens it. And because `DUPLICATE_RULE` (D-061) is derived from THIS
+  scan's per-file rule ids — incomplete for a skipped file — `TriageApplier` treats that cause as a FROZEN SOURCE
+  for a SAST finding in a skipped file (like the config/scope freezes): never unignored, re-solved or downgraded.
+  `SastSkippedFileReconcileIT`.); SAST findings in fully-scanned
   files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types + up to 10 repo-relative
   paths, then "and N more"; paths are a fingerprint input and shown throughout the UI, so they are not withheld —
   only the message/snippet are, D-053/S1), mapped in the coverage banner (D-030). This enforces domain rule 3

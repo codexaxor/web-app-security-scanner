@@ -79,6 +79,11 @@ public class TriageApplier {
         // thus the effective-include-dev — is unknown, so we must not flip scope-derived ignores on a guess).
         boolean globalScopeFrozen = triage.scopeInventoryFailed() || configFrozen;
         Set<String> unreadableManifests = triage.unreadableManifestsNormalized(); // SF3: per-manifest freeze
+        // M8.15 review B2: files Opengrep could not fully analyze this scan. DUPLICATE_RULE (D-061) is derived from
+        // THIS scan's rule ids per file, which are incomplete for such a file (the winner may simply not have run),
+        // so for a SAST finding there that cause's source is frozen — like config/scope above: never unignored,
+        // re-solved or downgraded on an incomplete recompute.
+        Set<String> sastSkippedFiles = triage.sastSkippedFilesNormalized();
         if (!configFrozen) {
             materializeSecscanCveRules(workspaceId, repositoryId, triage.config());
         }
@@ -98,9 +103,12 @@ public class TriageApplier {
             }
             boolean scopeFrozenForThis = globalScopeFrozen
                     || unreadableManifests.contains(PathExclusion.normalize(sub.getFilePath()));
+            boolean duplicateFrozenForThis = com.company.secscan.finding.RawFinding.TYPE_SAST.equals(sub.getType())
+                    && sub.getFilePath() != null
+                    && sastSkippedFiles.contains(PathExclusion.normalize(sub.getFilePath()));
             // SF1: persist the highest-precedence AUTO cause for this finding every reconcile (no event), even
             // when an IGNORE_RULE holds it — keeping a frozen source's prior value.
-            updateAutoIgnoreReason(sub, ctx, configFrozen, scopeFrozenForThis);
+            updateAutoIgnoreReason(sub, ctx, configFrozen, scopeFrozenForThis, duplicateFrozenForThis);
 
             TriageResolver.Desired desired =
                     TriageResolver.resolve(sub, groupKeyById.get(sub.getGroupId()), rules, ctx);
@@ -116,7 +124,7 @@ public class TriageApplier {
                 } else if (!incomingFps.contains(sub.getFingerprint())
                         && solvableScanners.contains(sub.getScanner())
                         && !frozenFingerprints.contains(sub.getFingerprint())
-                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)
+                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis, duplicateFrozenForThis)
                         && TriageResolver.isHoldReDerivable(sub, groupKeyById.get(sub.getGroupId()), rules)) {
                     // D-083 (OD-19) reconcile path (B-1): an IGNORED finding ABSENT from this scan whose scanner is
                     // authoritative (succeeded + closes findings, same-branch OR re-baselining), held by a
@@ -135,7 +143,7 @@ public class TriageApplier {
                             SubIssue.STATUS_SOLVED, closeReason, scanId));
                     touched.add(sub.getGroupId());
                 } else if (hasIgnoreChanged(sub, desired)
-                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
+                        && !isFrozenReason(sub, configFrozen, scopeFrozenForThis, duplicateFrozenForThis)) {
                     // Still ignored (hard rule 6) but the holding rule/reason changed — refresh quietly, no event.
                     // Nit: skip the refresh when the CURRENT reason's source is frozen this scan, so an incomplete
                     // recompute never downgrades a frozen-source reason (e.g. TEST_SCOPE → a lower live cause).
@@ -143,7 +151,7 @@ public class TriageApplier {
                     subIssues.save(sub);
                 }
             } else if (ignored) {
-                if (isFrozenReason(sub, configFrozen, scopeFrozenForThis)) {
+                if (isFrozenReason(sub, configFrozen, scopeFrozenForThis, duplicateFrozenForThis)) {
                     continue; // S3: the source that ignored it is unusable this scan — leave it ignored
                 }
                 String newStatus = reconcileStatus(sub, incomingFps, solvableScanners, frozenFingerprints);
@@ -164,9 +172,10 @@ public class TriageApplier {
      * recompute it, so overwriting would lose it.
      */
     private void updateAutoIgnoreReason(SubIssue sub, TriageResolver.AutoContext ctx, boolean configFrozen,
-                                        boolean scopeFrozen) {
+                                        boolean scopeFrozen, boolean duplicateFrozen) {
         String prior = sub.getAutoIgnoreReason();
         boolean keepPrior = (configFrozen && ReasonCode.EXCLUDED_PATH.code().equals(prior))
+                || (duplicateFrozen && ReasonCode.DUPLICATE_RULE.code().equals(prior))
                 || (scopeFrozen && (ReasonCode.DEV_DEPENDENCY.code().equals(prior)
                         || ReasonCode.TEST_SCOPE.code().equals(prior)));
         if (keepPrior) {
@@ -237,10 +246,14 @@ public class TriageApplier {
      * failure, unreadable config, or this manifest unreadable). A default-glob EXCLUDED_PATH still resolves to a
      * desired, so it never reaches the unignore branch anyway.
      */
-    private static boolean isFrozenReason(SubIssue sub, boolean configFrozen, boolean scopeFrozen) {
+    private static boolean isFrozenReason(SubIssue sub, boolean configFrozen, boolean scopeFrozen,
+                                          boolean duplicateFrozen) {
         String reason = sub.getIgnoreReason();
         if (configFrozen && ReasonCode.EXCLUDED_PATH.code().equals(reason)) {
             return true;
+        }
+        if (duplicateFrozen && ReasonCode.DUPLICATE_RULE.code().equals(reason)) {
+            return true; // M8.15 review B2: its file was not fully analyzed this scan
         }
         return scopeFrozen && (ReasonCode.DEV_DEPENDENCY.code().equals(reason)
                 || ReasonCode.TEST_SCOPE.code().equals(reason));
