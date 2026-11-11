@@ -28,5 +28,14 @@ public record ScannerLaunchSpec(
         long pidsLimit,
         boolean networkDisabled,
         String runAsUser,
-        Duration timeout) {
+        Duration timeout,
+        // The git basic-auth username for the clone when a token is present: "oauth2" for GitLab,
+        // "x-access-token" for GitHub (D-014: the token itself is the password, delivered via the one-time file).
+        String cloneAuthUser,
+        // Ownership tag stamped on the container (label secscan.instance) so ScanReaper reaps only THIS
+        // instance's leftovers, never another stack's (D-102 / M8.14).
+        String instanceId,
+        // Pass --taint-intrafile to Opengrep (D-104, M8.15 S4). Default on in production; flipped off↔on only by
+        // TaintRescanStabilityIT to prove fingerprint stability. Delivered as the SAST_TAINT_INTRAFILE env var.
+        boolean taintIntrafile) {
 }

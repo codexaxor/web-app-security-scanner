@@ -25,15 +25,30 @@
   --accent-contrast: #ffffff;
   --focus: #2f6feb;       /* focus ring */
 
-  /* severity bands — severity ONLY (AA text on --surface) */
+  /* brand + shell (M8.11) — the navy chrome (sidebar + top bar), CONSTANT across light/dark so the shell
+   * is brand chrome while the content area flips theme. Defined once in :root and inherited into the dark
+   * blocks (they override only surface tokens, never --shell-*). Text pairs meet WCAG AA on navy
+   * (verified in contrast.test.ts). These navy roles are the ONLY place --brand-navy is used. */
+  --brand-navy: #0b1530;
+  --shell-bg: #0b1530;          /* sidebar / top-bar background */
+  --shell-surface: #16213f;     /* raised chrome (hover, menus on the navy) */
+  --shell-text: #e9eef7;        /* 14.9:1 on --shell-bg */
+  --shell-muted: #9fb0cc;       /* 8.0:1 on --shell-bg — group labels, secondary */
+  --shell-border: #24314f;      /* dividers on navy */
+  --shell-active-bg: #1b2c52;   /* active nav item background */
+  --shell-active-text: #ffffff; /* active nav item text */
+  --shell-accent: #5b8def;      /* active indicator / focus on navy — 5.5:1 on --shell-bg */
+
+  /* severity bands — severity ONLY (AA text on --surface). Critical deep red, High orange, Medium amber/gold,
+   * Low slate blue — NEVER green (green is reserved for solved/completed). All four are visually distinct. */
   --sev-critical: #b3261e;
-  --sev-high: #b45309;
-  --sev-medium: #8a6d00;
-  --sev-low: #2f7a34;
+  --sev-high: #c2410c;
+  --sev-medium: #946a00;
+  --sev-low: #3f6090;
   --sev-critical-bg: #fbe9e7;
-  --sev-high-bg: #fdf0e3;
-  --sev-medium-bg: #fbf4d9;
-  --sev-low-bg: #e7f4e8;
+  --sev-high-bg: #fdeadd;
+  --sev-medium-bg: #fbf1cf;
+  --sev-low-bg: #e9eef8;
 
   /* status roles */
   --status-new: #2f52c8;        /* blue */
@@ -44,6 +59,13 @@
   --status-ignored-bg: #eceff3;
   --status-solved: #2f7a34;     /* green */
   --status-solved-bg: #e7f4e8;
+
+  /* finding-type accent colours (S11.8) — a categorical set for type bars/icons, distinct from severity. */
+  --type-sca: #6d4bd8;
+  --type-sast: #0e7c86;
+  --type-secret: #c23aa0;
+  --type-iac: #1f6feb;
+  --type-eol: #8a5a2b;
 
   /* feedback */
   --danger: #b3261e;
@@ -61,6 +83,7 @@
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
+  --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
 
@@ -86,88 +109,59 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --content-max: 1200px;
+
+  /* motion (M8.11) — all transitions <= 200 ms; disabled under prefers-reduced-motion (base.css). */
+  --transition: 180ms ease;
+  --transition-fast: 120ms ease;
+
+  /* layering (M8.11) — single source of truth for overlay stacking. */
+  --z-drawer: 40;
+  --z-palette: 60;
+  --z-toast: 80;
+
+  /* the navy top app-bar shown below the sidebar breakpoint (<= 1024px); sticky table headers sit under it */
+  --appbar-h: 56px;
 }
 
-/* Dark theme: auto (unless an explicit light override) and an explicit [data-theme="dark"]. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0f1317;
-    --surface: #1a2027;
-    --surface-2: #212932;
-    --surface-3: #2a333d;
-    --border: #333d47;
-    --border-strong: #46525e;
-    --text: #e9eef3;        /* 13.8:1 on --surface */
-    --text-2: #c2ccd6;
-    --muted: #93a0ac;       /* 5.0:1 on --surface */
-    --accent: #7f9cf5;      /* 6.4:1 on --surface */
-    --accent-hover: #93abf7;
-    --accent-contrast: #0e1217;
-    --focus: #8fb0ff;
-
-    --sev-critical: #f28b82;
-    --sev-high: #f0a35e;
-    --sev-medium: #e6c84f;
-    --sev-low: #86d08a;
-    --sev-critical-bg: #3a1f1d;
-    --sev-high-bg: #352414;
-    --sev-medium-bg: #332d15;
-    --sev-low-bg: #16301a;
-
-    --status-new: #7f9cf5;
-    --status-new-bg: #1e2740;
-    --status-todo: #93a0ac;
-    --status-todo-bg: #262f39;
-    --status-ignored: #8a96a2;
-    --status-ignored-bg: #262f39;
-    --status-solved: #86d08a;
-    --status-solved-bg: #16301a;
-
-    --danger: #f28b82;
-    --danger-hover: #f4a49d;
-    --danger-contrast: #2a0f0c;
-    --warn: #f0a35e;
-    --warn-bg: #352414;
-    --error-bg: #3a1f1d;
-    --error-border: #6e3030;
-    --error-text: #f4b5ae;
-    --ok: #86d08a;
-
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
-    --shadow-2: 0 10px 32px rgba(0, 0, 0, 0.55);
-  }
-}
+/* Dark theme (D-099): ONLY via an explicit [data-theme="dark"] set by the theme toggle. There is deliberately no
+ * @media (prefers-color-scheme) block — the UI is light by default and never follows the OS, so the first paint
+ * (before React sets data-theme) is light too and cannot flash dark (M8.11 review N-4). */
 
 :root[data-theme="dark"] {
-  --bg: #0f1317;
-  --surface: #1a2027;
-  --surface-2: #212932;
-  --surface-3: #2a333d;
-  --border: #333d47;
-  --border-strong: #46525e;
+  --bg: #0b1020;
+  --surface: #121a2e;
+  --surface-2: #18223a;
+  --surface-3: #1f2b45;
+  --border: #2a3652;
+  --border-strong: #3a4968;
   --text: #e9eef3;
-  --text-2: #c2ccd6;
-  --muted: #93a0ac;
+  --text-2: #c2ccda;
+  --muted: #94a3bb;
   --accent: #7f9cf5;
   --accent-hover: #93abf7;
-  --accent-contrast: #0e1217;
+  --accent-contrast: #0b1020;
   --focus: #8fb0ff;
   --sev-critical: #f28b82;
   --sev-high: #f0a35e;
   --sev-medium: #e6c84f;
-  --sev-low: #86d08a;
+  --sev-low: #8fb3e8;
   --sev-critical-bg: #3a1f1d;
   --sev-high-bg: #352414;
   --sev-medium-bg: #332d15;
-  --sev-low-bg: #16301a;
+  --sev-low-bg: #1a2744;
   --status-new: #7f9cf5;
   --status-new-bg: #1e2740;
   --status-todo: #93a0ac;
-  --status-todo-bg: #262f39;
+  --status-todo-bg: #1d2740;
   --status-ignored: #8a96a2;
-  --status-ignored-bg: #262f39;
+  --status-ignored-bg: #1d2740;
   --status-solved: #86d08a;
   --status-solved-bg: #16301a;
+  --type-sca: #b3a0f0;
+  --type-sast: #5fc2cc;
+  --type-secret: #f0a0d8;
+  --type-iac: #7fb0ff;
+  --type-eol: #d2a679;
   --danger: #f28b82;
   --danger-hover: #f4a49d;
   --danger-contrast: #2a0f0c;

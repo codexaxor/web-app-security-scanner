@@ -1,3 +1,9 @@
 # API process: serves REST for the UI and (later) runs the scheduler, commit polling, intel sync and re-score.
 server:
   port: ${SECSCAN_API_PORT:8080}
+  servlet:
+    session:
+      # D-092: idle timeout (the SessionTimeoutFilter is the authority; this is the container backstop). The
+      # cookie flags (HttpOnly + Secure + SameSite=Strict) are set by SecurityConfig.sessionCookieCustomizer;
+      # Secure is overridable only via SECSCAN_SESSION_COOKIE_SECURE (false ONLY in the e2e compose project).
+      timeout: 30m

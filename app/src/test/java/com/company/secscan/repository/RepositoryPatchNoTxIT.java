@@ -54,7 +54,7 @@ class RepositoryPatchNoTxIT extends AbstractGitLabIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 6101L, "svc/app", "main",
                 List.of("Java")));
 
-        var view = service.patch(repo.getId(), null, null, null, TextNode.valueOf("dev"));
+        var view = service.patch(Workspace.DEFAULT_ID, repo.getId(), null, null, null, TextNode.valueOf("dev"));
 
         assertThat(view.scanBranch()).isEqualTo("dev");                 // the write still happened
         assertThat(txActiveDuringCall.get()).isFalse();                 // but GitLab ran outside any transaction

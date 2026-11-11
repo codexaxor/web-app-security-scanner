@@ -154,6 +154,11 @@ public final class Scoring {
             return sastIacBase(in.severityLabel(), "base_sast", "SAST rule severity ");
         }
         if (RawFinding.TYPE_IAC.equals(in.type())) {
+            // D-083 (OD-27, V20): a maintained per-check_id override replaces the default-MEDIUM Checkov base.
+            String override = in.iacSeverityOverride();
+            if (override != null && !override.isBlank()) {
+                return sastIacBase(override, "base_iac", "IaC check-id severity override ");
+            }
             return sastIacBase(in.severityLabel(), "base_iac", "IaC rule severity ");
         }
         if (RawFinding.TYPE_EOL.equals(in.type())) {

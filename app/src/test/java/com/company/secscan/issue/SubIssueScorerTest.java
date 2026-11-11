@@ -7,6 +7,7 @@ import com.company.secscan.finding.RawFinding;
 import com.company.secscan.intel.EolCycle;
 import com.company.secscan.intel.EolCycleRepository;
 import com.company.secscan.intel.EpssScoreRepository;
+import com.company.secscan.intel.IacSeverityOverrideRepository;
 import com.company.secscan.intel.KevEntryRepository;
 import com.company.secscan.scoring.ScoreLine;
 import java.time.LocalDate;
@@ -26,7 +27,8 @@ class SubIssueScorerTest {
     private final KevEntryRepository kev = Mockito.mock(KevEntryRepository.class);
     private final EpssScoreRepository epss = Mockito.mock(EpssScoreRepository.class);
     private final EolCycleRepository eol = Mockito.mock(EolCycleRepository.class);
-    private final SubIssueScorer scorer = new SubIssueScorer(kev, epss, eol);
+    private final IacSeverityOverrideRepository iacOverrides = Mockito.mock(IacSeverityOverrideRepository.class);
+    private final SubIssueScorer scorer = new SubIssueScorer(kev, epss, eol, iacOverrides);
 
     private static SubIssue eolSub(int score) {
         SubIssue s = new SubIssue(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),

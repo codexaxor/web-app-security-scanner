@@ -63,7 +63,7 @@ class DefaultBranchRefreshIT extends AbstractGitLabIT {
                 "{\"id\":5201,\"path_with_namespace\":\"svc/5201\",\"default_branch\":\"release\","
                         + "\"empty_repo\":false}");
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.branch()).isEqualTo("release");                           // snapshotted current default
         assertThat(repositories.findById(repo.getId()).orElseThrow().getDefaultBranch()).isEqualTo("release");
@@ -74,7 +74,7 @@ class DefaultBranchRefreshIT extends AbstractGitLabIT {
         Repository repo = seedRepo(5202L);
         // No stub for GET /projects/5202 → WireMock 404 → refresh fails → fallback + warning.
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.branch()).isEqualTo("main");                              // last known stored default
         assertThat(warnings.findByScanId(scan.id())).extracting(ScanWarning::getCode)

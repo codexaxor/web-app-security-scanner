@@ -67,6 +67,19 @@ code {
   border-radius: var(--radius-sm);
 }
 
+/* Motion (M8.11 item 4): all UI transitions are <= 200 ms (via --transition / --transition-fast). Under
+ * prefers-reduced-motion, disable transitions, animations and smooth scrolling globally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Utilities */
 .muted {
   color: var(--muted);

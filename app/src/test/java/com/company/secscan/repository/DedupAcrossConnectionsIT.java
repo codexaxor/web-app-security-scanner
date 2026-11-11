@@ -46,8 +46,8 @@ class DedupAcrossConnectionsIT extends AbstractGitLabIT {
                 .stubProject("services%2Fib-keycloak")
                 .stubProjectsFromSample(42L)
                 .stubLanguages(PROJECT_ID, "{\"Java\":100.0}");
-        connectionService.create(gitlab.baseUrl(), TOKEN, "group", "services");
-        connectionService.create(gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak");
+        connectionService.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
+        connectionService.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak");
     }
 
     @AfterEach
@@ -69,8 +69,8 @@ class DedupAcrossConnectionsIT extends AbstractGitLabIT {
         UUID groupConn = groupConnId();
         UUID projectConn = projectConnId();
 
-        repositoryService.select(groupConn, List.of(PROJECT_ID));
-        repositoryService.select(projectConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, groupConn, List.of(PROJECT_ID));
+        repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID));
 
         List<Repository> stored = repositories.findByWorkspaceId(Workspace.DEFAULT_ID);
         assertThat(stored).hasSize(1);
@@ -90,11 +90,11 @@ class DedupAcrossConnectionsIT extends AbstractGitLabIT {
         CountDownLatch start = new CountDownLatch(1);
         Callable<List<RepositoryView>> viaGroup = () -> {
             start.await();
-            return repositoryService.select(groupConn, List.of(PROJECT_ID)).repositories();
+            return repositoryService.select(Workspace.DEFAULT_ID, groupConn, List.of(PROJECT_ID)).repositories();
         };
         Callable<List<RepositoryView>> viaProject = () -> {
             start.await();
-            return repositoryService.select(projectConn, List.of(PROJECT_ID)).repositories();
+            return repositoryService.select(Workspace.DEFAULT_ID, projectConn, List.of(PROJECT_ID)).repositories();
         };
         try {
             Future<List<RepositoryView>> f1 = pool.submit(viaGroup);

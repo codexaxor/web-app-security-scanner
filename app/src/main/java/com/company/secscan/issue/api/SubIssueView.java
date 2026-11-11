@@ -5,6 +5,7 @@ import com.company.secscan.issue.SubIssue;
 import com.company.secscan.scoring.CweDictionary;
 import com.company.secscan.scoring.Scoring;
 import com.company.secscan.scoring.ScoreLine;
+import com.company.secscan.taxonomy.Level2Taxonomy;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -28,25 +29,44 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                            String cwePhrase, Boolean inKev, BigDecimal epss, String epssAttribution,
                            UUID firstSeenScanId, UUID lastSeenScanId, Instant solvedAt, Instant createdAt,
                            UUID ignoreRuleId, String ruleScope, String ruleReason, String ruleCreatedBy,
-                           boolean ruleGlobal) {
+                           boolean ruleGlobal, String level2Category, String owaspCategory,
+                           String advisorySummary, String host, String commitSha, String provider) {
 
     /** The © FIRST.org attribution shown wherever an EPSS value is surfaced (D-047 / EPSS terms of use). */
     public static final String EPSS_ATTRIBUTION = "EPSS data © FIRST.org — https://www.first.org/epss/";
 
     /** Without a holding rule (auto-ignore causes carry no rule; the reason code is {@code ignoreReason}). */
     public static SubIssueView of(SubIssue s) {
-        return of(s, null);
+        return of(s, null, null, null, null);
+    }
+
+    public static SubIssueView of(SubIssue s, IgnoreRule rule) {
+        return of(s, rule, null, null, null);
+    }
+
+    /** Back-compat overload (no provider → the UI defaults the source-link shape to GitLab). */
+    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha) {
+        return of(s, rule, host, commitSha, null);
     }
 
     /**
      * {@code rule} is the manual/.secscan.yml rule holding this finding ignored (from {@code ignored_by_rule_id}),
      * or null for an auto-ignore cause or an open/solved finding (OD-14 item 6). The rule fields drive the
      * panel's "ignored by rule / scope / reason / creator" block and the unignore-vs-409-vs-auto-cause logic.
+     *
+     * <p>M8.6 (D-084): {@code host} is the repository's source-host authority (host[:port]) and {@code commitSha}
+     * the commit this finding was last seen at — the only data, with the stored project path and file path, from
+     * which the UI builds a file/commit deep link. Both may be null (e.g. a detached repo), in which case no link
+     * is rendered.
      */
-    public static SubIssueView of(SubIssue s, IgnoreRule rule) {
+    public static SubIssueView of(SubIssue s, IgnoreRule rule, String host, String commitSha, String provider) {
         Integer score = s.getScore();
         String cwePhrase = CweDictionary.getInstance().phrase(s.getCwe(), s.getAdvisorySummary());
         String epssAttribution = s.getEpss() != null ? EPSS_ATTRIBUTION : null;
+        // M8.5 (D-083): the level-2 category + optional OWASP 2025 name, from the same pure function the group
+        // rollup uses, over this sub's own fields — so panel and feed agree.
+        Level2Taxonomy.Category cat = Level2Taxonomy.getInstance().of(s.getType(), s.getFilePath(), s.getRuleId(),
+                s.getCwe(), s.getPackageName());
         return new SubIssueView(s.getId(), s.getGroupId(), s.getRepositoryId(), s.getType(), s.getScanner(),
                 s.getStatus(),
                 s.getVulnId(), s.getRuleId(), s.getPackageName(), s.getInstalledVersion(), s.getFixedVersion(),
@@ -59,6 +79,7 @@ public record SubIssueView(UUID id, UUID groupId, UUID repositoryId, String type
                 rule == null ? null : rule.getReason(),
                 rule == null ? null : rule.getCreatedBy(),
                 // A global rule (repositoryId null) applies to every repo — the panel confirms before unignoring it.
-                rule != null && rule.getRepositoryId() == null);
+                rule != null && rule.getRepositoryId() == null,
+                cat.level2(), cat.owasp(), s.getAdvisorySummary(), host, commitSha, provider);
     }
 }

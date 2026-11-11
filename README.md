@@ -132,8 +132,47 @@ cd ui && npm run e2e             # end-to-end UI tests: isolated `secscan-e2e` c
 
 The first admin is created on first `api` startup when `app_user` is empty and
 `SECSCAN_BOOTSTRAP_ADMIN_EMAIL` / `SECSCAN_BOOTSTRAP_ADMIN_PASSWORD` are set (see `.env.example`).
-`/actuator/health` is public; `/api/**` requires HTTP Basic. For the host dev loop the worker runs as your
-own user, so the work root just needs to exist and be writable by you.
+`/actuator/health` is public; everything under `/api/**` requires authentication.
+
+The browser signs in at `POST /api/v1/auth/login` and gets a **server session** (D-092): an HttpOnly + Secure +
+SameSite=Strict `SECSCAN_SESSION` cookie, idle timeout 30 min, absolute cap 8 h; unsafe requests carry a CSRF
+token header (`X-CSRF-TOKEN`). A reload keeps you signed in; `POST /api/v1/auth/logout` ends the session. **HTTP
+Basic still works, statelessly, for curl/scripts** (and is CSRF-exempt). `SECSCAN_SESSION_COOKIE_SECURE` defaults
+to `true`; set it `false` only where the UI is reached over plain http on a non-localhost host (the e2e compose
+project does this) — **never on a shared/production host**.
+
+**Demo mode (D-091).** `SECSCAN_DEMO_MODE=true` creates/updates a demo user at startup
+(`SECSCAN_DEMO_USERNAME`, default `admin`, may be a non-email username; `SECSCAN_DEMO_PASSWORD`, min 4 chars),
+logs a WARN at every startup, and shows a red **DEMO MODE** ribbon in the UI. When it is off, any login
+identifier without `@` is refused (so a leftover demo user cannot sign in), and the 12-char password rule stays
+for every real user. **Never enable demo mode on a shared/production host.**
+
+**Workspaces, sign-up and the operator (M8.10, D-093–D-098).** Every account belongs to exactly one workspace,
+and every API call acts only on the signed-in user's workspace (another tenant's ids answer **404**). Anyone can
+request an account at `POST /api/v1/auth/signup` (`email`, `password` ≥ 12 chars, `workspaceName`); the answer is
+always the same `202` (no account enumeration) and sign-up is rate-limited per IP. The request waits for the
+**operator** — the earliest bootstrap admin (one operator per installation, never a second one silently) — who
+approves, rejects, disables or re-enables accounts under `/api/v1/admin/**` (operator-only). The operator sees
+account metadata only, never another tenant's business data. Login answers `401` for a wrong password, `403
+ACCOUNT_PENDING` / `403 ACCOUNT_INACTIVE` for a correct password on a pending or disabled account, and `429` +
+`Retry-After` after too many failures (per account+IP 5, per IP 20, per account 50 within 15 min; JSON login and
+Basic alike). Fair use per workspace: **one running scan** (further scans queue) and **25 active repositories**
+(`secscan.fair-use.max-repositories`; `409 REPOSITORY_LIMIT_REACHED`).
+
+The client IP for those limits honours `X-Forwarded-For` only from `SECSCAN_TRUSTED_PROXIES` (default: loopback
+only). In compose the ui nginx overwrites that header with its direct peer, and the stack runs on a pinned subnet
+(`SECSCAN_COMPOSE_SUBNET`, default `10.203.0.0/24`; smoke `10.203.1.0/24`, e2e `10.203.2.0/24`) in which nginx has
+a pinned address (`SECSCAN_UI_IP`, default `10.203.0.10`; smoke `10.203.1.10`, e2e `10.203.2.10`) — the ONLY peer
+the api trusts (not the whole subnet, which includes the Docker gateway). Change both only if they clash with a
+local/VPN route. Behind a host-side TLS proxy every client may share one IP key until that proxy's client IP is
+carried through (M8.9). **After upgrading to this version, run
+`docker compose down` once (without `-v` — keep `postgres-data`) and `docker network rm
+web-app-security-scanner_default`, so the network is recreated with the pinned subnet.**
+
+Demo mode is unchanged by tenancy: the demo user lives in the Default workspace (where all pre-M8.10 data
+lives), is never the operator and has no operator API; it sees Default's data like any Default member.
+
+For the host dev loop the worker runs as your own user, so the work root just needs to exist and be writable by you.
 
 ## Contributing
 

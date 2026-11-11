@@ -74,7 +74,7 @@ class CloneHostRecheckIT extends AbstractScanWorkerIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
                 List.of("Java")));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
@@ -100,7 +100,7 @@ class CloneHostRecheckIT extends AbstractScanWorkerIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
                 List.of("Java")));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));

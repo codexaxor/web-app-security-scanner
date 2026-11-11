@@ -357,6 +357,218 @@ already-selected project's checkbox is disabled ("Already selected") and the res
 selected"; a project whose code is unreadable is labelled honestly ("No access to repository code — check the token
 role") rather than "empty repository". No new dependency; CSP unchanged.
 
+## M8.5 Correctness + taxonomy
+
+**Scope (D-083 + D-081 (1)).** OD-19 family routed through the D-063 resolver: solve an *ignored* finding absent
+from a scan where its scanner succeeded and was authoritative when its hold is re-derivable (writing a
+`triage_event`), plus a one-off retire pass for the rows already accumulated (no migration); this also covers M8.1
+D-1 (a branch with no manifests) and absent-but-ignored after a branch switch (`BRANCH_CHANGED` when the cause is a
+branch switch). Level-2 taxonomy (migration **V21**): each issue group gets a level-2 category derived from stored
+data (SCA = ecosystem, secret = secret type, SAST = weakness class from CWE, IaC = platform, EOL = runtime), plus
+optional OWASP Top 10 2025 category names (names only — CC BY-SA), backfilled, exposed in feed/group/sub-issue
+views and usable as a feed filter; plus the D-074 errata correcting the level-1 label text to the shipped labels in
+`ui/src/lib/labels.ts`. IaC per-`check_id` severity override (migration **V20**, scoring-only). Feed "New · 7d"
+counts only findings first seen on the repository's currently tracked branch. D-081 (1) small items: IaC human
+titles from Checkov `check_name`, languages refreshed on each scan, re-score on unignore, the A5 ITs, and
+housekeeping (API Dockerfile `|| true`, dev postgres digest pin, e2e artifacts dir mode).
+
+**Done when:**
+- Baseline + end walkthrough on core-keycloak, notification, ib-api-v2 and secscan-test-secrets: `sub_issue`
+  status counts SQL = API = UI per repo.
+- OD-19: the 2 stale ignored SAST duplicates on secscan-test-secrets are retired with `triage_event`s; a repeat
+  scan creates no new orphans; named IT for absent-ignored-with-held-rule solved, absent-ignored-with-failed-scanner
+  unchanged, absent-ignored-with-non-authoritative-SCA unchanged.
+- Branch switch to a branch with no manifests re-baselines prior SCA findings (named IT).
+- Every issue group has a level-2 category after backfill (SQL count of null = 0); feed filter works (E2E).
+- IaC groups show the Checkov check name, not only the id.
+- IaC override changes only scores (no status change, no `triage_event`) — named IT.
+- "New · 7d" on notification equals the count of findings first seen on `dev` (SQL oracle).
+- Unignore re-scores the reopened finding immediately (named IT).
+- Languages are refreshed on every successful scan (secscan-test-secrets no longer empty).
+- `./gradlew clean build --rerun-tasks` green; UI gate + E2E twice green.
+
+## M8.6 UI uplift
+
+**Scope (D-081 (2) + D-084).** Left sidebar app shell + a design pass. Repositories list (search, filters, sort,
+severity chips, coverage tag, row menu, clickable rows). Repository page (Issues / Scans / Settings tabs, coverage
+banner, last scan age). Issue side panel (summary and how-to-fix text generated only from stored fields, advisory
+text via a new API field, sub-issues grouped by location with "+N more", next/prev, shareable URL). Secret context
+(fix guidance per secret type, file-line + commit link per D-084). Feed and Dashboard restyled.
+
+**Done when:** list → repo page → panel flow covered by E2E; generated texts unit-tested; link builder guard test;
+D-067 headers unchanged; real-data walkthrough on the 3 repos. (Detailed Done when: architect, before
+`/start-milestone M8.6`.)
+
+## M8.7 Multiple sources
+
+**Scope (D-080 + D-085).** One workspace holds self-managed GitLab + gitlab.com + GitHub + public repositories in
+one feed. GitHub access via a fine-grained personal access token (read-only Contents + Metadata, entered only in
+the UI; a GitHub App is later). Public repositories added by URL and cloned anonymously over HTTPS, branch listing
+via the provider's unauthenticated API with rate-limit handling, no search/listing of public repositories. Migration
+**V22** generalises the GitLab connection into a provider-neutral source connection and makes repository identity =
+workspace + provider + host + the provider's id; existing rows are backfilled as GitLab on their current host,
+keeping their ids and findings.
+
+**Done when:** one workspace scans self-managed GitLab + gitlab.com (a mirror of an existing repo) + a private
+GitHub repo + a public GitHub repo in one feed; the mirror pair yields the same findings on the same commit;
+existing repositories keep ids and findings after V22. (Detailed Done when: architect, before
+`/start-milestone M8.7`.)
+
+## M8.8 Usability + onboarding
+
+**Scope (D-091 + D-092).** Make the product usable end-to-end without rough edges. (1) **Blocker:** public
+repositories (`credential_kind='none'`) must not crash the branch picker or the default-branch refresh at
+enqueue — credentials are resolved through one provider-neutral helper (`null` = anonymous) and these paths go
+through the provider adapter, not the GitLab client. (2) An unhandled exception returns the generic
+`{"error":"INTERNAL","message":"Unexpected error."}` envelope (no class names/messages), logged server-side.
+(3) **D-092 browser session:** `POST /api/v1/auth/login` (JSON) creates a server session (cookie HttpOnly +
+Secure + SameSite=Strict, id rotated on login, idle 30 min, absolute 8 h), `POST /auth/logout` invalidates,
+`GET /auth/session` returns `{username, demoMode}`; CSRF ON (session synchronizer token in the JSON body,
+echoed in `X-CSRF-TOKEN`) for cookie-authenticated unsafe requests; HTTP Basic stays stateless + CSRF-exempt
+for curl/scripts; the password is never kept in JS memory and never in web storage; a refresh stays signed in.
+(4) **D-091 demo mode:** `SECSCAN_DEMO_MODE` (default false) creates/updates a demo user allowed a non-email
+username, WARN at every startup, red "DEMO MODE" ribbon; off ⇒ the demo username cannot sign in; the 12-char
+rule stays for every real user. (5) Live scan status: poll every 3 s while any queued/running scan is visible,
+stop when none, respect `document.hidden`, toast + invalidate on completion. (6) One toast system (success /
+info / transient error, `aria-live` polite, reduced-motion); form errors inline next to the field,
+confirmations in dialogs; the bottom `ErrorBanner` is retired. (7) Sources redesign: one provider-first page
+(provider → host → private/public), one URL-or-path input with detected provider/host/kind, per-path help,
+connected-sources table with a `⋮` menu, Rotate token hidden (and API-rejected) for `credential_kind='none'`.
+(8) One shared `Pager` ("1–50 of 282", 25/50/100, page in the URL, reset to page 1 on filter change) across
+every standard list view. (9) "Workspace settings" rename + plain-language EPSS text + link to the LOW_EPSS
+Ignored filter. (10) Polish: available-width layout, skeleton loaders, busy buttons, hover/focus, AA contrast
+in both themes. No new runtime deps, no CSS framework, CSP unchanged, scanner hardening unchanged.
+
+**Done when:** a public GitHub **and** a public GitLab repository list branches, set a scan branch, refresh the
+default branch at enqueue and handle a missing branch — all without a token (`PublicRepo*IT`); an unhandled
+exception yields the `INTERNAL` envelope and does not change security 401/403, 404 or existing 400s
+(`ApiExceptionHandlerIT`); login/logout/`session`, cookie flags, session-id rotation, idle AND absolute expiry,
+a cookie-auth unsafe request without the CSRF token → 403, and Basic still working are proven by ITs; demo mode
+on logs in with a non-email username (WARN) and off refuses any identifier without `@`; the status-poll hook,
+the toast system, the shared `Pager` and the Sources URL parser are unit-tested; e2e (×2) covers sign in →
+reload still signed in → sign out, the demo ribbon, live queued→running→completed with no reload, a success and
+a field error on Sources, `Pager` on Repositories and Feed, and the settings text + link. (Detailed Done when:
+architect, before `/start-milestone M8.8`.)
+
+## M8.11 UI redesign + navigation
+
+**Scope (D-099; `ui/` only).** A redesign and navigation pass over the existing screens — no `app/`/`core/`,
+migration, compose or API-contract change, no new runtime deps. Left-sidebar app shell with grouped sections
+(Overview / Findings / Sources & repos / Workspace) and a collapse-to-icons control; one design-token system;
+theme (D-099) LIGHT by default with explicit DARK only via the user-menu toggle (no "system", no
+`prefers-color-scheme` block), remembered through a single `secscan-theme` localStorage key behind the guard
+allowlist. One `PageLayout` template on every routed page (top bar → header → KPI strip → toolbar → content)
+with breadcrumbs on detail routes; a ⌘K/Ctrl+K quick-jump palette (ARIA combobox over pages + repositories via
+the server-side search, one page of 6, debounced). A Dashboard first-run checklist (add source → add repository →
+run first scan) derived from existing list counts. Whole-row real links (`<a href>`) on Repositories and Feed.
+Default page size 20 (sizes 20/50/100). URL-addressable Repositories filters (`provider`, `search`,
+`lastScanFailed`). `/select` lists GitLab connections only, with an "Add a source first" empty state. The guard
+still bans `Authorization: Basic` construction; e2e selectors updated for the new shell/theme without weakening
+assertions.
+
+**Done when:** the UI gate (`npm run build`/`typecheck`/`test`/`guard`) and e2e (×2) pass; theme persistence,
+palette (focus restore, combobox, debounce), first-run checklist, whole-row keyboard navigation, default page
+size 20 and the URL-addressable Repositories filters are proven by unit tests and e2e; AA contrast holds in both
+themes. See `docs/reports/M8.11.md`.
+
+## M8.13 Public homepage
+
+**Scope (D-103; `ui/` + `docs/` only).** A public marketing homepage at "/" and route-based sign-in — no
+`app/`/`core/`, migration, compose or API change, no new runtime deps, no external fonts/scripts/images/analytics;
+the guard (incl. the D-099 storage allowlist) is unchanged.
+
+- **Routes.** "/" public homepage; `/login` sign-in and `/signup` self sign-up (D-093) as standalone public
+  routes in a centred frame (brand → "/", "Back to home"); every existing app route keeps its path and, signed
+  out, redirects to `/login?next=<path>`; after sign-in → `next` (sanitized by `safeNextPath`, D-103) or
+  `/dashboard`. An explicit Sign out lands on plain `/login`. A signed-in visitor on "/" sees "Open dashboard".
+- **Page.** Nav (section links, light/dark toggle, Sign in, Create account), hero with a pure-HTML/CSS sample
+  feed preview, trust strip, "How a scan works" (4 steps), "What it finds" (5 finding types, no orphan card at any
+  width), FAQ accordion (7 items, first open), comparison with *pipeline-based tools* (no competitor is named),
+  CTA band, footer; meta title + description.
+- **Truthfulness.** Every product/security sentence is backed by code or a decision (S0 fact-check, see
+  `docs/reports/M8.13.md`): claims describe SecScan's behaviour, never the token's limits; "four open-source
+  scanners plus our own end-of-life check"; secrets as a keyed hash + first 4 characters; AES-256-GCM; KEV/EPSS
+  ranking stated for dependency risks only; no host-allowlist, offline or crash-cleanup claim.
+- **No data calls.** The homepage itself fetches nothing; the shared `/auth/session` boot probe is the only
+  request on a signed-out "/".
+- **Accessibility/responsive.** One h1; accordion buttons with `aria-expanded`/`aria-controls`; skip link;
+  focus-visible on navy; AA contrast in both themes; scroll-reveal only when motion is allowed (fully readable
+  without it); no horizontal page scroll at 1440/1280/390.
+
+**Done when:** the UI gate and e2e (×2) pass; e2e covers CTA → `/signup`, Sign in → `/login`, `next` restore,
+open-redirect rejection, no business-API calls on "/", sign-out → `/login` without `next`, and no horizontal
+scroll at 1440/1280/390; `safeNextPath` is unit-tested against the open-redirect variants. See
+`docs/reports/M8.13.md`.
+
+## M8.14 Scan reaper
+
+**Scope (D-102; worker only).** After a worker crash/restart, a scanner container and the per-scan workspace dir
+(including its one-time token file) could linger; the stale-lease sweep only requeues the DB job. M8.14 adds a
+worker-side `ScanReaper` that removes those physical leftovers and nothing else:
+- every scanner container is labelled `secscan.instance=<SECSCAN_INSTANCE_ID>` (stable per stack: compose `dev`,
+  smoke `smoke`, Gradle ITs `it-<random>`); per-scan dirs live at `<workRoot>/<instanceId>/<scanId>`, so stacks
+  may share one work root;
+- the reaper removes only THIS instance's labelled containers and UUID-named dirs in ITS OWN sub-tree whose scan is
+  not live in this worker (`ActiveScans`, reference-counted, registered before the dir/container exists and
+  released after both are gone); symlinks are never followed;
+- it runs once synchronously before the worker's first claim, then every 10 min; a requeued scan that still meets
+  its own dead dir replaces it (sole holder) or is retried — never failed permanently;
+- it never changes job/scan/finding state and logs counts only; unlabelled pre-change containers and old-layout
+  `<workRoot>/<scanId>` dirs are never touched (manual one-time cleanup).
+No migration, API or UI change. Scanner container hardening unchanged (one label added).
+
+**Done when:** a leftover container + dir (with token file) of this instance are removed while a live scan's, another
+instance's and an unlabelled container are kept, against a real daemon (`ScanReaperIT`, `-PliveReaper`); the
+ordering, sub-tree isolation, live-span, stuck-dir and refcount behaviours are proven by `ScanReaperTest`,
+`ScanPollerTest`, `ScanJobProcessorLifecycleTest`, `ScanWorkspaceTest` and `ActiveScansTest` in the default build.
+See `docs/reports/M8.14.md`.
+
+## M8.15 SAST coverage
+
+**Scope (D-104; scanner image + a thin worker/UI touch).** Opengrep ships rules for only
+java/csharp/javascript/typescript, so a Python/Go/PHP/Ruby/Kotlin/Scala repo gets 0 SAST findings
+(`plexicus/simplest-sast-vulnerable @77baa1b` → 0 Python findings). M8.15 widens coverage without changing any
+fingerprint input:
+- **Six more language packs** (python, go, php, ruby, kotlin, scala) from the **same pinned commit**
+  `f1d2b56` — the SHA is NOT bumped (every `check_id` is a fingerprint input; a bump would churn findings). Only
+  rule YAML is baked (never the packs' test source files); the existing four packs switch to the same YAML-only
+  bake with a **proven-identical** loaded check_id set.
+- **Noise control:** a baked deny-list of full check_ids (NEW packs only) applied via `--exclude-rule`; audit
+  twins are denied (not merged via the D-061 winner map). Final list captured from real output and human-approved.
+- **Locale:** Opengrep runs under `C.UTF-8` so a non-ASCII rule cannot crash it.
+- **Cross-function taint:** `--taint-intrafile`, which does not change any fingerprint.
+- **Uncovered-language warning:** `SAST_LANGUAGE_UNCOVERED` lists detected SAST-eligible languages with no pack,
+  shown in the coverage banner (D-030). Shell/Dockerfile/HCL are excluded (no SAST pack / covered by IaC).
+- **Recall fixture + scorecard:** our own multi-language fixture proves the new packs in the default build; an
+  OWASP-benchmark scorecard (BenchmarkJava, Juice Shop, NodeGoat, scanned statically from local clones, never
+  built/run) drives 3 Java + 3 JS custom MIT rules for the weakest categories.
+Out of scope (D-104): generic hardcoded-password SAST detection (product decision); any new SAST engine
+(CodeQL rejected on licence; Joern/Bearer deferred).
+
+**Done when:**
+- Scanning a Python/Go/PHP/Ruby/Kotlin/Scala **and** Java/JavaScript/TypeScript fixture yields its expected
+  `(rule_id, file)` SAST findings and none on the negatives, through the real image in the default build
+  (`sastRecallInImageTest`); no raw source line/metavar and no planted canary value leaves `/out` (D-053 S1).
+- A file Opengrep cannot fully analyze (a per-rule `Timeout`, a FULL parse failure, a size-limit or unreadable
+  skip, another analysis error) CLOSES NOTHING: its existing open or ignored SAST findings are left untouched at
+  reconcile (not solved, no `triage_event`) and the scan raises a `SAST_FILES_SKIPPED` coverage warning (count +
+  normalized error types + repo-relative paths), shown in the banner (`SastSkippedFileReconcileIT`). A file
+  Opengrep only PARTIALLY parsed was analyzed: it reconciles normally and is only counted ("partially parsed (N)")
+  (M8.15 review S2). Classification is proven on real Opengrep output and fails closed
+  (`sastSkippedFilesInImageTest`, `ScannerOutputParserSastSkippedTest`). Opengrep runs with a raised per-rule
+  `--timeout` so real repos skip no files.
+- The existing four packs' loaded check_id set is unchanged by the YAML-only bake (asserted in the build:
+  `opengrepExclusionsInImageTest` diffs Opengrep's loaded ids against the 388-id golden
+  `scanner-image/opengrep-existing-packs-check-ids.txt`, M8.15 review S4).
+- A repo whose detected language has no SAST pack raises `SAST_LANGUAGE_UNCOVERED` listing those languages, shown
+  in the coverage banner (D-030).
+- Opengrep runs under C.UTF-8 and loads a non-ASCII rule without crashing (`opengrepLocaleInImageTest`).
+- A rescan with intrafile taint enabled churns no finding seen by both scans — 0 triage_events
+  (`TaintRescanStabilityIT`, live-opengrep; run output pasted in the report).
+- `docs/reports/SAST_SCORECARD.md` records Java per-CWE TPR/FPR and JS hits/misses before and after the custom
+  rules, with a committed scoring script and the exact benchmark commits.
+See `docs/reports/M8.15.md`.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
@@ -395,7 +607,13 @@ locally.
 | M7 | Triage and ignore | Default exclusions, `.secscan.yml`, ignore rules for all scopes, auto-triage reason codes | Every ignore scope has an integration test; unignore restores status |
 | M8 | UI | Repositories, Feed, side panel, Ignored, Dashboard | Walkthrough on 3 real repos matches API numbers (M8 met this on core-keycloak (real) + secscan-test-secrets (fixture); ib-api-v2 + a 3rd real repo deferred to M8.5 — D-075) |
 | M8.1 | Branch to scan per repository | Per-repo `scan_branch` + `scan.branch` snapshot (V19); branch picker endpoint + searchable UI combobox; git-ref-format + GitLab-existence validation; branch-aware re-baseline (`BRANCH_CHANGED`); token-rotation UI; two selection-screen bug fixes (B1 add-count, B2 empty-vs-no-access) — D-076..D-078 | `notification` scans branch `dev`; a branch switch re-baselines (closes "branch changed", Solved·7d unchanged) and a same-branch rescan adds 0 triage events; see the M8.1 section |
-| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner | A new commit is scanned within 15 min; nightly run completes for all repos |
+| M8.5 | Correctness + taxonomy | OD-19 family (incl. M8.1 D-1, absent-but-ignored after a branch switch), level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, D-075 real-repo walkthrough (UI polish moved out) — D-081 (1), D-083 | See the "M8.5 Correctness + taxonomy" section |
+| M8.6 | UI uplift | New app shell (left sidebar), Repositories list redesign (clickable rows), repository detail page (issues / scans / settings, coverage banner, last scan age), issue side panel clarity, secret context, compact side-panel locations — D-081 (2), D-084 | See the "M8.6 UI uplift" section (detailed Done when: architect, before `/start-milestone M8.6`) |
+| M8.7 | Multi-provider sources | gitlab.com + GitHub + public repositories in one workspace, one shared feed; one adapter per provider; host policy per connection; provider-neutral connection + identity (V22) — D-080, D-081 (3), D-085 | See the "M8.7 Multiple sources" section (detailed Done when: architect, before `/start-milestone M8.7`) |
+| M8.8 | Usability + onboarding | Public-repo blocker fix (provider-neutral credential helper), generic INTERNAL error envelope, browser session (login/logout/session, cookie, CSRF; Basic kept), demo mode, live scan status polling, one toast system + inline errors, Sources redesign, shared Pager, Workspace settings, polish — D-091, D-092 | See the "M8.8 Usability + onboarding" section |
+| TBD | Container image scanning | Registry-agnostic OCI (any registry incl. self-hosted), public images first-class, spike before build; manual scan/re-check only until M9 — D-081 (5), D-082 | SPEC section pending (architect) |
+| later | Secrets in git history | Git-history secret scan + author attribution; own lifecycle decision — D-081 (6) | SPEC section pending (architect) |
+| M9 | Scheduling | Daily schedule, 15-min SHA polling, skip-unchanged, ShedLock, token-expiry banner; provider-aware (D-080); deferred per D-082; also nightly container re-check | A new commit is scanned within 15 min; nightly run completes for all repos |
 | M10 | Hardening and ops | Roles, audit log, log scrubbing, metrics (Micrometer + Prometheus), backups, weekly scanner-image rebuild | Security section above fully implemented |
 
 ## Open decisions

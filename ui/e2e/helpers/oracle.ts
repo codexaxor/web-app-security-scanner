@@ -40,6 +40,11 @@ export async function sqlCount(text: string, params: unknown[] = []): Promise<nu
   return Number(r.rows[0]?.[Object.keys(r.rows[0])[0]] ?? 0);
 }
 
+/** Runs a write (insert/update/delete) against the e2e DB — used by the live-status spec to drive a scan. */
+export async function sqlExec(text: string, params: unknown[] = []): Promise<void> {
+  await db().query(text, params);
+}
+
 export async function closeDb(): Promise<void> {
   if (pool) {
     await pool.end();

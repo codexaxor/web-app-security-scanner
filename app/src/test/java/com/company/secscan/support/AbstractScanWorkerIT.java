@@ -12,6 +12,7 @@ import com.company.secscan.scan.ScanRepository;
 import com.company.secscan.scan.ScanTaskRepository;
 import com.company.secscan.scan.ScanWarningRepository;
 import java.util.Base64;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -36,6 +37,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @TestPropertySource(properties = "secscan.scanner.allow-local-file-clone=true")
 public abstract class AbstractScanWorkerIT {
 
+    /**
+     * D-102: a random reaper/ownership instance id per test JVM, so every scanner container these ITs launch is
+     * labelled {@code secscan.instance=it-<random>} and its dirs live under {@code <workRoot>/it-<random>} — a
+     * dev/smoke worker (or a bootRun worker on the default id) can never reap a running IT's scan, and vice versa.
+     */
+    public static final String IT_INSTANCE_ID = "it-" + UUID.randomUUID().toString().substring(0, 8);
+
     private static final String TEST_KEY_B64 = Base64.getEncoder().encodeToString(new byte[32]);
 
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
@@ -54,6 +62,7 @@ public abstract class AbstractScanWorkerIT {
         registry.add("SECSCAN_GITLAB_ALLOWED_HOSTS", () -> "localhost");
         // Drive the pipeline from the test; no background claiming.
         registry.add("secscan.scanner.polling-enabled", () -> "false");
+        registry.add("secscan.scanner.instance-id", () -> IT_INSTANCE_ID);
     }
 
     @Autowired

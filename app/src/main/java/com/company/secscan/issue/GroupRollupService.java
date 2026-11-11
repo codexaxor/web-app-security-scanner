@@ -5,6 +5,7 @@ import com.company.secscan.intel.FixTimeConfigRepository;
 import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scoring.CweDictionary;
 import com.company.secscan.scoring.FixTime;
+import com.company.secscan.taxonomy.Level2Taxonomy;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +82,31 @@ public class GroupRollupService {
                 if (subtitle != null) {
                     g.setSubtitle(subtitle);
                 }
+                // M8.5 (D-083): the level-2 category + optional OWASP 2025 name, derived from a representative
+                // sub-issue's stored fields (all subs in a group share the categorizing fields). Descriptive,
+                // never a status/fingerprint input.
+                SubIssue rep = worstOpen(open);
+                if (rep == null && !subs.isEmpty()) {
+                    rep = subs.get(0);
+                }
+                if (rep != null) {
+                    Level2Taxonomy.Category cat = Level2Taxonomy.getInstance().of(rep.getType(), rep.getFilePath(),
+                            rep.getRuleId(), rep.getCwe(), rep.getPackageName());
+                    g.setLevel2Category(cat.level2());
+                    g.setOwaspCategory(cat.owasp());
+                    // D-083: refresh the IaC title from the latest Checkov check_name (carried in advisory_summary),
+                    // so groups created before this behaviour pick up the human title on their next scan. Title is
+                    // descriptive; the fingerprint is unchanged.
+                    if (ScanFinding.TYPE_IAC.equals(g.getType()) && rep.getAdvisorySummary() != null) {
+                        g.setTitle(rep.getAdvisorySummary());
+                    }
+                } else {
+                    // N-2: a group with no sub-issues still gets its type's fallback category (never left null).
+                    Level2Taxonomy.Category cat = Level2Taxonomy.getInstance()
+                            .of(g.getType(), null, null, null, null);
+                    g.setLevel2Category(cat.level2());
+                    g.setOwaspCategory(cat.owasp());
+                }
                 groups.save(g);
             } else {
                 // Score-only path (SF-2): column-scoped UPDATE guarded by status='open'. Never writes status and
@@ -149,8 +175,11 @@ public class GroupRollupService {
             return null;
         }
         return switch (groupType) {
-            case ScanFinding.TYPE_SCA, ScanFinding.TYPE_SAST, ScanFinding.TYPE_IAC ->
+            case ScanFinding.TYPE_SCA, ScanFinding.TYPE_SAST ->
                     CweDictionary.getInstance().phrase(worst.getCwe(), worst.getAdvisorySummary());
+            // D-083: IaC subtitle is the check_id — the title is the human check_name, so the subtitle must NOT
+            // repeat it (advisory_summary now holds the check_name for IaC).
+            case ScanFinding.TYPE_IAC -> worst.getRuleId();
             default -> null;
         };
     }

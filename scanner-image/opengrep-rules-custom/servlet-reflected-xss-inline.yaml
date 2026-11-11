@@ -1,0 +1,17 @@
+rules:
+  - id: servlet-reflected-xss-inline
+    languages: [java]
+    severity: WARNING
+    message: "A request parameter/header is written straight to the servlet response with no output encoding (reflected XSS, CWE-79). Encode with OWASP Encoder/ESAPI before writing."
+    metadata:
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      category: security
+      license: MIT
+    pattern-either:
+      - pattern: $W.print((javax.servlet.http.HttpServletRequest $R).getParameter(...))
+      - pattern: $W.println((javax.servlet.http.HttpServletRequest $R).getParameter(...))
+      - pattern: $W.write((javax.servlet.http.HttpServletRequest $R).getParameter(...))
+      - pattern: $W.append((javax.servlet.http.HttpServletRequest $R).getParameter(...))
+      - pattern: $W.print((javax.servlet.http.HttpServletRequest $R).getHeader(...))
+      - pattern: $W.println((javax.servlet.http.HttpServletRequest $R).getHeader(...))
+      - pattern: $W.write((javax.servlet.http.HttpServletRequest $R).getHeader(...))

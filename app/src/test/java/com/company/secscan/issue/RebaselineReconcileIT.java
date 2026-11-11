@@ -137,22 +137,80 @@ class RebaselineReconcileIT extends AbstractGitLabIT {
     }
 
     @Test
-    void anIgnoredFindingAbsentOnTheNewBranchStaysIgnored() {
+    void anIgnoredFindingWithAReDerivableHoldAbsentOnTheNewBranchIsSolvedBranchChanged() {
+        // D-083 (OD-19) CHANGES the M8.1 behaviour: on a branch switch, an ignored finding whose hold is
+        // re-derivable (here a CVE-scope rule — structural, re-applies to any equivalent live finding) and which
+        // is absent on the new branch is now SOLVED with BRANCH_CHANGED, not left ignored forever (D-076's
+        // "absent-but-ignored after a branch switch" family). If it reappears on another branch it is re-ignored
+        // by the same cause, so user intent is preserved. (Pre-M8.5 this asserted it "stays ignored".)
         Repository repo = seedRepo(5103L);
 
         runSca(repo, "main", true, "CVE-7");                   // F7 open on main
-        // A persistent CVE-scoped ignore rule; applied through reconcile (the audited path, D-058) on the next
-        // main scan so F7 becomes ignored with a holding rule that survives later scans.
         ignoreRules.save(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_CVE, repo.getId(), "CVE-7", "not relevant",
                 "user"));
         runSca(repo, "main", true, "CVE-7");
         assertThat(subFor(repo, "CVE-7").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED); // held before the switch
 
-        runSca(repo, "dev", true);                             // F7 absent on dev, but ignored → stays ignored
+        runSca(repo, "dev", true);                             // F7 absent on dev, re-derivable hold → solved
 
         SubIssue after = subFor(repo, "CVE-7");
+        assertThat(after.getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(reasons(after.getId())).endsWith(TriageEvent.REASON_BRANCH_CHANGED);
+        assertThat(reasons(after.getId())).doesNotContain(TriageEvent.REASON_SOLVED_NOT_DETECTED);
+
+        // Switching back to main re-detects CVE-7; it reopens (BRANCH_CHANGED) and is re-ignored by the CVE rule.
+        runSca(repo, "main", true, "CVE-7");
+        assertThat(subFor(repo, "CVE-7").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+    }
+
+    @Test
+    void aSubIssueScopeManualIgnoreAbsentOnTheNewBranchStaysIgnored() {
+        // The carve-out (D-083): a sub-issue-scope manual ignore is an explicit human decision on this exact
+        // finding and is NEVER retired by OD-19 — it stays ignored across the switch (audit preserved).
+        Repository repo = seedRepo(5104L);
+
+        runSca(repo, "main", true, "CVE-8");                   // F8 open on main
+        String fingerprint = subFor(repo, "CVE-8").getFingerprint();
+        ignoreRules.save(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_SUBISSUE, repo.getId(), fingerprint,
+                "accepted risk", "user"));
+        runSca(repo, "main", true, "CVE-8");
+        assertThat(subFor(repo, "CVE-8").getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
+
+        runSca(repo, "dev", true);                             // F8 absent on dev, sub-issue manual hold → kept
+
+        SubIssue after = subFor(repo, "CVE-8");
         assertThat(after.getStatus()).isEqualTo(SubIssue.STATUS_IGNORED);
         assertThat(reasons(after.getId())).doesNotContain(TriageEvent.REASON_BRANCH_CHANGED,
                 TriageEvent.REASON_SOLVED_NOT_DETECTED);
+    }
+
+    @Test
+    void switchToBranchWithNoManifestsReBaselinesPriorScaFindings() {
+        // M8.1 D-1: a switch to a branch with NO manifests makes the SCA scan no-packages (ok but
+        // closes_findings=false). The prior branch's open SCA findings must still re-baseline (solved with
+        // BRANCH_CHANGED), not linger on the newly-tracked empty branch.
+        Repository repo = seedRepo(5105L);
+
+        runSca(repo, "main", true, "CVE-11", "CVE-12");        // F11,F12 open on main
+        assertThat(subFor(repo, "CVE-11").getStatus()).isEqualTo(SubIssue.STATUS_OPEN);
+
+        runScaNoPackages(repo, "dev");                         // dev has no manifests: ok + closes_findings=false
+
+        assertThat(subFor(repo, "CVE-11").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(subFor(repo, "CVE-12").getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);
+        assertThat(reasons(subFor(repo, "CVE-11").getId()))
+                .containsExactly(TriageEvent.REASON_SEEN, TriageEvent.REASON_BRANCH_CHANGED);
+    }
+
+    /** A successful SCA scan that found no packages (OSV exit 128 → closes_findings=false) with no findings. */
+    private void runScaNoPackages(Repository repo, String branch) {
+        Scan scan = scans.save(Scan.manual(WORKSPACE, repo.getId(), branch));
+        ScanTask task = new ScanTask(WORKSPACE, scan.getId(), ScanTask.SCANNER_SCA, ScanTask.STATUS_OK, 0, 100L,
+                null);
+        task.setClosesFindings(false); // OSV exit 128: ok, but not same-branch-authoritative (D-034)
+        tasks.save(task);
+        scan.finish(Scan.STATUS_COMPLETED);
+        scans.save(scan);
+        reconcile.reconcile(scan.getId(), WORKSPACE);
     }
 }

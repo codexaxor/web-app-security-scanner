@@ -43,6 +43,8 @@ test("shows the inactive line and an Inactive badge, and the scan button is disa
   await page.getByText("Show inactive").click();
   const legacy = await repoRow(page, "acme/legacy-batch");
   await expect(legacy.getByText("Inactive")).toBeVisible();
+  // Scan + Settings live in the row ⋮ menu now (M8.6); open it first.
+  await legacy.getByRole("button", { name: "Row actions" }).click();
   await expect(legacy.getByRole("button", { name: "Scan", exact: true })).toBeDisabled();
 });
 
@@ -54,6 +56,7 @@ test("Start Scan enqueues a scan for an active repository", async ({ page }) => 
 
   const before = await sqlCount(`select count(*) from scan where repository_id = '${WEB_PORTAL_ID}'`, []);
   const row = await repoRow(page, "acme/web-portal");
+  await row.getByRole("button", { name: "Row actions" }).click();
   await row.getByRole("button", { name: "Scan", exact: true }).click();
   await expect(row.getByRole("button", { name: /scanning|starting/i })).toBeVisible();
   await expect
@@ -81,10 +84,68 @@ test("polling drives the button back to idle once the scan reaches a terminal st
   await signIn(page);
   await page.getByRole("link", { name: "Repositories", exact: true }).click();
   const row = await repoRow(page, "acme/ib-api-v2");
+  await row.getByRole("button", { name: "Row actions" }).click();
   await row.getByRole("button", { name: "Scan", exact: true }).click();
   await expect(row.getByRole("button", { name: "Scanning…" })).toBeVisible();
   // After the mocked completion the button returns to idle.
   await expect(row.getByRole("button", { name: "Scan", exact: true })).toBeVisible({ timeout: 10000 });
+});
+
+test("whole-row: a row button does its own action; keyboard Enter on the row link opens the repo", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Repositories", exact: true }).click();
+  const row = await repoRow(page, CORE_KEYCLOAK);
+
+  // (b) A button inside the linked row does its OWN action (opens the ⋮ menu) — NOT navigation.
+  await row.getByRole("button", { name: "Row actions" }).click();
+  await expect(page).toHaveURL(/\/repositories$/);
+  await expect(row.getByRole("button", { name: "Scan", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // (a) Keyboard: focus the row's repository link and press Enter → navigates to the repo detail.
+  await row.getByRole("link").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
+
+  // Whole-row left-click also opens it: clicking the row lands on the stretched link overlay and navigates.
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+  const row2 = await repoRow(page, CORE_KEYCLOAK);
+  await row2.click();
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
+});
+
+test("N-8 — the full repository path is selectable text above the row link overlay", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Repositories", exact: true }).click();
+  const row = await repoRow(page, CORE_KEYCLOAK);
+  const path = row.locator(".repo-path");
+  await expect(path).toBeVisible();
+  const expected = (await path.textContent())!.trim();
+
+  // The topmost element at the path's centre is the path itself, not the stretched ::after of the row link.
+  const box = (await path.boundingBox())!;
+  const onTop = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.classList.contains("repo-path") ?? false,
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  expect(onTop, "repo path is above the overlay").toBe(true);
+
+  // Drag-select across it: the text is selected and the page did not navigate.
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.length, "some path text is selected").toBeGreaterThan(3);
+  expect(expected.includes(selected.trim()), `selection "${selected}" is part of the path`).toBe(true);
+  await expect(page).toHaveURL(/\/repositories$/);
+
+  // The rest of the row still opens the repository (the name link is unchanged).
+  await row.locator(".repo-name").click();
+  await expect(page).toHaveURL(/\/repositories\/[0-9a-f-]{36}$/);
 });
 
 test("the warnings drawer lists a scan's warnings", async ({ page }) => {

@@ -45,7 +45,7 @@ class ScanApiIT extends AbstractGitLabIT {
     void startCreatesAQueuedScanAndJob() {
         Repository repo = seedRepository();
 
-        ScanView scan = service.startManual(repo.getId());
+        ScanView scan = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.status()).isEqualTo(Scan.STATUS_QUEUED);
         assertThat(scan.trigger()).isEqualTo(Scan.TRIGGER_MANUAL);
@@ -58,7 +58,7 @@ class ScanApiIT extends AbstractGitLabIT {
     void startSnapshotsTheEffectiveBranchOntoTheScan() {
         Repository repo = seedRepository();   // default_branch "main", no scan_branch
 
-        ScanView scan = service.startManual(repo.getId());
+        ScanView scan = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.branch()).isEqualTo("main");
         assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("main");
@@ -70,7 +70,7 @@ class ScanApiIT extends AbstractGitLabIT {
         repo.setScanBranch("dev");            // D-076: overrides the default
         repositories.save(repo);
 
-        ScanView scan = service.startManual(repo.getId());
+        ScanView scan = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scan.branch()).isEqualTo("dev");
         assertThat(scans.findById(scan.id()).orElseThrow().getBranch()).isEqualTo("dev");
@@ -79,7 +79,7 @@ class ScanApiIT extends AbstractGitLabIT {
     @Test
     void findByWorkspaceIdAndIdInIsWorkspaceScoped() {   // B-1
         Repository repo = seedRepository();
-        ScanView scan = service.startManual(repo.getId());
+        ScanView scan = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(scans.findByWorkspaceIdAndIdIn(WORKSPACE, List.of(scan.id())))
                 .extracting(Scan::getId).containsExactly(scan.id());
@@ -92,7 +92,7 @@ class ScanApiIT extends AbstractGitLabIT {
         repo.setSensitivity("high");
         repositories.save(repo);
 
-        enqueuer.recordDefaultBranch(repo.getId(), "release");
+        enqueuer.recordDefaultBranch(Workspace.DEFAULT_ID, repo.getId(), "release");
 
         Repository after = repositories.findById(repo.getId()).orElseThrow();
         assertThat(after.getDefaultBranch()).isEqualTo("release");
@@ -103,8 +103,8 @@ class ScanApiIT extends AbstractGitLabIT {
     void startingAgainReturnsTheSameInFlightScan() {
         Repository repo = seedRepository();
 
-        ScanView first = service.startManual(repo.getId());
-        ScanView second = service.startManual(repo.getId());
+        ScanView first = service.startManual(Workspace.DEFAULT_ID, repo.getId());
+        ScanView second = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
         assertThat(second.id()).isEqualTo(first.id());
         assertThat(scans.findByWorkspaceIdAndRepositoryIdAndStatusIn(
@@ -117,7 +117,7 @@ class ScanApiIT extends AbstractGitLabIT {
         repo.deactivate("NO_ACCESSIBLE_CONNECTION");
         repositories.save(repo);
 
-        assertThatThrownBy(() -> service.startManual(repo.getId()))
+        assertThatThrownBy(() -> service.startManual(Workspace.DEFAULT_ID, repo.getId()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("inactive");
     }
@@ -125,12 +125,12 @@ class ScanApiIT extends AbstractGitLabIT {
     @Test
     void listAndDetailReflectTheScan() {
         Repository repo = seedRepository();
-        ScanView scan = service.startManual(repo.getId());
+        ScanView scan = service.startManual(Workspace.DEFAULT_ID, repo.getId());
 
-        assertThat(service.listForRepository(repo.getId(), 0, 50).content())
+        assertThat(service.listForRepository(Workspace.DEFAULT_ID, repo.getId(), 0, 50).content())
                 .extracting(ScanView::id).containsExactly(scan.id());
 
-        var detail = service.get(scan.id());
+        var detail = service.get(Workspace.DEFAULT_ID, scan.id());
         assertThat(detail.scan().id()).isEqualTo(scan.id());
         assertThat(detail.tasks()).isEmpty();
         assertThat(detail.findingCount()).isZero();

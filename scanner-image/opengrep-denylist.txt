@@ -1,0 +1,40 @@
+# SAST deny-list (D-104, M8.15 S2) — FULL check_ids excluded at scan time via opengrep --exclude-rule
+# (+ a results[] post-filter fallback in run-scan.sh). NEW packs only: denying an existing
+# java/csharp/javascript/typescript rule would make reconcile "solve" its live findings (reads as fixed),
+# a separate decision (see deferred register). Human-approved from REAL scanner output
+# (plexicus/simplest-sast-vulnerable@77baa1b, OWASP PyGoat, DVWA). Full check_ids only — never short ids
+# (e.g. eval-detected exists in both js and python). Format: one check_id per line; '#'/blank lines ignored.
+# Every id here is asserted to be a real loaded check_id by :app:opengrepExclusionsInImageTest.
+
+# --- Audit twins (8) — the base rule keeps the real-risk subset; the '-audit' twin flags EVERY call site
+#     for MANUAL audit (noise in an automated feed). The base (non-audit) rule is retained.
+opengrep-rules.php.lang.security.audit.assert-use-audit
+opengrep-rules.python.lang.security.audit.dangerous-interactive-code-run-audit
+opengrep-rules.python.lang.security.audit.dangerous-os-exec-audit
+opengrep-rules.python.lang.security.audit.dangerous-spawn-process-audit
+opengrep-rules.python.lang.security.audit.dangerous-subinterpreters-run-string-audit
+opengrep-rules.python.lang.security.audit.dangerous-subprocess-use-audit
+opengrep-rules.python.lang.security.audit.dangerous-system-call-audit
+opengrep-rules.python.lang.security.audit.dangerous-testcapi-run-in-subinterp-audit
+
+# --- WordPress-plugin audit rules (11) — audit-oriented WP-plugin patterns; high noise, NO base rule.
+opengrep-rules.php.wordpress-plugins.security.audit.wp-ajax-no-auth-and-auth-hooks-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-authorisation-checks-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-code-execution-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-command-execution-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-csrf-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-file-download-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-file-inclusion-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-file-manipulation-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-open-redirect-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-php-object-injection-audit
+opengrep-rules.php.wordpress-plugins.security.audit.wp-sql-injection-audit
+
+# --- Flask info rule (1) — binding host 0.0.0.0 is normal/expected in containers (24 hits on PyGoat/plexicus).
+opengrep-rules.python.flask.security.audit.avoid_app_run_with_bad_host
+
+# KEPT ON PURPOSE (NOT denied): the 3 asyncio audit orphans have NO base rule, so denying them would lose all
+# async exec/shell coverage for zero demonstrated noise (0 hits on the evidence repos):
+#   opengrep-rules.python.lang.security.audit.dangerous-asyncio-create-exec-audit
+#   opengrep-rules.python.lang.security.audit.dangerous-asyncio-exec-audit
+#   opengrep-rules.python.lang.security.audit.dangerous-asyncio-shell-audit

@@ -95,10 +95,19 @@ final class ScannerContainerConfig {
             env.add("SCAN_BRANCH=" + s.branch());
         }
         env.add("SCAN_CLONE_DEPTH=" + s.cloneDepth());
+        // D-104/S4: run-scan.sh adds opengrep --taint-intrafile iff this is "1" (default). Not a secret.
+        env.add("SAST_TAINT_INTRAFILE=" + (s.taintIntrafile() ? "1" : "0"));
+        if (s.cloneAuthUser() != null && !s.cloneAuthUser().isBlank()) {
+            // The git basic-auth username for a token clone (oauth2 / x-access-token). Not a secret; the token
+            // itself never becomes an env var (D-014).
+            env.add("SCAN_CLONE_USER=" + s.cloneAuthUser());
+        }
         return env;
     }
 
-    static Map<String, String> labels(String scanId) {
-        return Map.of("secscan.component", "scanner", "secscan.scan", scanId);
+    static Map<String, String> labels(String scanId, String instanceId) {
+        // component: identifies a scanner container; instance: which stack/worker owns it, so the reaper only
+        // ever reaps its own instance's leftovers (D-102); scan: the per-scan id (the reaper's live-set key).
+        return Map.of("secscan.component", "scanner", "secscan.instance", instanceId, "secscan.scan", scanId);
     }
 }

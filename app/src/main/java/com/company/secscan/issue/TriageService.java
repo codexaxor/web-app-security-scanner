@@ -32,7 +32,6 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TriageService {
 
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
     /** The acting user placeholder until M10 wires an authenticated principal (OD-9). Never a secret. */
     static final String MANUAL_ACTOR = "user";
 
@@ -44,11 +43,14 @@ public class TriageService {
     private final TriageStatusResolver statusResolver;
     private final WorkspaceRepository workspaces;
     private final RepositoryRepository repositories;
+    /** Optional: present only in the api profile (ReScoreService is @Profile("api")); worker never unignores. */
+    private final org.springframework.beans.factory.ObjectProvider<ReScoreService> reScore;
 
     public TriageService(IgnoreRuleRepository ignoreRules, SubIssueRepository subIssues,
                          IssueGroupRepository groups, TriageEventRepository events, GroupRollupService rollup,
                          TriageStatusResolver statusResolver, WorkspaceRepository workspaces,
-                         RepositoryRepository repositories) {
+                         RepositoryRepository repositories,
+                         org.springframework.beans.factory.ObjectProvider<ReScoreService> reScore) {
         this.ignoreRules = ignoreRules;
         this.subIssues = subIssues;
         this.groups = groups;
@@ -57,45 +59,46 @@ public class TriageService {
         this.statusResolver = statusResolver;
         this.workspaces = workspaces;
         this.repositories = repositories;
+        this.reScore = reScore;
     }
 
     /** Create a generic rule (path / cve / rule, global or per-repo; also subissue/group given an explicit value). */
     @Transactional
-    public IgnoreRuleView createRule(String scope, UUID repositoryId, String matchValue, String reason) {
+    public IgnoreRuleView createRule(UUID workspaceId, String scope, UUID repositoryId, String matchValue,
+            String reason) {
         validate(scope, matchValue, reason);
-        // N1: a per-repo rule must target a repository IN THIS WORKSPACE — never another tenant's repo.
-        if (repositoryId != null && repositories.findByIdAndWorkspaceId(repositoryId, WORKSPACE).isEmpty()) {
+        // N1: a per-repo rule must target a repository IN THIS workspaceId — never another tenant's repo.
+        if (repositoryId != null && repositories.findByIdAndWorkspaceId(repositoryId, workspaceId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository in this workspace.");
         }
-        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, scope, repositoryId, matchValue.trim(),
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(workspaceId, scope, repositoryId, matchValue.trim(),
                 reason.trim(), MANUAL_ACTOR));
-        applyRule(rule);
+        applyRule(workspaceId, rule);
         return IgnoreRuleView.of(rule);
     }
 
     /** Ignore one sub-issue (subissue scope). The match value is fingerprint, or rule|file for SAST (D-062). */
     @Transactional
-    public IgnoreRuleView ignoreSubIssue(UUID subIssueId, String reason) {
-        SubIssue sub = subIssues.findById(subIssueId)
-                .filter(s -> WORKSPACE.equals(s.getWorkspaceId()))
+    public IgnoreRuleView ignoreSubIssue(UUID workspaceId, UUID subIssueId, String reason) {
+        SubIssue sub = subIssues.findByIdAndWorkspaceId(subIssueId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such sub-issue."));
         requireReason(reason);
-        String matchValue = IgnoreMatcher.subIssueMatchValue(toFinding(sub, groupKeyOf(sub.getGroupId())));
-        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_SUBISSUE,
+        String matchValue = IgnoreMatcher.subIssueMatchValue(toFinding(sub, groupKeyOf(workspaceId, sub.getGroupId())));
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(workspaceId, IgnoreRule.SCOPE_SUBISSUE,
                 sub.getRepositoryId(), matchValue, reason.trim(), MANUAL_ACTOR));
-        applyRule(rule);
+        applyRule(workspaceId, rule);
         return IgnoreRuleView.of(rule);
     }
 
     /** Ignore a whole group (group scope). */
     @Transactional
-    public IgnoreRuleView ignoreGroup(UUID groupId, String reason) {
-        IssueGroup group = groups.findByIdAndWorkspaceId(groupId, WORKSPACE)
+    public IgnoreRuleView ignoreGroup(UUID workspaceId, UUID groupId, String reason) {
+        IssueGroup group = groups.findByIdAndWorkspaceId(groupId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such issue group."));
         requireReason(reason);
-        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(WORKSPACE, IgnoreRule.SCOPE_GROUP,
+        IgnoreRule rule = ignoreRules.saveAndFlush(new IgnoreRule(workspaceId, IgnoreRule.SCOPE_GROUP,
                 group.getRepositoryId(), group.getGroupKey(), reason.trim(), MANUAL_ACTOR));
-        applyRule(rule);
+        applyRule(workspaceId, rule);
         return IgnoreRuleView.of(rule);
     }
 
@@ -108,8 +111,8 @@ public class TriageService {
      * next reconcile.
      */
     @Transactional
-    public void removeRule(UUID ruleId) {
-        IgnoreRule rule = ignoreRules.findByWorkspaceIdAndId(WORKSPACE, ruleId)
+    public void removeRule(UUID workspaceId, UUID ruleId) {
+        IgnoreRule rule = ignoreRules.findByWorkspaceIdAndId(workspaceId, ruleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such ignore rule."));
         // A .secscan.yml-materialized rule is owned by the repo's in-repo config and reconciled by its revoke
         // lifecycle (D-057) — it cannot be deleted through the API (that would resurrect it on the next scan).
@@ -117,13 +120,18 @@ public class TriageService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This ignore is defined in the repository's .secscan.yml; edit .secscan.yml to change it.");
         }
-        List<IgnoreRule> others = ignoreRules.findByWorkspaceId(WORKSPACE).stream()
+        List<IgnoreRule> others = ignoreRules.findByWorkspaceId(workspaceId).stream()
                 .filter(r -> !r.getId().equals(ruleId)).toList();
-        TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled());
+        TriageResolver.AutoContext api = TriageResolver.AutoContext.api(epssAutoIgnoreEnabled(workspaceId));
         Set<UUID> touched = new HashSet<>();
-        for (SubIssue sub : subIssues.findByWorkspaceIdAndIgnoredByRuleId(WORKSPACE, ruleId)) {
+        List<UUID> reopenedToOpen = new java.util.ArrayList<>();
+        // B-2: only the still-IGNORED rows this rule holds are re-resolved. A finding the OD-19 retire pass
+        // solved while it was ignored has had its ignore markers cleared (SubIssue.solveIgnored), so deleting
+        // the rule must never resurrect it — the status filter guarantees that even against a stale pointer.
+        for (SubIssue sub : subIssues.findByWorkspaceIdAndStatusAndIgnoredByRuleId(
+                workspaceId, SubIssue.STATUS_IGNORED, ruleId)) {
             TriageResolver.Desired desired =
-                    TriageResolver.resolve(sub, groupKeyOf(sub.getGroupId()), others, api);
+                    TriageResolver.resolve(sub, groupKeyOf(workspaceId, sub.getGroupId()), others, api);
             if (desired != null) {
                 // still ignored under another rule or auto cause → quiet re-point/re-reason, no event
                 sub.ignore(desired.reasonCode(), desired.ruleId());
@@ -132,39 +140,51 @@ public class TriageService {
                 String newStatus = statusResolver.resolve(sub);
                 sub.unignore(newStatus);
                 subIssues.save(sub);
-                events.save(TriageEvent.user(WORKSPACE, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
+                events.save(TriageEvent.user(workspaceId, sub.getId(), SubIssue.STATUS_IGNORED, newStatus,
                         TriageEvent.REASON_UNIGNORED));
+                if (SubIssue.STATUS_OPEN.equals(newStatus)) {
+                    reopenedToOpen.add(sub.getId());
+                }
                 touched.add(sub.getGroupId());
             }
         }
         ignoreRules.delete(rule);
-        recomputeGroups(touched);
+        // D-2 (D-083): re-score each reopened finding immediately so its score reflects current intel without
+        // waiting for the next scan/sweep (column-scoped, status='open' guarded → no event, no status change).
+        // Done after the unignore loop (the re-score flushes/clears the context) and before the group rollup.
+        for (UUID subId : reopenedToOpen) {
+            reScore.ifAvailable(rs -> rs.rescoreSubIssue(workspaceId, subId));
+        }
+        recomputeGroups(workspaceId, touched);
     }
 
     @Transactional(readOnly = true)
-    public PagedResponse<IgnoreRuleView> listRules(int page, int size) {
+    public PagedResponse<IgnoreRuleView> listRules(UUID workspaceId, int page, int size) {
         return PagedResponse.fromPage(ignoreRules
-                .findByWorkspaceId(WORKSPACE, PageRequest.of(Math.max(0, page), Math.max(1, size)))
+                .findByWorkspaceId(workspaceId, PageRequest.of(Math.max(0, page), Math.max(1, size)))
                 .map(IgnoreRuleView::of));
     }
 
-    @Transactional(readOnly = true)
-    public PagedResponse<IgnoredItemView> listIgnored(int page, int size) {
-        org.springframework.data.domain.Page<SubIssue> ignored = subIssues.findByWorkspaceIdAndStatus(
-                WORKSPACE, SubIssue.STATUS_IGNORED, PageRequest.of(Math.max(0, page), Math.max(1, size)));
+    /** The Ignored view, optionally filtered to one reason code (e.g. {@code LOW_EPSS}); counts stay server-side. */
+    public PagedResponse<IgnoredItemView> listIgnored(UUID workspaceId, int page, int size, String reason) {
+        PageRequest pr = PageRequest.of(Math.max(0, page), Math.max(1, size));
+        org.springframework.data.domain.Page<SubIssue> ignored = (reason == null || reason.isBlank())
+                ? subIssues.findByWorkspaceIdAndStatus(workspaceId, SubIssue.STATUS_IGNORED, pr)
+                : subIssues.findByWorkspaceIdAndStatusAndIgnoreReason(workspaceId, SubIssue.STATUS_IGNORED,
+                        reason.trim(), pr);
         // N1: load the holding rules for the whole page in ONE query (no per-row findById N+1).
-        Map<UUID, IgnoreRule> rulesById = rulesFor(ignored.getContent());
+        Map<UUID, IgnoreRule> rulesById = rulesFor(workspaceId, ignored.getContent());
         return PagedResponse.fromPage(ignored.map(sub -> IgnoredItemView.of(sub,
                 sub.getIgnoredByRuleId() == null ? null : rulesById.get(sub.getIgnoredByRuleId()))));
     }
 
     // --- internals ---
 
-    private void applyRule(IgnoreRule rule) {
+    private void applyRule(UUID workspaceId, IgnoreRule rule) {
         List<SubIssue> candidates = rule.getRepositoryId() == null
-                ? subIssues.findByWorkspaceId(WORKSPACE)
-                : subIssues.findByWorkspaceIdAndRepositoryId(WORKSPACE, rule.getRepositoryId());
-        Map<UUID, String> groupKeys = groupKeyMap(candidates);
+                ? subIssues.findByWorkspaceId(workspaceId)
+                : subIssues.findByWorkspaceIdAndRepositoryId(workspaceId, rule.getRepositoryId());
+        Map<UUID, String> groupKeys = groupKeyMap(workspaceId, candidates);
         IgnoreMatcher.Rule ruleRef = new IgnoreMatcher.Rule(rule.getScope(), rule.getRepositoryId(),
                 rule.getMatchValue());
         Set<UUID> touched = new HashSet<>();
@@ -188,20 +208,20 @@ public class TriageService {
             String from = sub.getStatus();
             sub.ignore(ReasonCode.IGNORE_RULE.code(), rule.getId());
             subIssues.save(sub);
-            events.save(TriageEvent.user(WORKSPACE, sub.getId(), from, SubIssue.STATUS_IGNORED,
+            events.save(TriageEvent.user(workspaceId, sub.getId(), from, SubIssue.STATUS_IGNORED,
                     ReasonCode.IGNORE_RULE.code()));
             touched.add(sub.getGroupId());
         }
-        recomputeGroups(touched);
+        recomputeGroups(workspaceId, touched);
     }
 
-    private void recomputeGroups(Set<UUID> touched) {
+    private void recomputeGroups(UUID workspaceId, Set<UUID> touched) {
         if (touched.isEmpty()) {
             return;
         }
         Map<String, Integer> fixConfig = rollup.loadFixTimeConfig();
         for (UUID groupId : touched) {
-            rollup.recompute(WORKSPACE, groupId, fixConfig);
+            rollup.recompute(workspaceId, groupId, fixConfig);
         }
     }
 
@@ -211,31 +231,29 @@ public class TriageService {
     }
 
     /** Group keys for the given sub-issues, workspace-scoped (N1 — never a cross-tenant group leaks in). */
-    private Map<UUID, String> groupKeyMap(List<SubIssue> subs) {
+    private Map<UUID, String> groupKeyMap(UUID workspaceId, List<SubIssue> subs) {
         Set<UUID> ids = new HashSet<>();
         for (SubIssue s : subs) {
             ids.add(s.getGroupId());
         }
         Map<UUID, String> out = new HashMap<>();
-        groups.findAllById(ids).forEach(g -> {
-            if (WORKSPACE.equals(g.getWorkspaceId())) {
-                out.put(g.getId(), g.getGroupKey());
-            }
-        });
+        if (!ids.isEmpty()) {
+            groups.findByWorkspaceIdAndIdIn(workspaceId, ids).forEach(g -> out.put(g.getId(), g.getGroupKey()));
+        }
         return out;
     }
 
-    private String groupKeyOf(UUID groupId) {
-        return groups.findByIdAndWorkspaceId(groupId, WORKSPACE).map(IssueGroup::getGroupKey).orElse(null);
+    private String groupKeyOf(UUID workspaceId, UUID groupId) {
+        return groups.findByIdAndWorkspaceId(groupId, workspaceId).map(IssueGroup::getGroupKey).orElse(null);
     }
 
     /** The workspace EPSS auto-ignore toggle — the one auto cause the API can re-evaluate (D-060/D-063). */
-    private boolean epssAutoIgnoreEnabled() {
-        return workspaces.findById(WORKSPACE).map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+    private boolean epssAutoIgnoreEnabled(UUID workspaceId) {
+        return workspaces.findById(workspaceId).map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
     }
 
     /** The holding rules for a page of ignored sub-issues, workspace-scoped, in one query (N1 — no N+1). */
-    private Map<UUID, IgnoreRule> rulesFor(List<SubIssue> subs) {
+    private Map<UUID, IgnoreRule> rulesFor(UUID workspaceId, List<SubIssue> subs) {
         Set<UUID> ruleIds = new HashSet<>();
         for (SubIssue s : subs) {
             if (s.getIgnoredByRuleId() != null) {
@@ -247,7 +265,7 @@ public class TriageService {
         }
         // Workspace-scoped in SQL (N-1, domain rule 1) — never load another tenant's rule row at all.
         Map<UUID, IgnoreRule> out = new HashMap<>();
-        for (IgnoreRule r : ignoreRules.findByWorkspaceIdAndIdIn(WORKSPACE, ruleIds)) {
+        for (IgnoreRule r : ignoreRules.findByWorkspaceIdAndIdIn(workspaceId, ruleIds)) {
             out.put(r.getId(), r);
         }
         return out;

@@ -23,7 +23,7 @@ class ScannerContainerConfigTest {
                 "https://gitlab.example/ns/app.git", "main", 1,
                 Path.of("/srv/secscan/scans/scan-123/out"), tokenFile, localSource,
                 "2g", 4L * 1024 * 1024 * 1024, 2.0, 512, networkDisabled, "1000:1000",
-                Duration.ofMinutes(30));
+                Duration.ofMinutes(30), "oauth2", "inst-123", true);
     }
 
     @Test
@@ -83,8 +83,31 @@ class ScannerContainerConfigTest {
 
         List<String> env = ScannerContainerConfig.buildEnv(s);
         assertThat(env).containsExactlyInAnyOrder(
-                "SCAN_CLONE_URL=https://gitlab.example/ns/app.git", "SCAN_BRANCH=main", "SCAN_CLONE_DEPTH=1");
+                "SCAN_CLONE_URL=https://gitlab.example/ns/app.git", "SCAN_BRANCH=main", "SCAN_CLONE_DEPTH=1",
+                "SAST_TAINT_INTRAFILE=1", "SCAN_CLONE_USER=oauth2");
         assertThat(env).noneSatisfy(e -> assertThat(e.toLowerCase()).contains("token"));
+    }
+
+    @Test
+    void buildEnvEncodesTheTaintIntrafileToggle() {
+        ScannerLaunchSpec on = new ScannerLaunchSpec("s", "img", "https://g/x.git", "main", 1,
+                Path.of("/out"), null, null, "2g", 1L, 1.0, 256, false, "1000:1000",
+                Duration.ofMinutes(30), "oauth2", "inst", true);
+        ScannerLaunchSpec off = new ScannerLaunchSpec("s", "img", "https://g/x.git", "main", 1,
+                Path.of("/out"), null, null, "2g", 1L, 1.0, 256, false, "1000:1000",
+                Duration.ofMinutes(30), "oauth2", "inst", false);
+        assertThat(ScannerContainerConfig.buildEnv(on)).contains("SAST_TAINT_INTRAFILE=1");
+        assertThat(ScannerContainerConfig.buildEnv(off)).contains("SAST_TAINT_INTRAFILE=0");
+    }
+
+    @Test
+    void buildEnvCarriesTheGitHubCloneAuthUserNeverTheToken() {
+        ScannerLaunchSpec s = new ScannerLaunchSpec("scan-gh", "secscan-scanner:test",
+                "https://github.com/octo/app.git", "main", 1, Path.of("/out"), Path.of("/t"), null,
+                "2g", 1L, 1.0, 256, false, "1000:1000", Duration.ofMinutes(30), "x-access-token", "inst-gh", true);
+        List<String> env = ScannerContainerConfig.buildEnv(s);
+        assertThat(env).contains("SCAN_CLONE_USER=x-access-token");
+        assertThat(env).noneSatisfy(e -> assertThat(e.toLowerCase()).contains("token=")); // the user is not the token
     }
 
     @Test
@@ -104,9 +127,10 @@ class ScannerContainerConfigTest {
     }
 
     @Test
-    void labelsIdentifyTheScan() {
-        assertThat(ScannerContainerConfig.labels("scan-123"))
+    void labelsIdentifyTheScanAndOwningInstance() {
+        assertThat(ScannerContainerConfig.labels("scan-123", "inst-123"))
                 .containsEntry("secscan.component", "scanner")
+                .containsEntry("secscan.instance", "inst-123")
                 .containsEntry("secscan.scan", "scan-123");
     }
 }

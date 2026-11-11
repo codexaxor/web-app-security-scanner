@@ -69,14 +69,17 @@ test("S10d — severity color is identical on the Feed and in the side panel", a
 
 test("S10d — Esc closes the panel and returns focus to the row", async ({ page }) => {
   await signIn(page, "/feed");
-  const row = page.getByTestId("feed-row").first();
-  await row.focus();
+  // M8.11: the row's focusable element is its real link (the stretched row link), not the <tr>. Focusing it
+  // and pressing Enter opens the panel; the feed list stays mounted behind the panel, so focus stays on the
+  // link and is still there after Esc closes the panel.
+  const link = page.getByTestId("feed-row").first().getByRole("link").first();
+  await link.focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Issue details" });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(row).toBeFocused();
+  await expect(link).toBeFocused();
 });
 
 test("S10d — Dashboard band count links to the matching filtered Feed", async ({ page }) => {
@@ -90,10 +93,11 @@ test("S10d — Dashboard band count links to the matching filtered Feed", async 
     .toBe(n);
 });
 
-test("S10d — Connect shows token expiry with 'N days left' in amber under 14 days", async ({ page }) => {
+test("S10d — Connect shows a one-line token expiry in amber under 14 days", async ({ page }) => {
   await signIn(page, "/connect");
   const expiry = page.getByTestId("connection-expiry").first();
-  await expect(expiry).toContainText("days left");
+  // nit 9.4: exact one-line pattern — "<date> · N days" (no wrapping "left").
+  await expect(expiry).toHaveText(/· \d+ days?$/);
   await expect(expiry).toHaveClass(/expiry-warn/);
 });
 

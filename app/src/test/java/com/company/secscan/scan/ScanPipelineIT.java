@@ -95,7 +95,7 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 101L, "svc/app", "main",
                 List.of("Java")));
 
-        ScanView scan = scanService.startManual(repo.getId());
+        ScanView scan = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         List<UUID> claimed = claimer.claimBatch(10);
         assertThat(claimed).hasSize(1);
         processor.process(claimed.get(0));
@@ -135,7 +135,11 @@ class ScanPipelineIT extends AbstractScanWorkerIT {
         // Container is gone afterwards.
         assertThat(docker.listContainersCmd().withShowAll(true)
                 .withLabelFilter(Map.of("secscan.scan", scan.id().toString())).exec()).isEmpty();
-        // The per-scan workspace (and its token file) was wiped.
+        // The per-scan workspace (and its token file) lived under this run's instance sub-tree
+        // <workRoot>/<instanceId>/<scanId> (D-102) and was wiped; nothing was left directly under the work root.
+        Path instanceDir = workRoot.resolve(IT_INSTANCE_ID);
+        assertThat(instanceDir).isDirectory();
+        assertThat(Files.exists(instanceDir.resolve(scan.id().toString()))).isFalse();
         assertThat(Files.exists(workRoot.resolve(scan.id().toString()))).isFalse();
     }
 

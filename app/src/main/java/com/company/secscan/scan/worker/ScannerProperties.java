@@ -23,6 +23,13 @@ public class ScannerProperties {
 
     private String image = "secscan-scanner:8.21.2";
     private String workRoot = "/tmp/secscan/scans";
+    /**
+     * Pass {@code --taint-intrafile} to Opengrep (intra-file inter-procedural taint; D-104, M8.15 S4). Default
+     * on. It changes no SAST fingerprint input (rule id / file path / normalized-snippet hash), so turning it on
+     * does not churn existing findings — it only adds taint-tracked findings. TaintRescanStabilityIT flips this
+     * OFF then ON on the same commit and proves the matched findings keep identical fingerprints (0 triage_events).
+     */
+    private boolean taintIntrafile = true;
     private String tmpfsSize = "2g";
     private DataSize memory = DataSize.ofGigabytes(4);
     private double cpus = 2.0;
@@ -36,6 +43,20 @@ public class ScannerProperties {
     /** The scheduled claim loop; disabled in tests that drive the pipeline directly. */
     private boolean pollingEnabled = true;
     private long pollIntervalMs = 5000;
+    /**
+     * Ownership tag stamped on every scanner container (label {@code secscan.instance}) and used by
+     * {@link ScanReaper}: a worker reaps ONLY leftovers carrying its own instance id, never another stack's
+     * (dev / smoke / a Gradle IT run). It is also the name of this worker's sub-tree of the work root
+     * ({@code <workRoot>/<instanceId>/<scanId>}), so it must be one plain path segment. Stable across restarts;
+     * one worker per instance id (D-102).
+     * Sourced from {@code SECSCAN_INSTANCE_ID} (see application-worker.yml), default {@code "default"}.
+     */
+    private String instanceId = "default";
+    /**
+     * How often {@link ScanReaper} sweeps for leftovers (default every 10 minutes; configurable). The startup sweep
+     * is not delayed: it runs synchronously before the first claim (review S1).
+     */
+    private long reapIntervalMs = 600_000;
     /**
      * TEST-ONLY: allow cloning a repository over {@code file:///src} from a local path. Default false — in
      * production the worker clones only over https to an allowlisted host (D-018). The offline fixture ITs set
@@ -131,6 +152,14 @@ public class ScannerProperties {
         this.cloneDepth = cloneDepth;
     }
 
+    public boolean isTaintIntrafile() {
+        return taintIntrafile;
+    }
+
+    public void setTaintIntrafile(boolean taintIntrafile) {
+        this.taintIntrafile = taintIntrafile;
+    }
+
     public int getMaxParallel() {
         return maxParallel;
     }
@@ -161,6 +190,22 @@ public class ScannerProperties {
 
     public void setPollIntervalMs(long pollIntervalMs) {
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    public String getInstanceId() {
+        return instanceId;
+    }
+
+    public void setInstanceId(String instanceId) {
+        this.instanceId = instanceId;
+    }
+
+    public long getReapIntervalMs() {
+        return reapIntervalMs;
+    }
+
+    public void setReapIntervalMs(long reapIntervalMs) {
+        this.reapIntervalMs = reapIntervalMs;
     }
 
     public boolean isAllowLocalFileClone() {

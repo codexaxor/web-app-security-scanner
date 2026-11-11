@@ -2,8 +2,6 @@ package com.company.secscan.scan;
 
 import com.company.secscan.api.PagedResponse;
 import com.company.secscan.api.Pagination;
-import com.company.secscan.config.TokenCipherHolder;
-import com.company.secscan.gitlab.GitLabClient;
 import com.company.secscan.gitlab.GitlabConnection;
 import com.company.secscan.gitlab.GitlabConnectionRepository;
 import com.company.secscan.repository.Repository;
@@ -12,7 +10,6 @@ import com.company.secscan.scan.api.ScanDetailView;
 import com.company.secscan.scan.api.ScanTaskView;
 import com.company.secscan.scan.api.ScanView;
 import com.company.secscan.scan.api.ScanWarningView;
-import com.company.secscan.workspace.Workspace;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,7 +31,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class ScanService {
 
     private static final Logger log = LoggerFactory.getLogger(ScanService.class);
-    private static final UUID WORKSPACE = Workspace.DEFAULT_ID;
     private static final List<String> IN_FLIGHT = List.of(Scan.STATUS_QUEUED, Scan.STATUS_RUNNING);
 
     private final ScanRepository scans;
@@ -43,36 +39,38 @@ public class ScanService {
     private final ScanWarningRepository warnings;
     private final RepositoryRepository repositories;
     private final ScanEnqueuer enqueuer;
-    private final GitLabClient gitlab;
     private final GitlabConnectionRepository connections;
-    private final TokenCipherHolder cipher;
+    private final com.company.secscan.source.ProviderRegistry providers;
+    private final com.company.secscan.source.SourceCredentials credentials;
 
     public ScanService(ScanRepository scans, ScanTaskRepository tasks, ScanFindingRepository findings,
                        ScanWarningRepository warnings, RepositoryRepository repositories, ScanEnqueuer enqueuer,
-                       GitLabClient gitlab, GitlabConnectionRepository connections, TokenCipherHolder cipher) {
+                       GitlabConnectionRepository connections,
+                       com.company.secscan.source.ProviderRegistry providers,
+                       com.company.secscan.source.SourceCredentials credentials) {
         this.scans = scans;
         this.tasks = tasks;
         this.findings = findings;
         this.warnings = warnings;
         this.repositories = repositories;
         this.enqueuer = enqueuer;
-        this.gitlab = gitlab;
         this.connections = connections;
-        this.cipher = cipher;
+        this.providers = providers;
+        this.credentials = credentials;
     }
 
     /**
      * Queues a manual scan for a repository, or returns the scan already in flight. Not transactional at the
      * method level so the enqueue race can be caught and recovered (see {@link ScanEnqueuer}).
      */
-    public ScanView startManual(UUID repositoryId) {
-        Repository repo = requireScannable(repositoryId);
-        Optional<ScanView> inFlight = inFlight(repositoryId).map(ScanView::of);
+    public ScanView startManual(UUID workspaceId, UUID repositoryId) {
+        Repository repo = requireScannable(workspaceId, repositoryId, true);
+        Optional<ScanView> inFlight = inFlight(workspaceId, repositoryId).map(ScanView::of);
         if (inFlight.isPresent()) {
             return inFlight.get();
         }
-        BranchResolution branch = resolveBranch(repo);
-        return enqueueRecoveringRace(repo.getId(), branch);
+        BranchResolution branch = resolveBranch(workspaceId, repo);
+        return enqueueRecoveringRace(workspaceId, repo.getId(), branch);
     }
 
     /** The branch to clone, and whether a GitLab refresh at enqueue failed (A6 → a scan warning). */
@@ -86,18 +84,22 @@ public class ScanService {
      * {@code repository.default_branch} (INFO log, no status change). On a GitLab failure (or a local connection)
      * the last-known stored default is used; a failure also flags a scan warning.
      */
-    private BranchResolution resolveBranch(Repository repo) {
+    private BranchResolution resolveBranch(UUID workspaceId, Repository repo) {
         if (repo.getScanBranch() != null) {
             return new BranchResolution(repo.getScanBranch(), false);
         }
         GitlabConnection conn = repo.getConnectionId() == null ? null
-                : connections.findByIdAndWorkspaceId(repo.getConnectionId(), WORKSPACE).orElse(null);
+                : connections.findByIdAndWorkspaceId(repo.getConnectionId(), workspaceId).orElse(null);
         if (conn == null || isLocal(conn)) {
             return new BranchResolution(repo.getDefaultBranch(), false);
         }
         try {
-            String token = cipher.require().decrypt(conn.getTokenCiphertext());
-            String current = gitlab.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId()).defaultBranch();
+            // Provider-neutral (M8.8): resolve the credential through the shared helper (null = anonymous for a
+            // public connection) and read the default branch via the adapter, so a public GitHub/GitLab repo
+            // refreshes its default at enqueue without decrypting a blank ciphertext.
+            String token = credentials.tokenFor(conn);
+            String current = providers.require(conn.getProvider())
+                    .getRepository(conn.getBaseUrl(), token, repo.getProviderRepoId()).defaultBranch();
             // N-2: a GitLab default we cannot validate is not trusted — keep the stored value and warn.
             if (current != null && !BranchName.isValid(current)) {
                 log.warn("Repository {} GitLab default branch is not a valid ref name; keeping the stored default.",
@@ -108,10 +110,12 @@ public class ScanService {
                 log.info("Repository {} default branch changed in GitLab; updating the stored default.",
                         repo.getId());
                 // SF-1: column-scoped update in its own tx (no whole-entity save of the detached repo).
-                enqueuer.recordDefaultBranch(repo.getId(), current);
+                enqueuer.recordDefaultBranch(workspaceId, repo.getId(), current);
             }
             return new BranchResolution(current != null ? current : repo.getDefaultBranch(), false);
         } catch (RuntimeException e) {
+            // Best-effort refresh: a missing (M8.8) or unreadable (M8.10 S12) token is tolerated here exactly like a
+            // provider error — the scan is queued and the worker then fails it with the typed code.
             log.warn("Could not refresh the default branch for repository {} at enqueue ({}); scanning the last "
                     + "known default.", repo.getId(), e.getClass().getSimpleName());
             return new BranchResolution(repo.getDefaultBranch(), true);
@@ -122,11 +126,11 @@ public class ScanService {
         return conn.getBaseUrl() != null && conn.getBaseUrl().startsWith("file:");
     }
 
-    private ScanView enqueueRecoveringRace(UUID repositoryId, BranchResolution branch) {
+    private ScanView enqueueRecoveringRace(UUID workspaceId, UUID repositoryId, BranchResolution branch) {
         try {
-            Scan scan = enqueuer.enqueueManual(repositoryId, branch.branch());
+            Scan scan = enqueuer.enqueueManual(workspaceId, repositoryId, branch.branch());
             if (branch.refreshFailed()) {
-                warnings.save(new ScanWarning(WORKSPACE, repositoryId, scan.getId(), "DEFAULT_BRANCH_UNAVAILABLE",
+                warnings.save(new ScanWarning(workspaceId, repositoryId, scan.getId(), "DEFAULT_BRANCH_UNAVAILABLE",
                         "Could not refresh the default branch from GitLab; scanning the last known default branch.",
                         null));
             }
@@ -135,25 +139,40 @@ public class ScanService {
             // A concurrent start won the uq_scan_active_per_repository race; return that scan.
             log.debug("Concurrent scan start for repository {}; returning the existing in-flight scan",
                     repositoryId);
-            return inFlight(repositoryId).map(ScanView::of)
+            return inFlight(workspaceId, repositoryId).map(ScanView::of)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                             "A scan is already in progress for this repository."));
         }
     }
 
     @Transactional(readOnly = true)
-    public PagedResponse<ScanView> listForRepository(UUID repositoryId, int page, int size) {
-        requireScannable(repositoryId, false);
-        return PagedResponse.fromPage(scans
-                .findByWorkspaceIdAndRepositoryId(WORKSPACE, repositoryId, Pagination.of(page, size))
-                .map(ScanView::of));
+    public PagedResponse<ScanView> listForRepository(UUID workspaceId, UUID repositoryId, int page, int size) {
+        requireScannable(workspaceId, repositoryId, false);
+        var pageResult = scans.findByWorkspaceIdAndRepositoryId(workspaceId, repositoryId, Pagination.of(page, size));
+        java.util.Map<UUID, Long> warnCounts = warningCounts(workspaceId, pageResult.getContent());
+        return PagedResponse.fromPage(pageResult.map(s ->
+                ScanView.of(s, warnCounts.getOrDefault(s.getId(), 0L))));
     }
 
-    /** All scans in the workspace, newest-first, paginated (OD-14 item 2). Size capped at {@link Pagination#MAX_SIZE}. */
+    /** Warning counts for a page of scans in one query (no N+1); workspace-scoped. */
+    private java.util.Map<UUID, Long> warningCounts(UUID workspaceId, List<Scan> pageScans) {
+        if (pageScans.isEmpty()) {
+            return java.util.Map.of();
+        }
+        List<UUID> ids = pageScans.stream().map(Scan::getId).toList();
+        java.util.Map<UUID, Long> out = new java.util.HashMap<>();
+        for (Object[] row : warnings.countByScanIds(workspaceId, ids)) {
+            out.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return out;
+    }
+
+    /** All scans in the workspace, newest-first,
+            paginated (OD-14 item 2). Size capped at {@link Pagination#MAX_SIZE}. */
     @Transactional(readOnly = true)
-    public PagedResponse<ScanView> listAll(int page, int size) {
+    public PagedResponse<ScanView> listAll(UUID workspaceId, int page, int size) {
         return PagedResponse.fromPage(scans
-                .findByWorkspaceId(WORKSPACE, Pagination.of(page, size,
+                .findByWorkspaceId(workspaceId, Pagination.of(page, size,
                         org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC,
                                 "createdAt")))
                 .map(ScanView::of));
@@ -161,35 +180,30 @@ public class ScanService {
 
     /** One scan's warnings, paginated (OD-14 item 2); 404 if the scan is not in this workspace. */
     @Transactional(readOnly = true)
-    public PagedResponse<ScanWarningView> listWarnings(UUID scanId, int page, int size) {
-        scans.findByIdAndWorkspaceId(scanId, WORKSPACE)
+    public PagedResponse<ScanWarningView> listWarnings(UUID workspaceId, UUID scanId, int page, int size) {
+        scans.findByIdAndWorkspaceId(scanId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such scan."));
         return PagedResponse.fromPage(warnings
-                .findByWorkspaceIdAndScanId(WORKSPACE, scanId, Pagination.of(page, size))
+                .findByWorkspaceIdAndScanId(workspaceId, scanId, Pagination.of(page, size))
                 .map(ScanWarningView::of));
     }
 
     @Transactional(readOnly = true)
-    public ScanDetailView get(UUID scanId) {
-        Scan scan = scans.findByIdAndWorkspaceId(scanId, WORKSPACE)
+    public ScanDetailView get(UUID workspaceId, UUID scanId) {
+        Scan scan = scans.findByIdAndWorkspaceId(scanId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such scan."));
         List<ScanTaskView> taskViews = tasks.findByScanId(scanId).stream().map(ScanTaskView::of).toList();
         return new ScanDetailView(ScanView.of(scan), scan.getToolVersions(), taskViews,
                 findings.countByScanId(scanId));
     }
 
-    private Optional<Scan> inFlight(UUID repositoryId) {
-        return scans.findByWorkspaceIdAndRepositoryIdAndStatusIn(WORKSPACE, repositoryId, IN_FLIGHT)
+    private Optional<Scan> inFlight(UUID workspaceId, UUID repositoryId) {
+        return scans.findByWorkspaceIdAndRepositoryIdAndStatusIn(workspaceId, repositoryId, IN_FLIGHT)
                 .stream().findFirst();
     }
 
-    private Repository requireScannable(UUID repositoryId) {
-        return requireScannable(repositoryId, true);
-    }
-
-    private Repository requireScannable(UUID repositoryId, boolean requireActive) {
-        Repository repo = repositories.findById(repositoryId)
-                .filter(r -> r.getWorkspaceId().equals(WORKSPACE))
+    private Repository requireScannable(UUID workspaceId, UUID repositoryId, boolean requireActive) {
+        Repository repo = repositories.findByIdAndWorkspaceId(repositoryId, workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such repository."));
         if (requireActive && !repo.isActive()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

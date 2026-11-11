@@ -1,6 +1,6 @@
 import { test, expect, signIn } from "../fixtures/test-base";
 import { apiGet, sqlCount } from "../helpers/oracle";
-import type { FeedSummaryView, Paged, IssueGroupView } from "../../src/api";
+import type { FeedSummaryView, Paged, IssueGroupView, CategoryCount } from "../../src/api";
 
 const WS = "00000000-0000-0000-0000-000000000001";
 const CORE = "20000000-0000-0000-0000-000000000001"; // core-keycloak, 64 bulk groups
@@ -53,7 +53,7 @@ test("Focus hides ignored groups; All includes them", async ({ page, request }) 
   await expect(page.getByTestId("total-groups")).toHaveText(String(all.totalGroups));
 });
 
-test("server-side pagination for a repo with more than 50 groups", async ({ page, request }) => {
+test("server-side pagination for a repo with more than one page of groups", async ({ page, request }) => {
   await gotoFeed(page);
   // Filter to core-keycloak (64 bulk open groups).
   await page.getByLabel("Repository").selectOption(CORE);
@@ -61,12 +61,24 @@ test("server-side pagination for a repo with more than 50 groups", async ({ page
   const api = await apiGet<Paged<IssueGroupView>>(
     request, `/api/v1/issue-groups?view=focus&repositoryId=${CORE}&page=0&size=50`);
   expect(api.totalElements).toBe(64);
-  expect(api.content.length).toBe(50); // server caps the page, never the client
 
-  await expect(page.getByTestId("page-info")).toContainText("64 groups");
-  await expect(page.getByTestId("feed-row")).toHaveCount(50);
-  await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByTestId("feed-row")).toHaveCount(14);
+  // Default page size is 20 (S11.3); the footer pager's "of N" is EXACTLY the API totalElements and the range
+  // bounds are exact. "Next" is scoped to the footer pager (the toolbar also has a compact pager).
+  const footer = page.getByTestId("pager");
+  await expect(page.getByTestId("pager-range")).toHaveText(/^1.20 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^21.40 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^41.60 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(20);
+  // The partial last page: the range's upper bound is clamped to totalElements (to = min(...)), and the server
+  // returns only the remaining rows.
+  await footer.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("pager-range")).toHaveText(/^61.64 of 64$/);
+  await expect(page.getByTestId("feed-row")).toHaveCount(4);
+  await expect(footer.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
 });
 
 test("default sort is severity desc and filters narrow by type", async ({ page, request }) => {
@@ -95,4 +107,34 @@ test("New (<7d) vs To Do status at the 7-day boundary", async ({ page }) => {
   await page.getByText("Include inactive").click();
   const row = page.getByRole("row").filter({ hasText: "Inactive repo finding" });
   await expect(row.getByText("To Do", { exact: true })).toBeVisible();
+});
+
+// M8.6 item 9 + M8.5 level-2 taxonomy filter: the Feed category chip narrows the feed server-side and is
+// URL-addressable. Oracle: the categories endpoint's count for a category == the feed's totalElements when
+// filtered by that category (same focus scope, workspace-scoped, both default includeInactive=false).
+test("the category filter narrows the feed server-side and is URL-addressable", async ({ page, request }) => {
+  await gotoFeed(page);
+  const cats = await apiGet<CategoryCount[]>(request, "/api/v1/issue-groups/categories?view=focus");
+  expect(cats.length, "seed has at least one level-2 category").toBeGreaterThan(0);
+  const cat = cats[0];
+
+  const unfiltered = await apiGet<Paged<IssueGroupView>>(
+    request,
+    "/api/v1/issue-groups?view=focus&page=0&size=50",
+  );
+  const filtered = await apiGet<Paged<IssueGroupView>>(
+    request,
+    `/api/v1/issue-groups?view=focus&category=${encodeURIComponent(cat.category)}&page=0&size=50`,
+  );
+  // The categories endpoint count is the group total for that category under the same focus scope.
+  expect(filtered.totalElements).toBe(cat.count);
+  expect(filtered.totalElements).toBeLessThanOrEqual(unfiltered.totalElements);
+  // Every group returned for the filter carries that level-2 category.
+  expect(filtered.content.every((g) => g.level2Category === cat.category)).toBeTruthy();
+
+  // Selecting the category sets ?category=<value> (URL-addressable) and narrows the visible rows to the
+  // server-side result (page capped at 50, as the pagination test above asserts).
+  await page.getByLabel("Category").selectOption(cat.category);
+  await expect.poll(() => new URL(page.url()).searchParams.get("category")).toBe(cat.category);
+  await expect(page.getByTestId("feed-row")).toHaveCount(Math.min(20, filtered.totalElements));
 });

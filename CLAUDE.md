@@ -16,7 +16,10 @@ If the spec, this file and a decision disagree, stop and ask.
 - One Spring Boot codebase, two profiles:
   - `api`: REST for the UI, scheduler, GitLab commit polling, KEV/EPSS/EOL sync, re-score jobs.
   - `worker`: claims `scan_job` rows, launches one disposable scanner container per scan, parses, enriches,
-    scores and reconciles findings.
+    scores and reconciles findings. Once before its first claim and then every 10 min a reaper (`ScanReaper`,
+    D-102) removes scan leftovers a crash left behind — containers labelled
+    `secscan.instance=<SECSCAN_INSTANCE_ID>` and scan dirs under its own `<workRoot>/<instanceId>/` — that are
+    not held by a live scan; it never changes job/scan/finding state.
 - PostgreSQL is both the database and the job queue (`SELECT … FOR UPDATE SKIP LOCKED`). No Redis, no broker.
 - Scanner = separate Docker image (`scanner-image/`) with git, OSV-Scanner, Betterleaks, Opengrep, Checkov. Writes
   JSON/SARIF to `/out`, destroyed after every scan. Only `/out` and logs leave it.
@@ -59,10 +62,12 @@ scripts/compose-smoke.sh           # isolated compose smoke (own project `secsca
 docker build -t secscan-scanner:8.21.2 scanner-image/   # scanner image; tag must match ScannerProperties.image
 cd ui && npm ci && npm run dev
 cd ui && npm run build && npm run typecheck && npm test && npm run guard  # UI gate (M8): tsc, vite build, vitest, security guard
+#   npm test runs serially (vite.config.ts test.fileParallelism:false) to avoid the BranchPicker timing flake; no command changed (M8.11).
 cd ui && npm run e2e               # M8 E2E: isolated `secscan-e2e` compose (own volume/ports) + Playwright-in-Docker; builds, seeds, tests, down -v
 ./gradlew :app:test -PliveOsv   --tests "*ScaLiveScanIT"   # live-osv tests (osv.dev/deps.dev); excluded by default
 ./gradlew :app:test -PliveIntel --tests "*LiveIntelIT"     # live-intel tests (CISA KEV / FIRST EPSS); excluded by default
 ./gradlew :app:test -PliveOpengrep -PliveCheckov -PliveEol # M6 live tests (real Opengrep/Checkov container + endoflife.date); excluded by default
+./gradlew :app:test -PliveReaper --tests "*ScanReaperIT*" # reaper live test (real Docker daemon + scanner image); excluded by default
 ```
 
 Update this section whenever a command changes.
@@ -79,17 +84,31 @@ developer's `postgres-data` dev database. Any smoke/scratch compose run uses a s
    - the `scan_job` claim (`claimable`, `SELECT … FOR UPDATE SKIP LOCKED`) — the queue is drained across all
      workspaces; the claimed row's `workspace_id` then scopes the rest of that scan. The worker's follow-up
      re-read of that same claimed job by id (`ScanJobProcessor.process` via `ScanJobRepository.findById`) is
-     part of this trust root and is likewise unscoped.
+     part of this trust root and is likewise unscoped. Its D-097 fair-use subqueries (skip a workspace that
+     already has a running job; at most the oldest queued job per workspace) are part of the same claim.
    - the stale-lease sweep (`staleLeases`) — reclaims hung leases across all workspaces; each reclaimed job's
      `workspace_id` scopes its own state change.
-   - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`, and the D-053 EOL
-     feed cache `eol_cycle`) carry no `workspace_id` (shared public reference data / global tuning, not
+   - the D-050 global intel/config tables (`kev_entry`, `epss_score`, `fix_time_config`, the D-053 EOL
+     feed cache `eol_cycle`, and the D-087 IaC severity-override table `iac_severity_override`) carry no
+     `workspace_id` (shared public reference data / global tuning, not
      per-tenant business data), so their lookups are intentionally workspace-agnostic:
      `KevEntryRepository.findPresentCves`, `EpssScoreRepository.findByCveIn`, `FixTimeConfigRepository.findAll`,
-     `EolCycleRepository.findByProductAndCycle`. They are joined to workspace-scoped `sub_issue` rows, which carry the
+     `EolCycleRepository.findByProductAndCycle`, `IacSeverityOverrideRepository.findById`. They are joined to workspace-scoped `sub_issue` rows, which carry the
      scoping. The intel sync and the re-score sweep (`ReScoreService`, driven by `WorkspaceRepository.findAll`)
      are system maintenance jobs that run across all workspaces; the sweep then loads each workspace's own
      open sub-issues, so every sub-issue/repository/group query stays scoped by the row's own `workspace_id`.
+   - M8.10 tenancy (D-093/D-094/D-098):
+     - `signup_request` is a **pre-tenant** table (a pending sign-up belongs to no workspace yet), read only by
+       sign-up, the login pending-check (`SignupRequestRepository.findByEmailAndStatus`) and the operator API.
+     - the per-request account check reloads the principal's own row by id (`ActiveAccountFilter` via
+       `AppUserRepository.findById`) — part of the authentication trust root, like the login lookup.
+     - the single-operator guard `AppUserRepository.existsByOperatorTrue` (the operator is a platform role).
+     - the operator's account list (`AppUserRepository.findAllByOrderByCreatedAtAscIdAsc` /
+       `findByStatusOrderByCreatedAtAscIdAsc`) and disable/enable by id — account metadata only (D-094: the
+       operator has no read access to other tenants' business data).
+     - request paths take their workspace ONLY from the authenticated principal (`@CurrentWorkspace`);
+       `Workspace.DEFAULT_ID` appears only in its declaration and the admin/demo bootstraps
+       (`DefaultWorkspaceUsageGuardTest`).
 2. `issue_group` (what users triage) vs `sub_issue` (one finding, stable fingerprint = SHA-256 of fields joined
    with `|`):
    - SCA: package + vuln id (CVE, else GHSA/OSV) + manifest path

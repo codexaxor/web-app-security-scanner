@@ -119,7 +119,7 @@ public class ReScoreService {
             if (c.unmappedSecretRule() != null) {
                 unmapped.add(c.unmappedSecretRule());
             }
-            subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()),
+            subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()),
                     c.inKev(), c.epss());
             touchedGroups.add(sub.getGroupId());
         }
@@ -132,6 +132,32 @@ public class ReScoreService {
         }
         log.info("Re-score recomputed {} open sub-issue(s) for repository {}", open.size(), repositoryId);
         return open.size();
+    }
+
+    /**
+     * Re-scores ONE open sub-issue immediately — used when a manual unignore reopens a finding (M8 D-2, D-083):
+     * its score must reflect the current KEV/EPSS/sensitivity at once, not wait for the next scan or sweep. Same
+     * guard as the sweeps: a column-scoped {@code updateScoreColumnsIfOpen} (status='open'), so it writes NO
+     * {@code triage_event} and never changes status or the fingerprint. The CALLER recomputes the group rollup.
+     * Returns 1 when re-scored, 0 when the sub is absent or not open.
+     */
+    @Transactional
+    public int rescoreSubIssue(UUID workspaceId, UUID subIssueId) {
+        SubIssue sub = subIssues.findByIdAndWorkspaceId(subIssueId, workspaceId).orElse(null);
+        if (sub == null || !SubIssue.STATUS_OPEN.equals(sub.getStatus())) {
+            return 0;
+        }
+        boolean epssEnabled = workspaces.findById(workspaceId).map(Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        String sensitivity = repositories.findByIdAndWorkspaceId(sub.getRepositoryId(), workspaceId)
+                .map(Repository::getSensitivity).orElse("normal");
+        Computation c = scorer.compute(sub, sensitivity, epssEnabled);
+        subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()), c.inKev(),
+                c.epss());
+        if (c.unmappedSecretRule() != null) {
+            log.warn("Unmapped secret rule '{}' scored at the default base 75 (D-045); add it to the rule map.",
+                    c.unmappedSecretRule());
+        }
+        return 1;
     }
 
     private int rescoreWorkspace(UUID workspaceId, boolean epssAdjustmentsEnabled, Map<String, Integer> fixConfig,
@@ -150,7 +176,7 @@ public class ReScoreService {
             }
             // Column-scoped UPDATE guarded by status='open' — never a full save, so a row reconcile has solved
             // since we read it is skipped (B1). No triage_event, no status/fingerprint change.
-            subIssues.updateScoreColumnsIfOpen(sub.getId(), c.score(), writeBreakdown(c.breakdown()),
+            subIssues.updateScoreColumnsIfOpen(sub.getId(), workspaceId, c.score(), writeBreakdown(c.breakdown()),
                     c.inKev(), c.epss());
             touchedGroups.add(sub.getGroupId());
         }

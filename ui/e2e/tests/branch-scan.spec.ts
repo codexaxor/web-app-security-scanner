@@ -55,6 +55,8 @@ test("the branch picker lists branches and explains re-baseline before saving", 
 
   await signIn(page, "/repositories");
   const row = await repoRow(page, CORE_KEYCLOAK);
+  // Settings lives in the row ⋮ menu now (M8.6); open it first.
+  await row.getByRole("button", { name: "Row actions" }).click();
   await row.getByRole("button", { name: "Settings", exact: true }).click();
 
   const dialog = page.getByRole("dialog");

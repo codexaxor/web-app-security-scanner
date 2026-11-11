@@ -53,6 +53,8 @@ public class ScannerOutputParser {
         // MISSING_NUGET_LOCKFILE (no sibling packages.lock.json on disk) keep their .csproj-sourced SCA findings;
         // see parseOsv (D-035).
         List<ScanWarning> warnings = new ArrayList<>();
+        List<SastSkippedFile> sastSkippedFiles = List.of();
+        int sastPartiallyParsed = 0;
         java.util.Set<String> csprojMissingLockfile = new java.util.HashSet<>();
         if (m.warnings != null) {
             for (ManifestWarning w : m.warnings) {
@@ -96,6 +98,10 @@ public class ScannerOutputParser {
                         warnings, syntheticPoms));
             } else if (RawFinding.SCANNER_SAST.equals(s.name)) {
                 findings.addAll(parseOpengrep(outDir.resolve(s.findingsFile), m.checkoutPath, warnings));
+                // Only for a SUCCEEDED sast task (the loop `continue`s on a failed one): a failed SAST run carries no
+                // skipped files / partial count, so it never raises SAST_FILES_SKIPPED (review N5).
+                sastSkippedFiles = parseOpengrepSkippedFiles(outDir.resolve(s.findingsFile), m.checkoutPath);
+                sastPartiallyParsed = parseOpengrepPartiallyParsed(outDir.resolve(s.findingsFile));
             } else if (RawFinding.SCANNER_IAC.equals(s.name)) {
                 findings.addAll(parseCheckov(outDir.resolve(s.findingsFile), warnings));
             } else if (RawFinding.SCANNER_EOL.equals(s.name)) {
@@ -107,8 +113,10 @@ public class ScannerOutputParser {
         String scopeStatus = m.scopeInventoryStatus == null ? ParsedScan.SCOPE_STATUS_OK : m.scopeInventoryStatus;
         List<String> unreadable = m.unreadableScopeManifests == null ? List.of()
                 : List.copyOf(m.unreadableScopeManifests);
+        List<String> languages = readLanguages(outDir.resolve("languages.json"));
         return new ParsedScan(false, m.commit, versions, tasks, findings, warnings, toSecscanConfig(m.config),
-                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable);
+                toDeclaredScopes(m.declaredScopes), scopeStatus, unreadable, languages, sastSkippedFiles,
+                sastPartiallyParsed);
     }
 
     /**
@@ -320,6 +328,70 @@ public class ScannerOutputParser {
     }
 
     /**
+     * Reads the {@code skippedFiles} that run-scan.sh ({@code sast_skipped_files}) classified from Opengrep's
+     * {@code errors[]} + {@code paths.skipped} (M8.15 S6 follow-up, D-104; review S1/S2): the repo-relative files
+     * whose SAST findings must be FROZEN (Timeout, full parse error, size limit, unreadable, other analysis error)
+     * with their normalized error-TYPE names only — never a message or source text (D-053/S1). Each type is
+     * re-normalized here (defense in depth: the leading {@code [A-Za-z0-9 _.-]} name only, at most 48 chars, blanks dropped), so
+     * a container path or line range can never reach a warning message even from a malformed report. A path that is absolute or escapes the checkout is dropped (defense in depth — it must never
+     * drive a freeze against the wrong file). Paths are already repo-relative in the sanitized report; we
+     * relativize defensively in case a future report ships absolute paths.
+     */
+    List<SastSkippedFile> parseOpengrepSkippedFiles(Path json, String checkoutPath) {
+        if (!Files.exists(json)) {
+            return List.of();
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        if (report == null || report.skippedFiles == null) {
+            return List.of();
+        }
+        List<SastSkippedFile> out = new ArrayList<>();
+        for (OpengrepSkippedFile sf : report.skippedFiles) {
+            if (sf == null || sf.path == null) {
+                continue;
+            }
+            String rel = relativize(sf.path, checkoutPath);
+            if (isPathOutsideCheckout(rel)) {
+                log.warn("Dropping Opengrep skipped-file entry with a path outside the checkout: {}", sf.path);
+                continue;
+            }
+            List<String> types = sf.errorTypes == null ? List.of()
+                    : sf.errorTypes.stream().filter(java.util.Objects::nonNull)
+                            .map(ScannerOutputParser::normalizeSastErrorType).filter(t -> !t.isEmpty())
+                            .distinct().toList();
+            out.add(new SastSkippedFile(rel, types));
+        }
+        return out;
+    }
+
+    private static final java.util.regex.Pattern SAST_TYPE_NAME =
+            java.util.regex.Pattern.compile("^[\\[\"\\s]*([A-Za-z0-9 _.-]*)");
+
+    /**
+     * An Opengrep error-type NAME (review S1): only the LEADING run of {@code [A-Za-z0-9 _.-]} characters (after
+     * any leading {@code [}/{@code "}), at most 48 chars — so a stringified payload such as
+     * {@code ["PartialParsing",[{"path":"/work/checkout/…","start":{"line":6…}}]]} yields {@code PartialParsing}
+     * and never a container path or line range.
+     */
+    static String normalizeSastErrorType(String type) {
+        java.util.regex.Matcher m = SAST_TYPE_NAME.matcher(type);
+        String t = m.find() ? m.group(1).strip() : "";
+        return t.length() > 48 ? t.substring(0, 48).strip() : t;
+    }
+
+    /**
+     * The number of files Opengrep only PARTIALLY parsed ({@code partiallyParsedFiles}, review S2): analyzed and
+     * reconciled normally (NOT frozen); surfaced only as "partially parsed (N)". 0 when absent or invalid.
+     */
+    int parseOpengrepPartiallyParsed(Path json) {
+        if (!Files.exists(json)) {
+            return 0;
+        }
+        OpengrepReport report = read(json, OpengrepReport.class);
+        return report == null || report.partiallyParsedFiles == null ? 0 : Math.max(0, report.partiallyParsedFiles);
+    }
+
+    /**
      * Parses Checkov JSON ({@code checkov.json}) into one {@link RawFinding} per IaC misconfiguration (M6,
      * D-054). The output is a JSON ARRAY of per-{@code check_type} reports when several frameworks match, a
      * single report object for one framework, or a summary-only object (no {@code results}) when nothing matched
@@ -424,7 +496,47 @@ public class ScannerOutputParser {
                 line = range.get(0).asInt();
             }
             String severityLabel = text(c, "severity"); // usually null for OSS checks → base MEDIUM (D-054)
-            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel));
+            // D-083: Checkov's human description becomes the IaC title (carried via advisory_summary, reused);
+            // the check_id remains the subtitle and the fingerprint input.
+            String checkName = text(c, "check_name");
+            out.add(RawFinding.iac(checkId, filePath, resource, line, severityLabel, checkName));
+        }
+    }
+
+    /**
+     * Reads {@code languages.json} (M8.5, D-081) → the ordered language list the worker stores on the repository.
+     * A missing or unparseable file, or a non-"ok" status, yields an empty list — the worker then leaves the
+     * stored languages unchanged (a detection failure never clears them).
+     */
+    List<String> readLanguages(Path file) {
+        if (!Files.exists(file)) {
+            return List.of();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(file.toFile());
+            if (root == null) {
+                return List.of();
+            }
+            // N-4: honour the detector's status — a non-"ok" status (an error result) yields an empty list, so
+            // the worker leaves the stored languages unchanged. A missing status field is treated as ok (the
+            // languages array, if present and well-formed, is used) for backward compatibility.
+            com.fasterxml.jackson.databind.JsonNode status = root.get("status");
+            if (status != null && status.isTextual() && !"ok".equals(status.asText())) {
+                return List.of();
+            }
+            com.fasterxml.jackson.databind.JsonNode arr = root.get("languages");
+            if (arr == null || !arr.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                if (n != null && n.isTextual() && !n.asText().isBlank()) {
+                    out.add(n.asText());
+                }
+            }
+            return out;
+        } catch (java.io.IOException e) {
+            return List.of();
         }
     }
 
@@ -939,6 +1051,14 @@ public class ScannerOutputParser {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static final class OpengrepReport {
         public List<OpengrepResult> results;
+        public List<OpengrepSkippedFile> skippedFiles;
+        public Integer partiallyParsedFiles;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class OpengrepSkippedFile {
+        public String path;
+        public List<String> errorTypes;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

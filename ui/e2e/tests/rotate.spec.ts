@@ -22,9 +22,11 @@ test("the Rotate token dialog sends the PUT and never shows the token after subm
   });
 
   await signIn(page, "/connect");
-  await expect(page.getByRole("heading", { name: "GitLab connections" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected sources" })).toBeVisible();
   const row = page.getByTestId("connection-row").first();
-  await row.getByRole("button", { name: "Rotate token" }).click();
+  await row.getByRole("button", { name: "Source actions" }).click();
+
+  await page.getByRole("button", { name: "Rotate token" }).click();
 
   const dialog = page.getByRole("dialog");
   const tokenInput = dialog.getByLabel("New access token");
@@ -53,7 +55,9 @@ test("a target-mismatch rotation shows an inline error, clears the token, and do
 
   await signIn(page, "/connect");
   const row = page.getByTestId("connection-row").first();
-  await row.getByRole("button", { name: "Rotate token" }).click();
+  await row.getByRole("button", { name: "Source actions" }).click();
+
+  await page.getByRole("button", { name: "Rotate token" }).click();
 
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("New access token").fill(SECRET);
@@ -63,5 +67,5 @@ test("a target-mismatch rotation shows an inline error, clears the token, and do
   await expect(dialog.getByText(/different target/i)).toBeVisible();
   await expect(dialog.getByLabel("New access token")).toHaveValue("");
   await expect(dialog).not.toContainText(SECRET);
-  await expect(page.getByRole("heading", { name: "GitLab connections" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected sources" })).toBeVisible();
 });

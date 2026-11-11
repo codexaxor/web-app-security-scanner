@@ -20,6 +20,19 @@ readonly SMOKE_PROJECT="secscan-smoke"
 
 cd "$(dirname "$0")/.."
 
+# D-098: the smoke stack gets its own pinned subnet (never the default stack's 10.203.0.0/24) and trusts only the
+# ui nginx's pinned address in it (review SF-3: never the whole subnet). Override with SECSCAN_SMOKE_SUBNET /
+# SECSCAN_SMOKE_UI_IP (together) if they clash with a local/VPN route.
+export SECSCAN_COMPOSE_SUBNET="${SECSCAN_SMOKE_SUBNET:-10.203.1.0/24}"
+export SECSCAN_UI_IP="${SECSCAN_SMOKE_UI_IP:-10.203.1.10}"
+export SECSCAN_TRUSTED_PROXIES="$SECSCAN_UI_IP"
+
+# D-102: give the smoke worker its OWN reaper instance id, distinct from the dev stack's ("dev"). It shares the
+# dev work root (README-provisioned, already owned by the worker user): each instance keeps its scan dirs in its
+# own sub-tree <workRoot>/<instanceId>/, and the reaper only ever looks in its own, so dev and smoke never reap
+# each other's containers or dirs.
+export SECSCAN_INSTANCE_ID="${SECSCAN_SMOKE_INSTANCE_ID:-smoke}"
+
 # An inline override that (a) excludes the ui and (b) gives postgres/api random loopback host ports so the smoke
 # stack cannot collide with a running dev stack on 5432/8080.
 OVERRIDE="$(mktemp -t secscan-smoke-override.XXXXXX.yml)"

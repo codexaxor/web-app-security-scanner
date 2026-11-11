@@ -63,7 +63,7 @@ class RepositoryBranchesIT extends AbstractGitLabIT {
                 + "\"commit\":{\"committed_date\":\"2026-10-20T10:00:00Z\"}}]";
         gitlab.stubBranches(8101L, body, 2, 1);
 
-        var pageResult = service.listBranches(repo.getId(), null, 0, 50);
+        var pageResult = service.listBranches(Workspace.DEFAULT_ID, repo.getId(), null, 0, 50);
 
         assertThat(pageResult.totalElements()).isEqualTo(2);
         assertThat(pageResult.content()).extracting(BranchView::name).containsExactly("main", "dev");
@@ -83,7 +83,7 @@ class RepositoryBranchesIT extends AbstractGitLabIT {
                 .collect(Collectors.joining(",")) + "]";
         gitlab.stubBranches(8102L, body, 150, 2);
 
-        var pageResult = service.listBranches(repo.getId(), null, 0, 100);
+        var pageResult = service.listBranches(Workspace.DEFAULT_ID, repo.getId(), null, 0, 100);
 
         assertThat(pageResult.content()).hasSize(100);
         assertThat(pageResult.totalElements()).isEqualTo(150);
@@ -95,7 +95,7 @@ class RepositoryBranchesIT extends AbstractGitLabIT {
         Repository repo = seedRepo(8103L);
         gitlab.stubBranches(8103L, "[{\"name\":\"release/1.2\",\"default\":false,\"protected\":true}]", 1, 1);
 
-        var pageResult = service.listBranches(repo.getId(), "release/", 0, 50);
+        var pageResult = service.listBranches(Workspace.DEFAULT_ID, repo.getId(), "release/", 0, 50);
 
         assertThat(pageResult.content()).extracting(BranchView::name).containsExactly("release/1.2");
         gitlab.server().verify(getRequestedFor(urlPathEqualTo("/api/v4/projects/8103/repository/branches"))
@@ -105,7 +105,7 @@ class RepositoryBranchesIT extends AbstractGitLabIT {
     @Test
     void rejectsAnOverlongSearchWith400() {
         Repository repo = seedRepo(8104L);
-        assertThatThrownBy(() -> service.listBranches(repo.getId(), "x".repeat(101), 0, 50))
+        assertThatThrownBy(() -> service.listBranches(Workspace.DEFAULT_ID, repo.getId(), "x".repeat(101), 0, 50))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }

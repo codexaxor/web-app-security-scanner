@@ -10,7 +10,15 @@ const TERMINAL = new Set(["completed", "partial", "failed"]);
  * reaches a terminal status, and on terminal refetch the feed/dashboard/repository counts. With no worker (the
  * e2e stack) the scan stays queued — the polling-to-terminal path is exercised by intercepting the status call.
  */
-export default function ScanButton({ repositoryId, disabled }: { repositoryId: string; disabled?: boolean }) {
+export default function ScanButton({
+  repositoryId,
+  disabled,
+  primary = false,
+}: {
+  repositoryId: string;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
   const [scanId, setScanId] = useState<string | null>(null);
 
   const start = useMutation({
@@ -43,7 +51,7 @@ export default function ScanButton({ repositoryId, disabled }: { repositoryId: s
   const busy = scanning || start.isPending;
   return (
     <button
-      className="btn btn-secondary btn-sm"
+      className={primary ? "btn btn-primary" : "btn btn-secondary btn-sm"}
       disabled={disabled || busy}
       onClick={() => start.mutate()}
       title={

@@ -11,7 +11,9 @@ const ALL_IGNORE = "40000000-0000-0000-0000-000000000014"; // SF-1: single open 
 
 test("SF-7: an SCA group with several fixed versions shows the 'see each location' fix line", async ({ page }) => {
   await signIn(page, `/feed/${MULTI_FIX}`);
-  await expect(page.getByText("Several fixed versions — see each location below.")).toBeVisible();
+  // M8.6: the fix guidance is the deterministic "How do I fix it?" text (issueFix); several fixed versions →
+  // "see each location".
+  await expect(page.getByTestId("howtofix")).toContainText("see each location");
 });
 
 test("SF-1: ignoring the whole group flips the panel header to 'Ignored' (no band) without a reload", async ({
@@ -20,7 +22,8 @@ test("SF-1: ignoring the whole group flips the panel header to 'Ignored' (no ban
 }) => {
   await signIn(page, `/feed/${ALL_IGNORE}`);
   const header = page.locator(".panel-header");
-  await expect(header.locator(".pill")).toContainText("High"); // severity 80 before
+  // M8.6: the header severity control is now a gauge (score + band), not a pill.
+  await expect(header.locator(".gauge-band")).toHaveText("High"); // severity 80 before
 
   await page.getByRole("button", { name: "Ignore group…" }).click();
   const dialog = page.getByRole("dialog", { name: "Ignore finding" });
@@ -28,9 +31,9 @@ test("SF-1: ignoring the whole group flips the panel header to 'Ignored' (no ban
   await dialog.getByRole("button", { name: "Ignore", exact: true }).click();
   await expect(dialog).toBeHidden();
 
-  // The header pill became the neutral "No severity (ignored)" pill — no page reload happened.
-  await expect(header.getByTitle("No severity (ignored)")).toBeVisible();
-  await expect(header.locator(".pill")).not.toContainText("High");
+  // The header gauge became the neutral "No severity (ignored)" gauge — no page reload happened.
+  await expect(header.getByLabel("No severity (ignored)")).toBeVisible();
+  await expect(header.locator(".gauge-band")).toHaveCount(0);
 
   // Oracle: the group's sub-issues are all ignored (so the group left Focus / has a null score).
   const subs = await apiGet<Paged<SubIssueView>>(request, `/api/v1/issue-groups/${ALL_IGNORE}/sub-issues`);

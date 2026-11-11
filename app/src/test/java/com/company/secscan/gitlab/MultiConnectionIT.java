@@ -45,21 +45,23 @@ class MultiConnectionIT extends AbstractGitLabIT {
 
     @Test
     void aGroupAndAProjectConnectionCoexist() {
-        assertThat(service.create(gitlab.baseUrl(), TOKEN, "group", "services").ok()).isTrue();
-        assertThat(service.create(gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak").ok()).isTrue();
+        assertThat(service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services").ok()).isTrue();
+        assertThat(service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project",
+                "services/ib-keycloak").ok()).isTrue();
 
         List<GitlabConnection> all = connections.findByWorkspaceId(Workspace.DEFAULT_ID);
         assertThat(all).hasSize(2);
         assertThat(all).anyMatch(GitlabConnection::isGroup);
         assertThat(all).anyMatch(GitlabConnection::isProject);
-        assertThat(service.list()).hasSize(2);
+        assertThat(service.list(Workspace.DEFAULT_ID)).hasSize(2);
     }
 
     @Test
     void creatingTheSameProjectTwiceIsRejected() {
-        assertThat(service.create(gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak").ok()).isTrue();
+        assertThat(service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project",
+                "services/ib-keycloak").ok()).isTrue();
 
-        var second = service.create(gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak");
+        var second = service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "project", "services/ib-keycloak");
 
         assertThat(second.ok()).isFalse();
         assertThat(second.errorCode()).isEqualTo(GitLabError.CONNECTION_EXISTS.name());
@@ -74,7 +76,7 @@ class MultiConnectionIT extends AbstractGitLabIT {
         CountDownLatch start = new CountDownLatch(1);
         Callable<ConnectionTestResult> create = () -> {
             start.await();
-            return service.create(gitlab.baseUrl(), TOKEN, "group", "services");
+            return service.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
         };
         try {
             Future<ConnectionTestResult> f1 = pool.submit(create);

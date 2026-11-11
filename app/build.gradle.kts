@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.spring.boot)
     alias(libs.plugins.spring.dependency.management)
@@ -35,6 +37,7 @@ dependencies {
 //   - "live-opengrep" (real Opengrep SAST):    `./gradlew :app:test -PliveOpengrep --tests "*Opengrep*"`
 //   - "live-checkov"  (real Checkov IaC):      `./gradlew :app:test -PliveCheckov  --tests "*Checkov*"`
 //   - "live-eol"      (endoflife.date / EOL container): `./gradlew :app:test -PliveEol --tests "*Eol*"`
+//   - "live-reaper"   (real Docker daemon + scanner image): `./gradlew :app:test -PliveReaper --tests "*ScanReaperIT*"`
 // A test needing several tools carries several tags (e.g. M6ScannerImageIT is live-opengrep AND live-checkov),
 // so it runs only when ALL its flags are passed.
 tasks.withType<Test> {
@@ -54,7 +57,34 @@ tasks.withType<Test> {
         if (!project.hasProperty("liveEol")) {
             excludeTags("live-eol")
         }
+        if (!project.hasProperty("liveReaper")) {
+            excludeTags("live-reaper")
+        }
     }
+}
+
+// Content hash of scanner-image/, mirroring buildScannerImage's find-based formula (skip dotfiles and
+// __pycache__). Declared as an input property on :app:test and every in-image test task so their up-to-date
+// checks are tied to the scanner image's content: a change to ANY baked scanner file re-runs those tasks
+// against the freshly rebuilt image instead of staying UP-TO-DATE / FROM-CACHE. Without it a scanner-image
+// change rebuilds the image (buildScannerImage reruns) but leaves :app:test UP-TO-DATE, so the ITs never
+// exercise the new image (the M8.15 S1 gate miss). It need not equal the docker label string — Gradle only
+// compares it against this task's own previous value, so any stable content hash detects the change.
+val scannerImageContentHash: Provider<String> = providers.provider {
+    val base = rootProject.file("scanner-image")
+    fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { b -> "%02x".format(b) }
+    val manifest = base.walkTopDown()
+        .filter { it.isFile }
+        .filterNot { f ->
+            f.relativeTo(base).invariantSeparatorsPath.split('/')
+                .any { seg -> seg.startsWith(".") || seg == "__pycache__" }
+        }
+        .map { f -> f.relativeTo(base).invariantSeparatorsPath + "\u0000" + sha256Hex(f.readBytes()) }
+        .sorted()
+        .joinToString("\n")
+    sha256Hex(manifest.toByteArray(Charsets.UTF_8))
 }
 
 // Builds the disposable scanner image (scanner-image/) that the worker ITs launch. The tag must match
@@ -85,6 +115,12 @@ val buildScannerImage by tasks.registering(Exec::class) {
 
 tasks.named<Test>("test") {
     dependsOn(buildScannerImage)
+    // Re-run the suite (incl. the worker ITs that launch the scanner image) whenever the image content changes.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    // The ITs read fixtures/ at run time (copied into temp git repos and scanned), so a fixture change must re-run
+    // them instead of leaving :app:test UP-TO-DATE (M8.15 review N3).
+    inputs.dir(rootProject.file("fixtures")).withPropertyName("fixtures")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // D-039 gate: the static Gradle resolver (scanner-image/gradle_resolver.py) is Python, so its unit tests run
@@ -158,6 +194,22 @@ val scopeInventoryTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-081 gate (M8.5): the static language detector (scanner-image/lang_detect.py) is Python; host-run unit tests
+// under the DEFAULT build (stdlib unittest; sizes files only, no network), mirroring eolDetectTest.
+val langDetectTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the static language detector's Python unit tests (M8.5, D-081)."
+    val scannerDir = rootProject.file("scanner-image")
+    workingDir = scannerDir
+    inputs.file(scannerDir.resolve("lang_detect.py")).withPropertyName("langDetect")
+    inputs.file(scannerDir.resolve("lang_detect_test.py")).withPropertyName("langDetectTest")
+    val marker = layout.buildDirectory.file("lang-detect-test.ok")
+    outputs.file(marker)
+    environment("PYTHONDONTWRITEBYTECODE", "1")
+    commandLine("python3", "-B", "lang_detect_test.py")
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 // D-076 gate (SF-5): the scanner's branch-name validator (secscan-lib.sh valid_branch_name) must agree with the
 // Java core.scan.BranchName rules on the SHARED scanner-image/branch-vectors.json, and run-scan.sh must refuse an
 // invalid SCAN_BRANCH before git. Run INSIDE the built image (busybox sh + the shipped scripts), not host dash,
@@ -173,6 +225,8 @@ val branchVectorsInImageTest by tasks.registering(Exec::class) {
     inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
     inputs.file(scannerDir.resolve("branch-vectors.json")).withPropertyName("branchVectors")
     inputs.file(scannerDir.resolve("branch_vectors_test.py")).withPropertyName("branchVectorsTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
     val marker = layout.buildDirectory.file("branch-vectors-in-image-test.ok")
     outputs.file(marker)
     commandLine(
@@ -185,6 +239,197 @@ val branchVectorsInImageTest by tasks.registering(Exec::class) {
     doLast { marker.get().asFile.writeText("ok\n") }
 }
 
+// D-081 gate (M8.5, review N-5): the language detector's filesystem-sensitive cases (symlink-out not followed,
+// vendored dirs skipped, empty repo) run INSIDE the built scanner image against the SHIPPED lang_detect.py, so
+// os.walk/islink/realpath behaviour is proven on the real container runtime, not only the host. Runs as
+// --user 0 for a logic-only check (like branchVectorsInImageTest); the production USER 10001 is unchanged.
+val langDetectInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run the language detector's filesystem tests inside the scanner image (M8.5, D-081, N-5)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("lang_detect.py")).withPropertyName("langDetect")
+    inputs.file(scannerDir.resolve("lang_detect_in_image_test.py")).withPropertyName("langDetectInImageTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("lang-detect-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/lang_detect_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// D-104 gate (M8.15 S2): the SAST exclusion lists (deny-list + category-exclusion) are applied INSIDE the
+// image, so verify them there against the SHIPPED baked rules — the category list regenerates byte-for-byte
+// (diff gate), no excluded id is dead or belongs to an existing pack, and --exclude-rule actually removes
+// every listed id from a synthetic trigger scan. Runs as --user 0 (logic-only, like the sibling in-image
+// tests); production USER 10001 + hardening unchanged.
+val opengrepExclusionsInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the SAST deny-list + category exclusions inside the scanner image (D-104, M8.15 S2)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("gen_category_exclusions.py")).withPropertyName("genCategoryExclusions")
+    inputs.file(scannerDir.resolve("opengrep-denylist.txt")).withPropertyName("denylist")
+    inputs.file(scannerDir.resolve("opengrep-excluded-by-category.txt")).withPropertyName("categoryExclusions")
+    inputs.file(scannerDir.resolve("opengrep_exclusions_in_image_test.py")).withPropertyName("exclusionsTest")
+    inputs.file(scannerDir.resolve("opengrep-existing-packs-check-ids.txt")).withPropertyName("existingPacksGolden")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("opengrep-exclusions-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-e", "HOST=/host",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/opengrep_exclusions_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// D-104 gate (M8.15 S3): Opengrep must load rules containing non-ASCII text, which it only does under a UTF-8
+// locale. Proven inside the image: C.UTF-8 loads+fires a non-ASCII rule, a forced non-UTF-8 locale crashes on
+// it, and run-scan.sh sets C.UTF-8 for the opengrep scan. --user 0 logic-only (like the sibling in-image tests).
+val opengrepLocaleInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify Opengrep loads non-ASCII rules under C.UTF-8 inside the scanner image (D-104, M8.15 S3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
+    inputs.file(scannerDir.resolve("opengrep_locale_in_image_test.py")).withPropertyName("localeTest")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("opengrep-locale-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0",
+        "-e", "HOST=/host",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/opengrep_locale_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// D-104 gate (M8.15 S6): recall + canary leak. Scans fixtures/sast-recall THE PRODUCTION WAY (real run-scan.sh
+// over a file:// clone) inside the built image, asserting every expected (check_id, file) fires for the six new
+// packs, negatives stay clean, no denied/category-excluded id appears, and the planted canary secret never
+// reaches /out or the logs. --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastRecallInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Run SAST recall + canary-leak checks for the new packs inside the scanner image (D-104, M8.15 S6)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-recall")
+    inputs.file(scannerDir.resolve("sast_recall_in_image_test.py")).withPropertyName("recallTest")
+    inputs.file(scannerDir.resolve("run-scan.sh")).withPropertyName("runScan")
+    inputs.dir(fixtureDir).withPropertyName("recallFixture")
+    // Runs INSIDE the built image, so tie its up-to-date check to the whole image content, not just these files.
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-recall-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "SCAN_CLONE_URL=file:///tmp/repo",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_recall_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// D-104 gate (M8.15 S7): the custom MIT rules (scorecard-driven) must fire on their positive fixture and stay
+// silent on their negative, inside the built image, in the default build. --user 0 logic-only (like the sibling
+// in-image tests); production hardening unchanged.
+val customRulesInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the custom MIT SAST rules fire on positives + stay silent on negatives (D-104, M8.15 S7)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-custom")
+    inputs.file(scannerDir.resolve("custom_rules_in_image_test.py")).withPropertyName("customRulesTest")
+    inputs.dir(scannerDir.resolve("opengrep-rules-custom")).withPropertyName("customRules")
+    inputs.dir(fixtureDir).withPropertyName("customFixtures")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("custom-rules-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/custom_rules_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// M8.15 review B3 gate: the SAST FAILURE path. Opengrep's --verbose run log quotes scanned source on a parse error;
+// it must never reach /out or run-scan.sh's stdout/stderr (= the stored scan_task log excerpt). Runs the REAL
+// run-scan.sh over fixtures/sast-fail-canary twice inside the built image — once normally, once with an opengrep
+// PATH shim that runs the real opengrep then exits 2 — and asserts the canary is only ever in the in-container
+// verbose log. --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastFailureCanaryInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify the SAST failure path never leaks the verbose run log (M8.15 review B3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val fixtureDir = rootProject.file("fixtures/sast-fail-canary")
+    inputs.file(scannerDir.resolve("sast_failure_canary_in_image_test.py")).withPropertyName("failureCanaryTest")
+    inputs.dir(fixtureDir).withPropertyName("failCanaryFixture")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-failure-canary-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_failure_canary_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
+// M8.15 review S1/S2/S3 gate: SAST skipped-file classification in the built image against REAL Opengrep 1.31.0
+// output (app/src/test/resources/samples/opengrep/skipped/) — real-sample equality with the parser test's
+// sanitized sample, unexplained-failure freeze, normalized types, fail-closed (unit + end-to-end via run-scan.sh).
+// --user 0 logic-only (like the sibling in-image tests); production hardening unchanged.
+val sastSkippedFilesInImageTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Verify SAST skipped-file classification on real Opengrep output (M8.15 review S1/S2/S3)."
+    dependsOn(buildScannerImage)
+    val scannerDir = rootProject.file("scanner-image")
+    val samplesDir = project.file("src/test/resources/samples/opengrep/skipped")
+    val fixtureDir = rootProject.file("fixtures/sast-fail-canary")
+    inputs.file(scannerDir.resolve("sast_skipped_in_image_test.py")).withPropertyName("skippedTest")
+    inputs.dir(samplesDir).withPropertyName("skippedSamples")
+    inputs.dir(fixtureDir).withPropertyName("failCanaryFixture")
+    inputs.property("scannerImageContentHash", scannerImageContentHash)
+    val marker = layout.buildDirectory.file("sast-skipped-files-in-image-test.ok")
+    outputs.file(marker)
+    commandLine(
+        "docker", "run", "--rm", "--user", "0", "--network", "none",
+        "-e", "SAMPLES=/samples", "-e", "FIXTURE=/fixture",
+        "-v", scannerDir.absolutePath + ":/host:ro",
+        "-v", samplesDir.absolutePath + ":/samples:ro",
+        "-v", fixtureDir.absolutePath + ":/fixture:ro",
+        "--entrypoint", "python3", "secscan-scanner:8.21.2",
+        "-I", "/host/sast_skipped_in_image_test.py",
+    )
+    doLast { marker.get().asFile.writeText("ok\n") }
+}
+
 tasks.named("check") {
-    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, branchVectorsInImageTest)
+    dependsOn(gradleResolverTest, eolDetectTest, secscanConfigTest, scopeInventoryTest, langDetectTest,
+        branchVectorsInImageTest, langDetectInImageTest, opengrepExclusionsInImageTest,
+        opengrepLocaleInImageTest, sastRecallInImageTest, customRulesInImageTest, sastFailureCanaryInImageTest,
+        sastSkippedFilesInImageTest)
 }

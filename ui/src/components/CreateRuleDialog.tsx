@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "../api";
 import { invalidateFor } from "../queryClient";
-import ErrorBanner from "./ErrorBanner";
+import InlineError from "./InlineError";
 import Dialog from "./Dialog";
 import Button from "./Button";
 
@@ -49,7 +49,7 @@ export default function CreateRuleDialog({
   return (
     <Dialog title="Create ignore rule" onClose={onClose} variant="center">
       <h2>Create ignore rule</h2>
-      {create.error ? <ErrorBanner error={create.error} /> : null}
+      {create.error ? <InlineError error={create.error} variant="field" /> : null}
       <div className="form">
         <div className="field">
           <label htmlFor="rule-scope">Scope</label>

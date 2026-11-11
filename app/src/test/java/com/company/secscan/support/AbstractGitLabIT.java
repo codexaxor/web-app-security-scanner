@@ -72,6 +72,8 @@ public abstract class AbstractGitLabIT {
     private IssueGroupRepository issueGroupsForCleanup;
     @Autowired
     private RepositoryEventRepository repositoryEventsForCleanup;
+    @Autowired
+    private com.company.secscan.auth.RateLimits rateLimitsForCleanup;
 
     /**
      * The container is shared across IT classes, so clean the tables before each test in FK-safe order (issue
@@ -80,6 +82,7 @@ public abstract class AbstractGitLabIT {
      */
     @BeforeEach
     void cleanDatabase() {
+        rateLimitsForCleanup.clear();   // M8.10: in-memory login/sign-up limiters outlive a test in a cached context
         triageEventsForCleanup.deleteAllInBatch();
         subIssuesForCleanup.deleteAllInBatch();
         ignoreRulesForCleanup.deleteAllInBatch(); // M7: after sub_issue (FK ON DELETE SET NULL)

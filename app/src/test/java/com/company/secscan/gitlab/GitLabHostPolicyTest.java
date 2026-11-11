@@ -43,6 +43,15 @@ class GitLabHostPolicyTest {
     }
 
     @Test
+    void allowsHttpForAllowlistedIpv6Loopback() {   // N-3: URI.getHost() returns "[::1]" for an IPv6 literal
+        GitLabHostPolicy policy = new GitLabHostPolicy("[::1]");
+
+        // Over http the loopback-scheme exemption must recognise the bracketed IPv6 literal (the old "::1"
+        // clause never matched, so this would have failed with "GitLab must be reached over https").
+        assertThatCode(() -> policy.requireAllowed("http://[::1]:8080")).doesNotThrowAnyException();
+    }
+
+    @Test
     void parsesCommaSeparatedHostsCaseInsensitively() {
         GitLabHostPolicy policy = new GitLabHostPolicy(" GitLab.Celloscope.NET , other.example.com ");
 
@@ -64,5 +73,24 @@ class GitLabHostPolicyTest {
         assertThat(new GitLabHostPolicy("gitlab.celloscope.net").startupSummary())
                 .contains("1 host(s)")
                 .contains("gitlab.celloscope.net");
+    }
+
+    @Test
+    void builtinSaasHostsAreAllowedByDefault() {
+        // The Spring constructor merges the built-in SaaS hosts unless they are switched off (M8.7 approval 17).
+        GitLabHostPolicy policy = new GitLabHostPolicy("gitlab.celloscope.net", true);
+        assertThat(policy.isAllowedHost("github.com")).isTrue();
+        assertThat(policy.isAllowedHost("api.github.com")).isTrue();
+        assertThat(policy.isAllowedHost("gitlab.com")).isTrue();
+        assertThat(policy.isAllowedHost("gitlab.celloscope.net")).isTrue();
+        assertThatCode(() -> policy.requireAllowed("https://github.com")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void builtinSaasCanBeSwitchedOffForEgressLockedDeployments() {
+        GitLabHostPolicy policy = new GitLabHostPolicy("gitlab.celloscope.net", false);
+        assertThat(policy.isAllowedHost("github.com")).isFalse();
+        assertThat(policy.isAllowedHost("gitlab.com")).isFalse();
+        assertThat(policy.isAllowedHost("gitlab.celloscope.net")).isTrue();
     }
 }

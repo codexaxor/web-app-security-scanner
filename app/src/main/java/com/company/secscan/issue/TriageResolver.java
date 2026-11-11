@@ -107,6 +107,30 @@ public final class TriageResolver {
                 .orElse(null);
     }
 
+    /**
+     * D-083 (OD-19): whether an ignored finding's hold is <em>re-derivable</em> — i.e. structural and so re-applies
+     * to any equivalent live finding, which makes it safe to solve a now-absent fingerprint while preserving the
+     * user's intent on the present one. True when an auto cause holds it (its {@code auto_ignore_reason} is set,
+     * persisted every reconcile — SF1) or a group/path/cve/rule-scope rule matches it. FALSE when a
+     * <b>sub-issue-scope</b> manual ignore matches it (an explicit human decision on this exact finding, kept for
+     * its audit trail — never retired), even if another cause also applies. Used by the reconcile branch-switch
+     * retire ({@link TriageApplier}) and the one-off retire pass ({@code IgnoredOrphanRetirer}).
+     */
+    public static boolean isHoldReDerivable(SubIssue sub, String groupKey, List<IgnoreRule> rules) {
+        IgnoreMatcher.Finding f = finding(sub, groupKey);
+        for (IgnoreRule r : rules) {
+            if (IgnoreMatcher.IgnoreRuleScopes.SUBISSUE.equals(r.getScope())
+                    && IgnoreMatcher.matches(
+                            new IgnoreMatcher.Rule(r.getScope(), r.getRepositoryId(), r.getMatchValue()), f)) {
+                return false; // explicit per-finding human decision — preserved
+            }
+        }
+        if (firstMatchingRule(f, rules) != null) {
+            return true; // a group/path/cve/rule rule holds it (structural)
+        }
+        return sub.getAutoIgnoreReason() != null; // an auto cause holds it (SF1 persisted)
+    }
+
     /** The earliest ({@code created_at}, {@code id}) rule that matches {@code f}, or null (D-063 ordering). */
     static IgnoreRule firstMatchingRule(IgnoreMatcher.Finding f, List<IgnoreRule> rules) {
         return rules.stream()

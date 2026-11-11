@@ -38,14 +38,15 @@ class ScanCreatedAtIT extends AbstractGitLabIT {
         Repository repo = repositories.save(new Repository(WORKSPACE, conn.getId(), 9301L, "svc/scan", "main",
                 List.of("Java")));
 
-        ScanView view = scanService.startManual(repo.getId());
+        ScanView view = scanService.startManual(Workspace.DEFAULT_ID, repo.getId());
         assertThat(view.createdAt()).isNotNull(); // R1 — was null before the @Generated(INSERT) fix
         assertThat(view.status()).isEqualTo(Scan.STATUS_QUEUED);
     }
 
     @Test
     void postIgnoreRuleReturnsANonNullCreatedAt() {
-        IgnoreRuleView rule = triageService.createRule("cve", null, "CVE-2022-42889", "offline build tool only");
+        IgnoreRuleView rule = triageService.createRule(Workspace.DEFAULT_ID, "cve", null, "CVE-2022-42889",
+                "offline build tool only");
         assertThat(rule.createdAt()).isNotNull(); // R4 — Ignored view's createdAt is never null/blank
     }
 }

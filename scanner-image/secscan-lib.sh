@@ -115,3 +115,64 @@ csproj_package_versions() {
     done
     unset _f _n _i _base _name _ver
 }
+
+# --- SAST (Opengrep) report helpers (M8.15 review B3/S1/S2/S3). Exercised in-image by
+# sast_failure_canary_in_image_test.py and sast_skipped_in_image_test.py against REAL Opengrep 1.31.0 output. ---
+
+# jq definition shared by the helpers below: an Opengrep error TYPE reduced to its variant NAME. A variant with a
+# payload is a JSON array — e.g. ["PartialParsing", [<locations: container paths + line ranges>]] — so we keep
+# only .[0]; of that we keep only the LEADING run of [A-Za-z0-9 _.-] characters (after any leading [ or "), capped
+# at 48 chars — so even a stringified payload can never carry a path, a line range or source text into a message.
+SAST_JQ_DEFS='def sast_type: (if type == "array" then .[0] else . end) | tostring | capture("^[\\[\" ]*(?<n>[A-Za-z0-9 _.-]*)").n | .[0:48] | rtrimstr(" ");'
+
+# sast_error_summary <opengrep-raw.json>
+#   The DISTINCT normalized Opengrep error types in the raw report, comma-separated, at most 5 then "+N more";
+#   "none" when there are none or the report is unreadable. Never a message, path or source text — this is the
+#   only Opengrep detail run-scan.sh prints when SAST fails (the --verbose run log is never printed, B3).
+sast_error_summary() {
+    _s="$(jq -r "$SAST_JQ_DEFS"'
+        [.errors[]? | .type | sast_type | select(length > 0)] | unique
+        | if length > 5 then (.[0:5] | join(", ")) + ", +" + ((length - 5) | tostring) + " more"
+          else join(", ") end' "$1" 2>/dev/null)" || _s=""
+    printf '%s' "${_s:-none}"
+    unset _s
+}
+
+# sast_skipped_files <opengrep-raw.json> <checkout-prefix-with-trailing-slash> <out.json>
+#   Classifies the files Opengrep could not FULLY analyze (D-104; owner decision in the M8.15 review, S2), from
+#   REAL Opengrep 1.31.0 behaviour (app/src/test/resources/samples/opengrep/skipped/README.md):
+#   - FROZEN — their SAST findings close nothing: an errors[] type other than PartialParsing (Timeout,
+#     "Syntax error", "Other syntax error" = a full parse failure, "Too many matches", OutOfMemory, any unknown
+#     type → fail safe); a paths.skipped reason exceeded_size_limit or insufficient_permissions; or
+#     analysis_failed_parser_or_internal_error on a path with NO errors[] entry (unexplained → fail safe).
+#   - PARTIALLY PARSED — scanned, reconciled normally, only COUNTED: an errors[] PartialParsing and nothing that
+#     freezes. (Opengrep also lists every errored file, incl. these, as paths.skipped
+#     analysis_failed_parser_or_internal_error; for a partially parsed file that reason is explained by its
+#     PartialParsing entry and does not freeze.)
+#   Only paths under <checkout-prefix> are kept, made repo-relative (a rule-file or other non-checkout path is
+#   dropped). Error types are normalized (sast_type). Writes
+#     {"skippedFiles":[{"path":…,"errorTypes":[…]}…], "partiallyParsedFiles": N}
+#   FAILS CLOSED: returns non-zero when the report cannot be classified — unparsable JSON, errors[] not an array,
+#   or paths.skipped absent/not an array (it is always an array under --verbose) — so the caller marks SAST
+#   failed (closes nothing) instead of reporting "ok, nothing skipped".
+sast_skipped_files() {
+    jq -e -c --arg co "$2" "$SAST_JQ_DEFS"'
+        def rel: if type == "string" and startswith($co) and (ltrimstr($co) | length) > 0
+                 then ltrimstr($co) else null end;
+        (if (.errors | type) == "array" then .errors else error("errors is not an array") end) as $rawerrs
+        | (if (.paths.skipped | type) == "array" then .paths.skipped
+           else error("paths.skipped missing (run without --verbose?)") end) as $rawskips
+        | [$rawerrs[] | {p: ((.location.path // .path) | rel), t: (.type | sast_type)}
+                      | select(.p != null and (.t | length) > 0)] as $errs
+        | [$rawskips[] | {p: (.path | rel), r: (.reason | sast_type)} | select(.p != null)] as $skips
+        | [$errs[].p] as $errpaths
+        | ([$errs[] | select(.t != "PartialParsing")]
+           + [$skips[] | select(.r == "exceeded_size_limit" or .r == "insufficient_permissions") | {p, t: .r}]
+           + [$skips[] | select(.r == "analysis_failed_parser_or_internal_error")
+                       | select(.p | IN($errpaths[]) | not) | {p, t: .r}]) as $freeze
+        | [$freeze[].p] as $frozenpaths
+        | {skippedFiles: ($freeze | group_by(.p) | map({path: .[0].p, errorTypes: (map(.t) | unique)})),
+           partiallyParsedFiles: ([$errs[] | select(.t == "PartialParsing") | .p] | unique
+                                  | map(select(IN($frozenpaths[]) | not)) | length)}
+    ' "$1" > "$3"
+}

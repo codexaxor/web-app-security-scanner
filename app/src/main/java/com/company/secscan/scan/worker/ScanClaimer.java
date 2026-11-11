@@ -23,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class ScanClaimer {
 
     private static final Logger log = LoggerFactory.getLogger(ScanClaimer.class);
+    /** Advisory-lock key for claim serialisation ("SCAN" + "CLAIM" as a stable constant). */
+    static final long CLAIM_LOCK_KEY = 0x5CA9_C1A1_0000_0001L;
 
     private final ScanJobRepository jobs;
     private final ScanStateService state;
@@ -34,13 +36,17 @@ public class ScanClaimer {
         this.workerId = buildWorkerId();
     }
 
-    /** Claims and leases up to {@code max} runnable jobs; returns their ids for the caller to process. */
+    /**
+     * Claims and leases up to {@code max} runnable jobs — at most one per workspace, and none for a workspace that
+     * already has a running job (D-097 fair use; the others wait in the queue). Returns their ids.
+     */
     @Transactional
     public List<UUID> claimBatch(int max) {
         if (max <= 0) {
             return List.of();
         }
         List<UUID> claimed = new ArrayList<>();
+        jobs.lockClaims(CLAIM_LOCK_KEY);   // D-097: one claimer at a time → one running job per workspace
         for (ScanJob job : jobs.claimable(max)) {
             job.lease(workerId);
             jobs.save(job);

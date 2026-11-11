@@ -91,7 +91,7 @@ class DashboardSummaryIT extends AbstractGitLabIT {
         UUID gOther = openGroup(other.getId(), otherRepo.getId(), "other", 99);
         openSub(other.getId(), gOther, otherRepo.getId(), "sca", "fp-other", 99);
 
-        DashboardSummaryView d = service.summary(false);
+        DashboardSummaryView d = service.summary(Workspace.DEFAULT_ID, false);
 
         // Group bands: only the active repo's 2 open groups (inactive + other excluded).
         assertThat(d.groupBands().critical()).isEqualTo(1);

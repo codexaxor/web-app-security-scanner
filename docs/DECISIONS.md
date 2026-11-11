@@ -14,6 +14,613 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-104 SAST coverage: six more language packs, noise control, taint, locale (2026-11-07, accepted)
+Context: a scan of `github.com/plexicus/simplest-sast-vulnerable @77baa1b` gave **0 Python SAST findings**
+because D-053 bakes only java/csharp/javascript/typescript language packs from opengrep/opengrep-rules
+@`f1d2b562b414783763fd02a6ed2736eaed622efa` (the AikidoSec pack is tiny). The architect verified Opengrep
+1.31.0 + that commit's `python/` pack finds SQLi, `os.system`, SSTI, pickle, `yaml.load`, `subprocess
+shell=True` and XXE at ERROR, and that Opengrep crashed with a `UnicodeDecodeError` loading rules under a
+non-UTF-8 locale. M8.15 widens SAST coverage without touching any fingerprint input.
+Decision (extends D-053; does NOT supersede it):
+- **Rule packs:** bake `python, go, php, ruby, kotlin, scala` from the **SAME pinned commit** `f1d2b56` — the SHA
+  is NOT bumped, because every `check_id` is a SAST fingerprint input (D-053) and a bump would re-fingerprint and
+  churn existing findings. New loaded check_ids (distinct): python 375, go 82, php 61, ruby 92, kotlin 14,
+  scala 27 (≈651 new; ≈1039 distinct across ten packs). **Licence:** these packs are **Commons Clause** (restricts
+  resale/SaaS) — the SAME flag D-053 already raised for the open "SAST rule licensing before any SaaS" SPEC item
+  and the D-005 note; INTERNAL USE OK, does NOT block M8.15. **NEVER** `semgrep/semgrep-rules`. Kotlin (14) and
+  Scala (27) coverage is **thin** (noted in the scorecard).
+- **Bake only rule YAML** (`*.yaml`/`*.yml`, excluding `*.test.yaml`/`*.test.yml`, which load 0 rules) — never the
+  packs' test SOURCE files (`.py`/`.go`/`.php`/`.html`). This also fixes the existing four packs (they `cp -r` the
+  whole dir today, shipping ~930 untrusted test-source files). The existing four packs' LOADED check_id set is
+  proven **identical** before/after the YAML-only change (opengrep `--verbose --max-log-list-entries` list
+  diffed: 388 distinct, unchanged), so no fingerprint churn.
+- **Deny-list (noise control):** a baked, commented `scanner-image/opengrep-denylist.txt` of **full check_ids**
+  (`opengrep-rules.<pack>.<dotted-dir>.<id>`, never short ids — `eval-detected` exists in both js and python).
+  Applied via Opengrep `--exclude-rule` (confirmed present on 1.31.0; `results[]` post-filter kept as fallback).
+  For audit/non-audit twins (e.g. `dangerous-system-call` vs `dangerous-system-call-audit`) we **DENY the `-audit`
+  twin** rather than extend the D-061 winner map — the audit twin fires on different lines than its base, so the
+  winner map (same-file co-occurrence only) would not suppress it. The deny-list may contain **only ids from the
+  six NEW packs**: denying an existing java/csharp/js/ts rule would make reconcile "solve" its live findings
+  (reads as fixed) — a separate decision, out of scope here. The final list is captured from REAL scanner output
+  (hit counts on the recall fixture + plexicus + one real repo; audit-only-hit evidence), never guessed, and
+  human-approved (mirrors D-061's "seeded from real output"). **Finalized (S2, from plexicus@77baa1b + PyGoat +
+  DVWA; a real Celloscope repo was waived by the architect):** `scanner-image/opengrep-denylist.txt` = **20**
+  full check_ids — the **8 audit twins with a base rule** (php `assert-use-audit` + 7 python `dangerous-*-audit`;
+  the base keeps the real-risk subset), the **11 `wp-*-audit`** WordPress-plugin audit rules, and
+  `python.flask.security.audit.avoid_app_run_with_bad_host` (binding `0.0.0.0` is normal in containers). The **3
+  `dangerous-asyncio-*-audit` orphans are KEPT** (no base rule → denying loses all async exec/shell coverage for
+  zero observed noise).
+- **Category exclusion (noise control, NEW six packs only):** the packs load non-security categories too (of 651
+  distinct new check_ids: 528 security, **122** in best-practice/compatibility/correctness/maintainability/
+  performance, 1 "other" = `python.flask.caching.flask-cache-query-string` (`caching`), KEPT). At scan time
+  Opengrep also `--exclude-rule`s every new-pack rule whose `metadata.category` ∈ {best-practice, **compatibility**,
+  correctness, maintainability, performance}. `compatibility` (the 25 python36/37 + django-compat version-portability
+  rules) was added in an M8.15 follow-up — version portability is not a security risk in a scanned repo; the single
+  `caching` rule is kept. The list is **generated** by `scanner-image/gen_category_exclusions.py` into the committed
+  `scanner-image/opengrep-excluded-by-category.txt` (per-pack: python 108, go 11, ruby 2, scala 1, php 0, kotlin 0);
+  `:app:opengrepExclusionsInImageTest` regenerates it in-image and **fails the build on any diff** so category
+  changes are reviewed. Rules with "other"/missing categories are KEPT. Both lists are applied via `--exclude-rule` (confirmed to take the full check_id on 1.31.0)
+  with a `run-scan.sh` `results[]` post-filter fallback; the in-image test proves every listed id is a real
+  loaded check_id (no dead/typo), belongs to no existing pack, and is actually removed from a trigger scan.
+- **Locale:** run Opengrep under `LANG=C.UTF-8 LC_ALL=C.UTF-8` so loading a rule with non-ASCII text cannot crash
+  with `UnicodeDecodeError`.
+- **Cross-function taint:** pass `--taint-intrafile` (intra-file inter-procedural taint; confirmed on 1.31.0). It
+  changes neither `rule_id`, `file_path` nor the normalized-snippet hash, so a rescan with the flag on does not
+  churn existing findings (0 triage_events for findings seen by both; taint-only NEW findings are allowed).
+  Default-on via `ScannerProperties.taintIntrafile` (delivered as `SAST_TAINT_INTRAFILE` → `run-scan.sh`). The
+  live `TaintRescanStabilityIT` flips OFF→ON on one commit of `fixtures/sast-taint` and proved matched findings
+  keep identical fingerprints with **0 triage_events** (observed 4 matched, 0 rescan events, 2 taint-only-new JS
+  findings). Measured taint marginal cost is ~2 s (~7 %) on PyGoat; the before→after SAST-time rise (≈2.3–2.5× on
+  small repos, from ~12 s to ~25–30 s) is dominated by the six new packs' rule set, not taint, and absolute times
+  are far below the 30-min timeout.
+- **Scan-time budget (resolved on a real Celloscope Java repo, `ib-api` @`807b6aa`, 2594 Java files):** SAST
+  wall time **119 s → 194 s** isolated (**1.63×**, +75 s; full-pipeline SAST step 203 s); full scan **276.5 s
+  (~4.6 min)** — SCA 54 s, SAST 203 s, the rest <5 s. Stop rule ("SAST >2× **and** +>60 s, **or** full scan
+  >15 min") **not triggered** (ratio <2×; full scan ≪15 min) → proceeded to S5/S6. Note (deferred register):
+  `java.lang.security.audit.formatted-sql-string` hit Opengrep's per-file **Timeout** (5 s/rule/file) on 1–2
+  large files under the heavier 10-pack+taint run (24→14 hits on this repo); a recall gap on very large files,
+  not an exclusion/taint-logic effect — revisit raising `--timeout` if it recurs.
+- **Uncovered-language warning (D-030):** reusing `lang_detect.py`, `ScanStateService` raises
+  `SAST_LANGUAGE_UNCOVERED` after each scan listing the detected SAST-eligible CODE languages that have no
+  Opengrep pack; the message names them and reads as a complete coverage-banner line (the UI shows it verbatim).
+  The pure classifier is `core` `SastLanguageCoverage`, three buckets covering every `lang_detect.py` name:
+  **covered** (the 10 packs: java/csharp/js/ts/python/go/php/ruby/kotlin/scala); **uncovered-eligible, reported**
+  (Groovy, Rust, C, C++, Swift, PowerShell, **Vue, Svelte**); **not-SAST, never reported** (HTML, CSS/SCSS/Sass/
+  Less, FreeMarker, Shell, Dockerfile, HCL — Shell has no pack and would be noise on nearly every repo;
+  Dockerfile/HCL are covered by the IaC engine, not Opengrep). An unrecognised name is NOT reported, so a future
+  detector name can't manufacture a false banner. **Vue/Svelte are reported (measured, change #7):** on Opengrep
+  1.31.0 the js/ts rules TARGET `.vue`/`.svelte` (they appear in `paths.scanned`, 182 rules applied) but produce
+  ZERO findings even for a top-level `eval()`/`document.write()` that fires three JS rules in a `.js` file — so
+  their `<script>` code is effectively unanalyzed.
+- **Recall fixture (S6):** `fixtures/sast-recall` has a vulnerable file per NEW pack AND existing-pack cases —
+  Java/Spring (JDBC + JPA SQLi, formatted-SQL-string, `ProcessBuilder` command injection, XXE, actuator) and
+  JS/TS (express SQLi, XSS sink, `eval`) — plus negatives and three canary cases (`ruby/secret.rb`,
+  `java/application.properties` → `custom.hardcoded-connection-string`, `python/flask_secret.py` → Flask
+  `SECRET_KEY`), each an obviously-fake secret. `:app:sastRecallInImageTest` scans it the PRODUCTION way (real
+  `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
+  `(check_id, file)` fires (29, across all six new packs + java/javascript/typescript), no finding on a
+  `negative/` file, NO denied/category-excluded id ever appears, and **no canary value appears anywhere in
+  `/out` or the scanner logs**. **Corrected in the M8.15 review (B1):** stripping only `extra.lines`/
+  `extra.metavars` was NOT enough — three more Opengrep fields carry scanned source text: `extra.message` (rules
+  interpolate metavariables; `ruby…brakeman.check-rails-secret-yaml` puts the `secret_key_base` VALUE into it),
+  `extra.fix` (autofix text rewritten from the match) and `extra.dataflow_trace` (taint source/sink snippets;
+  also emitted by the four original packs). The `run-scan.sh` sanitize is now an **allow-list** of the fields the
+  worker reads (`check_id`, `path`, `start`/`end` positions, `extra.severity`, `extra.metadata`,
+  `extra.snippet_sha256`), so an unknown/new field is dropped by default; `sastRecallInImageTest` asserts the
+  allow-list structurally and plants a canary in each of the three fields. No fingerprint input changes (the
+  snippet hash is still computed from `extra.lines` in-container; the worker never read the dropped fields).
+- **Per-rule timeout + skipped files close nothing (S6 follow-up):** Opengrep's default per-rule timeout is
+  **5.0 s** (`--timeout`; max seconds one rule may run on one file, 0 = no limit) with `--timeout-threshold 3`
+  (max rules that may time out on a file before the WHOLE file is skipped, 0 = no limit). At 5 s a slow rule
+  (e.g. `formatted-sql-string`) times out on large files and SILENTLY DROPS its matches there, so a real finding
+  could vanish for a non-fix reason. `run-scan.sh` now runs with **`--timeout 60 --timeout-threshold 3`** (60 s
+  clears every file on the repos measured, incl. `ib-api`'s 2594 Java files → 0 timeout-skipped files; a
+  pathological rule×file is still bounded far under the 30-min container timeout; threshold 3 kept as a safety
+  valve). Any file Opengrep still reports in `errors[]` (any type) is carried to the worker as a **skipped file**
+  — PATHS + error-TYPE classifications only, never a message or source (D-053/S1) — in `opengrep.json`
+  `skippedFiles[]`. The skipped set is **two sources merged**: Opengrep's `errors[]` (per-rule `Timeout`,
+  `ParseError`) AND `paths.skipped[]` entries whose reason is a **size limit or read/parse failure**
+  (`exceeded_size_limit`, `insufficient_permissions`, `analysis_failed_parser_or_internal_error`). Skips BY
+  DESIGN are NOT frozen — gitignore/semgrepignore/cli-flag matches, `always_skipped`, and `wrong_language`
+  (no rule applies → nothing to lose), plus our own `EXCLUDED_PATH`/D-059 path exclusions (a worker-side triage
+  concern, never an Opengrep skip). (`paths.skipped` is only emitted when `opengrep scan` runs with `--verbose`,
+  which run-scan.sh now passes. **M8.15 review B3:** the `--verbose` run log QUOTES scanned source on a parse
+  error, so it is written to `/work/opengrep-verbose.log` (tmpfs) and NEVER tailed/printed/copied; when SAST fails
+  run-scan.sh prints only `opengrep failed (exit N); error types: <normalized names>` — the previous
+  `tail -c 4000` of the log would have put source text into the stored `scan_task.log_excerpt`. Proven on the
+  failure path by `sastFailureCanaryInImageTest` (canary absent from `/out`/stdout/stderr, present only in the
+  in-container verbose log) and `SastFailureCanaryIT` (real worker pipeline, test-only image whose `opengrep`
+  exits 2 after a real scan: canary in no `scan`/`scan_task`/`scan_warning`/`scan_finding`/`sub_issue` row).) At reconcile,
+  every OPEN **or IGNORED** SAST finding whose file is skipped is **frozen** (left untouched —
+  never solved, no `triage_event`), exactly like the EOL coverage guard. (**M8.15 review B2:** IGNORED is
+  included because the D-083 reconcile path solves an absent ignored finding held by a re-derivable cause —
+  `DUPLICATE_RULE`, a path/rule ignore — unless its fingerprint is frozen; a SOLVED finding is NOT frozen, so a
+  re-detection in a skipped file still reopens it. And because `DUPLICATE_RULE` (D-061) is derived from THIS
+  scan's per-file rule ids — incomplete for a skipped file — `TriageApplier` treats that cause as a FROZEN SOURCE
+  for a SAST finding in a skipped file (like the config/scope freezes): never unignored, re-solved or downgraded.
+  `SastSkippedFileReconcileIT`.); SAST findings in fully-scanned
+  files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types + up to 10 repo-relative
+  paths, then "and N more"; paths are a fingerprint input and shown throughout the UI, so they are not withheld —
+  only the message/snippet are, D-053/S1), mapped in the coverage banner (D-030). This enforces domain rule 3
+  (a scanner that did not fully cover a file closes nothing there)
+  at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
+  fingerprint)` set both runs.
+  **Refined in the M8.15 review (S1/S2/S3; S2 = owner decision), from REAL Opengrep 1.31.0 output
+  (`app/src/test/resources/samples/opengrep/skipped/`):** Opengrep lists EVERY errored file — including one it only
+  partially parsed — as `paths.skipped` `analysis_failed_parser_or_internal_error`, so that reason alone is not a
+  full-failure signal, and `PartialParsing` means the file WAS analyzed. Classification (`sast_skipped_files` in
+  `secscan-lib.sh`): **FROZEN** = an `errors[]` type other than `PartialParsing` (`Timeout`, the full parse failures
+  `Syntax error`/`Other syntax error`, `Too many matches`, out-of-memory, any unknown type — fail safe), a
+  `paths.skipped` `exceeded_size_limit`/`insufficient_permissions`, or `analysis_failed_parser_or_internal_error`
+  on a path with NO `errors[]` entry (unexplained — fail safe). **PARTIALLY PARSED** (`PartialParsing` and nothing
+  that freezes) = scanned → NOT frozen, reconciled normally, only COUNTED (`partiallyParsedFiles`); it is
+  mentioned inside `SAST_FILES_SKIPPED` only as "partially parsed (N)" and never raises the warning on its own (so
+  the banner's "findings were left unchanged" stays true). `Too many matches`/out-of-memory are not in the owner's
+  literal list but are analysis failures that drop matches for a non-fix reason, so they freeze (flagged in the
+  review report). Error types are reduced to their variant NAME (`["PartialParsing",[<container paths + line
+  ranges>]]` → `PartialParsing`; leading `[A-Za-z0-9 _.-]` run, ≤48 chars — in-container and again in the parser),
+  deduped, and capped at 5 in the message ("+N more"), so no container path or line range reaches any message.
+  Only paths under the checkout are kept. **Fail closed:** a report that cannot be classified (unparsable,
+  `errors` not an array, `paths.skipped` absent — it is always an array under `--verbose`) marks SAST **failed**
+  (closes nothing, no results emitted), never "ok with nothing skipped". A failed SAST task carries no skipped
+  files (the parser reads them only from a succeeded task), so `SAST_FILES_SKIPPED` never fires on a failed run.
+  Proven by `sastSkippedFilesInImageTest` (real sample, fail-closed unit + end-to-end), `ScannerOutputParserSastSkippedTest`
+  and `SastSkippedFileReconcileIT`.
+- **Scorecard + custom MIT rules (S7):** `scorecard/score_benchmark.py` (committed; benchmarks never committed)
+  scores the production config against OWASP BenchmarkJava v1.2 (`d4f6f3a`, GPL-2.0), Juice Shop (`717f5ef`, MIT)
+  and NodeGoat (`c5cb68a`, Apache-2.0), static only. Six MIT rules in `scanner-image/opengrep-rules-custom/` cover
+  the weakest **addressable** categories (full tables in `docs/reports/SAST_SCORECARD.md`): Java
+  `servlet-trust-boundary-session` (CWE-501, the weakest category 0.22 → 0.33), `mybatis-dollar-sql-injection`
+  (CWE-89), `servlet-reflected-xss-inline` (CWE-79); JS `nodejs-nosql-where-injection` (CWE-943),
+  `nodejs-ssrf-http-client` (CWE-918), `nodejs-unsafe-yaml-load` (CWE-502) — the three JS classes were 0-detection
+  on Juice Shop/NodeGoat before. Categories whose weakness is existing-rule **FPR** (sqli/cmdi/ldapi/pathtraver)
+  are NOT targeted — adding rules can't lower FPR and retiring a pack rule is out of scope (`rule retired ≠
+  fixed`). Real-world noise check: all three Java rules fire **0** times on ib-api (0 FP). Each rule has a
+  positive + negative fixture in `fixtures/sast-custom/`, asserted in the default build by
+  `:app:customRulesInImageTest` (+ the live `CustomSastRulesIT`).
+- **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
+  **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
+  stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer
+  deferred (added to the deferred register).
+Consequences: SAST covers ten languages with controlled noise and no fingerprint churn; the Commons-Clause SaaS
+flag now covers the wider rule set; thin Kotlin/Scala coverage and the uncovered-language gaps are shown, not
+hidden.
+
+## D-103 Public homepage + route-based sign-in (2026-11-07, accepted)
+Context: M8.13 adds a public marketing homepage. Until now the app shell rendered the sign-in gate (and, M8.10,
+the sign-up form at `/signup`) IN PLACE of any route when signed out, so "/" could not be a public page.
+Decision (`ui/` only; no API change):
+ - **"/" is public** (the homepage, `HomePage.tsx`); **`/login`** (sign-in, `LoginPage.tsx`) and **`/signup`**
+   (self sign-up, D-093) are standalone public routes in a shared centred frame (`AuthShell`: `main` landmark,
+   brand linking to "/", "Back to home"). Existing app routes keep their paths (no `/app` prefix).
+ - **Signed-out app routes → `/login?next=<path+search>`** (`Layout.tsx`); after sign-in `/login` redirects to
+   `next` or `/dashboard`. While the `/auth/session` check runs, the shell renders an empty busy `main`, `/login`
+   a busy frame without the form, and the homepage invisible CTA placeholders — no flash of app content, of the
+   sign-in form, or of "Sign in / Create account" for a signed-in visitor.
+ - **`safeNextPath` policy** (`ui/src/lib/safeNext.ts`, the only open-redirect gate): `next` is kept only if it
+   (1) is a non-empty string; (2) starts with exactly one "/" — not "//" and not "/\"; (3) contains no
+   backslash anywhere; (4) contains no ASCII control character (U+0000–U+001F, U+007F) and no whitespace
+   (incl. Unicode spaces such as U+3000); (5) resolved against a sentinel origin, stays on that origin.
+   Anything else (absolute URL, any scheme incl. `javascript:` in any case, bare word, encoded "//" that is not
+   a leading "/") falls back to `/dashboard`. `next` is decoded once by the query string; a once-decoded
+   double-encoded value is a literal same-origin path.
+ - **The shared `/auth/session` probe stays on "/"** (the AuthProvider boot check, D-092): the homepage needs it
+   to show a signed-in visitor "Open dashboard". It is the only request on a signed-out "/"; the homepage makes
+   no business-data call (unit + e2e tested).
+ - **An explicit Sign out lands on plain `/login` (no `next`)** — `AuthProvider.signedOutByUser`, reset on
+   sign-in — so the next person to sign in starts on the dashboard, not the previous user's page. An expired
+   session (401) still keeps `next`. **Supersedes M8 change 10** ("route restore after sign-out → re-auth",
+   `M8-worklog.md` row 10) for an explicit sign-out only (owner decision 2026-11-07); `onboarding.spec`
+   now asserts sign-out → `/login` → re-auth → `/dashboard`.
+Consequences: deep links survive sign-in; the homepage is cacheable static UI. Homepage copy describes SecScan's
+behaviour, not token limits (SecScan does not yet refuse over-scoped tokens — deferred, see the M8.13 register).
+(D-102 is taken on `feature/m8.14-scan-reaper` — scan leftovers reaper.)
+
+## D-102 Scan leftovers reaped on worker start + periodically (2026-11-07, accepted)
+Context: M8.13 fact-check (claim 6). After a worker crash/restart a scanner container and the per-scan host
+workspace dir (including its one-time token file) can linger; nothing reaped them — `ScanPoller`'s stale-lease
+sweep only requeues the DB job.
+Decision: a worker-side `ScanReaper` runs once synchronously BEFORE the worker's first stale-lease sweep and
+claim (`ScanPoller` calls `reapBeforeFirstClaim()` at the top of each tick; only the first call sweeps), then
+every `secscan.scanner.reap-interval-ms` (default 10 min). If a requeued scan still meets its own dir from a dead
+run, `ScanWorkspace` replaces it when this run is the scan's only holder, else the job is retried
+(`failOrRequeue`) — an existing dir is never a permanent `WORK_ROOT_NOT_WRITABLE` failure. It:
+ - **containers:** lists with a daemon-side filter on BOTH labels — `secscan.component=scanner` AND
+   `secscan.instance=<own id>` — and force-removes those whose `secscan.scan` is not currently live; a
+   different instance's or an unlabelled pre-change container is never returned, so never removed (pre-change
+   ones are counted only — INFO on the first sweep, DEBUG afterwards);
+ - **dirs:** per-scan dirs live at `<workRoot>/<instanceId>/<scanId>` (same absolute path on host and in the
+   worker, so D-022 holds; `ScanWorkspace` creates the instance sub-dir `0700` on demand). The reaper deletes
+   only UUID-named direct children of ITS OWN sub-tree `<workRoot>/<ownInstanceId>`, never following a symlink
+   and never leaving that sub-tree. Another instance's sub-tree, and old-layout `<workRoot>/<scanId>` dirs left
+   from before this change, are never listed and so never touched (one-time manual cleanup, see the M8.14
+   report). The instance id must be one plain path segment (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`). A leftover
+   that cannot be fully deleted (e.g. an unreadable sub-dir) is deleted as far as possible, counted
+   (`dirsFailed`, logged as a count) and skipped; the sweep always continues with the remaining leftovers.
+ - **"Live"** = a scan id in this worker's in-memory `ActiveScans` registry (reference-counted per scan id, so a
+   second concurrent run of one scan keeps it live), marked by `ScanJobProcessor` BEFORE the per-scan
+   dir/container exists and released only AFTER both are gone; the reaper deletes each leftover under the
+   registry's lock (`runIfInactive`), so a scan cannot become live mid-deletion — so an in-flight scan is never mistaken
+   for a leftover, and a freshly (re)started worker (empty set) reaps every pre-existing leftover on the first
+   tick.
+ - **Ownership:** every scanner container is now also labelled `secscan.instance=<SECSCAN_INSTANCE_ID>`
+   (`ScannerProperties`, stable across restarts, default `"default"`; docker-compose=`dev`, compose-smoke=`smoke`;
+   Gradle ITs use a random `it-<random>` per test JVM — `AbstractScanWorkerIT`, which every scanner-launching IT
+   extends, and `ScanReaperIT`). Stacks that share one work root (dev + smoke, or dev + a `bootRun` worker) are
+   safe because each instance only ever looks in its own sub-tree and its own labelled containers.
+ - It NEVER changes job/scan/finding state (the stale-lease sweep stays the only requeue path; a failed scanner
+   still closes nothing) and logs counts only — never a path (which could name a token file) and never token
+   content. A reaper failure is swallowed and never stops the worker.
+Consequences: assumes ONE worker per instance id — `ActiveScans` is process-local, so two workers sharing one
+instance id (and one daemon / work root) could reap each other's live containers and dirs. Revisit (a shared live-lease source) before
+running several workers with the same instance id. Proven by `ScanReaperTest` (default build) and `ScanReaperIT`
+(`-PliveReaper`, real daemon).
+
+## D-101 Relaxed password minimum (temporary) (2026-11-06, accepted)
+Context: sign-up required min 12 chars (M8.10).
+Decision: sign-up password minimum = 2 characters; maximum unchanged (72 bytes, bcrypt); bcrypt, login rate
+limits and operator approval unchanged.
+Consequences: weak passwords are guessable; mitigated by rate limits + approval.
+Revisit when: before the first external tenant — add to the D-096 gate list.
+
+## D-100 Unreadable stored token (2026-11-06, accepted)
+Context: M8.10 S12. A stored source token that cannot be decrypted — the `SECSCAN_ENCRYPTION_KEY` was rotated,
+or the ciphertext is damaged/not base64 — surfaced as a generic 500 in the api and a retried failure in the worker.
+The token itself is fine to re-enter; nothing else is wrong.
+Decision: `SourceCredentials.tokenFor` (the single decrypt path) maps a decrypt failure to
+`UnreadableCredentialException` (cause dropped — it can only describe key/ciphertext, never echoed); a MISSING key
+stays a configuration error.
+ - **API:** every decrypting API path answers **409 `CONNECTION_TOKEN_UNREADABLE`** ("… Re-enter the token for
+   this source."): GitLab project listing + select, provider-neutral repository listing + select, the branch
+   picker and the scan-branch PATCH.
+ - **Worker:** the scan **fails permanently** with that code (job `failed`, not retried) and **closes nothing**
+   (no reconcile; domain rule 3).
+ - **`POST /repositories/{id}/scans` still answers 202**: enqueueing does not need the token (its decrypt is only
+   the best-effort default-branch refresh, which already tolerates a missing token and provider errors); the
+   queued scan then fails in the worker with the code above.
+Consequences: a key rotation shows as an actionable 409 per source instead of 500s. **Revisit** the scan-start
+202 with a pre-check once the e2e seed holds a REAL ciphertext (today's seeded placeholder ciphertext would turn
+the existing `repositories.spec.ts` polling test red) — deferred item "pre-check token at scan start (needs
+real-ciphertext seed)". Proven by `UnreadableTokenApiIT`, `UnreadableTokenScanIT`, `SourceCredentialsTest`.
+
+## D-099 Theme persistence: narrow localStorage allowlist (amends D-067(e)) (2026-11-05, accepted)
+Context: M8.11 makes the light/dark theme a user choice (light default, dark via a toggle) that must be
+remembered across reloads. D-067(e)'s security guard FAILS on `localStorage` anywhere in `ui/src` (no
+client-side persistence), so persisting the theme needs an explicit, audited carve-out rather than a silent
+lint exception. (Numbering: M8.10 owns D-093…D-098 in the parallel tenancy worktree; M8.11 merges first and
+takes D-099.)
+Decision: a single file — **`ui/src/lib/themeStore.ts`** — is the ONLY place `localStorage` is permitted. It
+reads/writes exactly one key, **`secscan-theme`**, whose value is **`light`** or **`dark`** and nothing else;
+every access is wrapped in `try/catch` and falls back to **light** (private-mode / blocked / cleared storage
+never throws to the UI). No credential, CSRF token, password or any other value is ever stored — those stay
+in memory per D-067(a)/D-092. The guard (`ui/scripts/guard-forbidden.mjs`) is amended to:
+ - keep `localStorage` FORBIDDEN in every file except `src/lib/themeStore.ts` (and `sessionStorage`,
+   `indexedDB`, `document.cookie`, `btoa`, the `Basic ` header literal etc. stay forbidden EVERYWHERE,
+   `themeStore.ts` included);
+ - additionally assert that `themeStore.ts` only ever references the literal key `"secscan-theme"` and only the
+   values `"light"`/`"dark"` — so the exemption cannot quietly widen to another key, value or secret.
+A guard self-test proves the guard exits non-zero if `localStorage` appears in another file, or if a different
+key or value appears in `themeStore.ts`.
+Consequences: the theme is remembered across reloads with a one-file, one-key, one-value exemption that stays
+auditable; D-067(a–d) and D-092 are unchanged; the CSP is unchanged (no storage touches it). This **closes the
+M10 deferred-register item "Theme (light/dark) preference persistence → M10 (user settings)"** — theme
+persistence ships now, scoped to this carve-out, and does not wait for M10 user settings. Proven by
+`themeStore.test.ts` and the guard self-test.
+Addendum (M8.11 review N-4): dark exists ONLY as the explicit `[data-theme="dark"]` token set — `tokens.css`
+has no `@media (prefers-color-scheme)` block, so the OS setting is never followed and first paint is light
+(asserted in `contrast.test.ts`).
+
+## D-098 M8.10 tenancy mechanics: pre-tenant signup_request, login status, rate limits, client IP (2026-11-05, accepted)
+Context: D-093 needs pending sign-ups that have no workspace yet, a login that reveals account state only to the
+password holder, brute-force limits (pulled forward from M10, see D-092) and a trustworthy client IP behind nginx.
+Decision:
+ - **`signup_request` is its own pre-tenant table** (V23): id, email (lowercase), password_hash (bcrypt, cleared
+   once decided), requested_workspace_name, status `pending|approved|rejected`, created_at, decided_at,
+   decided_by → app_user, workspace_id (set only on approval, for traceability). Why its own table: a pending
+   sign-up is not yet a tenant member, so putting it in `app_user` would force `app_user.workspace_id` nullable and
+   weaken domain rule 1 for every user query; keeping it apart leaves `app_user.workspace_id NOT NULL` and makes the
+   only workspace-agnostic access a small, operator/login-only table. It is added to the CLAUDE.md rule-1
+   exception list. `app_user` only gains `status` (`active|disabled`, default active), `is_operator`,
+   `status_changed_at`, `status_changed_by`; at most one operator (partial unique index).
+ - **Approve** = one DB transaction: create the workspace, create the active `app_user` (hash moved from the
+   request), mark the request approved. **Reject** clears the hash; a rejected email may sign up again. Email is
+   unique across `app_user` ∪ pending `signup_request`: an advisory xact lock per lowercased email in the sign-up
+   and approve transactions + `uq_app_user_email_lower` + a partial unique index on pending requests.
+ - **Login** (JSON session and HTTP Basic share one AuthenticationManager): wrong password → 401 as today; the
+   correct password for a pending request → 403 `ACCOUNT_PENDING`; the correct password for a disabled user → 403
+   `ACCOUNT_INACTIVE` (Basic: generic 401). Status is checked after the password. A per-request check reloads the
+   principal's status by id, so disabling ends live sessions on the next request.
+ - **Rate limits** (in-memory sliding window, bounded maps, single api instance, no new dependency): login
+   failures per (account, IP) 5 / 15 min, per IP 20 / 15 min, per account 50 / 15 min → 429 + Retry-After;
+   sign-up per IP 5 / 15 min. Covers JSON login and Basic.
+ - **Client IP**: `SECSCAN_TRUSTED_PROXIES` (CIDR list, default loopback only; compose sets its network).
+   `X-Forwarded-For` is honoured only when the direct peer is trusted; `ui/nginx.conf` overwrites it with
+   `$remote_addr` (M8.10 owns that file).
+Consequences: new workspace-agnostic accesses, all documented in CLAUDE.md rule 1: signup_request queries
+(sign-up, login pending check, operator list/approve/reject), the per-request user status reload by id, the
+operator's user list, the fair-use claim subquery. Multi-instance api needs a shared limiter (with ShedLock, M9).
+A per-account limit lets a third party slow a known account's logins (accepted: 50/15 min is high; per-pair 5).
+
+## D-097 Fair use per workspace (2026-11-05, accepted)
+Context: self sign-up (D-093) lets anyone create a workspace; one tenant must not monopolise the worker or grow
+without bound.
+Decision: per workspace at most **1 running scan** — further scans wait in the queue (never rejected); the claimer
+serialises claims with a transaction advisory lock and claims at most the oldest queued job of a workspace that
+has no running job. At most **25 active repositories** per workspace (every workspace incl. Default; configurable
+`secscan.fair-use.*`); adding or reactivating past the limit → **409 `REPOSITORY_LIMIT_REACHED`**, a batch that
+would exceed it is refused whole; existing repositories above the limit are kept. The whole-batch check runs
+before any write; every transaction that activates a row re-checks under the workspace row lock. Two concurrent
+selection requests can therefore leave a batch **partly applied** (the later rows get 409), but a workspace never
+exceeds 25 active repositories.
+Consequences: a tenant with many queued scans does not delay others; Default (today's data) is subject to the
+same limits.
+
+## D-096 External tenants: preconditions before the first one goes live (2026-11-05, accepted)
+Context: D-093 allows anyone to sign up, so external (non-company) tenants are possible by design.
+Decision: external tenants are allowed by design. **Before the first EXTERNAL tenant goes live:** (1) Opengrep
+rule-pack licence re-check (SPEC "SAST rule licensing"), (2) scanner egress restriction, (3) written acceptance of
+the Docker-socket risk (D-026). Self-managed source hosts stay on the operator allowlist — the SSRF guard (D-018,
+D-090) is unchanged; tenants cannot add hosts.
+Consequences: M8.10 ships the mechanism; going live externally is a separate, gated operator step.
+Addendum (2026-11-06, M8.10 review N-5): gate item **(4) volume caps** — before the first external tenant, add a
+cap on PENDING sign-ups (global, so a distributed sign-up flood cannot fill the operator queue; the per-IP limit
+alone does not stop it) and a cap on connections per workspace (fair use limits active repositories only, D-097).
+Not built in M8.10.
+Addendum (2026-11-06, D-101): gate item **(5) password minimum** — before the first external tenant, restore a
+stronger password minimum (D-101 temporarily relaxed the sign-up minimum from 12 to 2 characters).
+
+## D-095 UI theme: light default + dark toggle (2026-11-05, accepted; record only)
+Context: the M8.11 UI redesign.
+Decision: light theme by default with a dark-mode toggle. Built by M8.11, not M8.10.
+Consequences: none for M8.10; its new pages use the shared tokens once M8.11 merges.
+
+## D-094 Two admin levels: platform operator and workspace owner (resolves OD-9) (2026-11-05, accepted)
+Context: OD-9 left `/api/v1/admin/**` callable by any authenticated user; self sign-up (D-093) makes that unsafe.
+Decision: the **platform operator** (the existing bootstrap admin; `app_user.is_operator`, at most one) approves,
+rejects, disables and re-enables sign-ups/users and is the **ONLY** one allowed on `/api/v1/admin/**` (non-operator
+→ 403). The **workspace owner** is the person who signed up, with full rights inside their own workspace only.
+The operator has **no read access to other tenants' data**: their own data is the Default workspace; the operator
+API exposes only sign-up/user metadata (email, status, workspace name, dates), never another workspace's
+repositories, findings or settings. The V23 backfill and AdminBootstrap promote an operator only when none exists.
+Consequences: OD-9 resolved. The demo user (D-091) is never operator, so it loses `/admin/**`.
+Addendum (2026-11-06, M8.10 review B-1): **operator maintenance acts on the operator's own workspace only.** `POST /api/v1/admin/maintenance/retire-ignored-orphans` takes its workspace from the principal (`@CurrentWorkspace`, i.e. Default for the operator); it never lists or changes another tenant's findings. The earlier all-workspaces retire loop (and its CLAUDE.md rule-1 exception) is removed. Tenants have no retire endpoint of their own yet. Global intel sync and the re-score sweep stay platform-wide (they touch shared intel tables and return counts only). Proven by `IgnoredOrphanRetirerWorkspaceScopeIT`.
+
+## D-093 Tenancy by self sign-up (2026-11-05, accepted)
+Context: SecScan was single-tenant (Default workspace, D-011) on a tenant-ready schema (D-001).
+Decision: anyone can sign up; an **approved** sign-up gets its own private workspace (no invites, no members).
+Pending or rejected accounts cannot log in. Existing users and data stay in the Default workspace. The workspace
+is created at approval, not at sign-up.
+Consequences: every request path takes its workspace from the authenticated principal; no `Workspace.DEFAULT_ID`
+in request paths; tenant isolation is proven per endpoint (404 on another tenant's ids).
+
+## D-092 M8.8 browser session (amends D-067(a)) (2026-10-28, accepted)
+Context: D-067(a) kept Basic credentials in JS memory and forced a full re-sign-in on every browser refresh —
+poor UX, and an avoidable secret-at-rest-in-memory. M8.8 adds a real browser session without weakening the
+D-067 security baseline.
+Decision: a server-side **in-memory** session for the browser.
+ - `POST /api/v1/auth/login` (JSON only — a non-JSON `Content-Type` → **415**) authenticates against `app_user`
+   (bcrypt) and starts an `HttpSession`; the session cookie is **HttpOnly + Secure + SameSite=Strict**; the
+   session id is **rotated on login** (fixation protection); **idle timeout 30 min**, **absolute cap 8 h**
+   (enforced by a filter on the session's creation time, independent of activity).
+ - `POST /api/v1/auth/logout` invalidates the session and clears the cookie; it is an unsafe request so it
+   **requires the CSRF token** (no token → 403).
+ - `GET /api/v1/auth/session` returns `{username, demoMode}` for a live session (401 otherwise).
+ - **CSRF ON** for cookie-authenticated unsafe requests (POST/PUT/PATCH/DELETE): a **session synchronizer
+   token** (stored server-side in the session, **delivered in the `/auth/login` and `/auth/session` JSON
+   bodies**, never in a JS-readable cookie — so the D-067(e) `document.cookie` guard stands and the CSP is
+   unchanged) echoed by the SPA in an **`X-CSRF-TOKEN`** header; a cookie-auth unsafe request without a valid
+   token → **403**. (This is a synchronizer token, chosen over a double-submit cookie because the guard forbids
+   `document.cookie`; it is strictly stronger.)
+ - **HTTP Basic is unchanged, stateless, and CSRF-exempt** (it carries no session cookie) for curl/scripts.
+   Basic stays safe to exempt because D-067(b) keeps the 401 free of `WWW-Authenticate`, so a browser never
+   silently replays Basic cross-site.
+ - The SPA **never constructs an `Authorization: Basic` header** (login is the JSON POST) and keeps no password
+   after login — only the in-memory CSRF token. A **refresh stays signed in** (the cookie survives; the SPA
+   calls `/auth/session` on load). Nothing is written to web storage. An api restart signs everyone out.
+ - **Idle-timer refresh:** the UI status-poll (only while scans are active AND the tab is visible, M8.8 item 5)
+   refreshes the idle timer; the 8 h absolute cap still applies regardless of polling.
+ - `SECSCAN_SESSION_COOKIE_SECURE` (default **true**) exists so the e2e compose project (if it reaches the UI
+   over plain http on a non-localhost host) can set it **false** — documented as never false anywhere else.
+Consequences: amends **D-067(a)** (a browser refresh no longer forces re-sign-in); D-067(b–e) unchanged; the UI
+gate guard stays green and is extended to fail on any `Authorization: Basic` construction in `ui/src`. Login
+attempt rate-limiting/lockout is out of scope here (deferred to M10).
+
+## D-091 M8.8 demo mode (`SECSCAN_DEMO_MODE`), never on a shared host (2026-10-28, accepted)
+Context: demos and trials want a memorable non-email login (e.g. `admin`) without weakening the rules for real
+accounts or the email identity model.
+Decision: `SECSCAN_DEMO_MODE` (default **false**).
+ - **On:** `SECSCAN_DEMO_USERNAME` (default `admin`, **may be a non-email username**) and
+   `SECSCAN_DEMO_PASSWORD` (**min 4 chars**) define a demo `app_user` **created/updated idempotently** (bcrypt)
+   at api startup; a **WARN logs at every startup** ("DEMO MODE ON — the demo user can sign in; never enable on
+   a shared/production host"); the UI shows a red **"DEMO MODE"** ribbon (`/auth/session` → `demoMode:true`).
+ - **Off:** the demo username is neither created nor updated, **and any login identifier without `@` is
+   refused** at authentication time — so a leftover demo row from a previous on-run can never sign in once demo
+   mode is turned off. Real users (emails, which contain `@`) are unaffected.
+ - The **12-char minimum** and the normal bootstrap rules stay for **every real user**; the relaxed 4-char floor
+   applies only to the demo user. `app_user.email` has **no format constraint** (lowercased-unique `text`, V1/
+   V3), so a non-email username needs **no migration**; it is stored lowercased like any identifier.
+ - README documents: **never enable demo mode on a shared/production host.**
+Consequences: a low-friction demo login that cannot leak into real deployments (the no-`@` lockout is the
+backstop); no migration; the 12-char rule is intact for real users.
+
+## D-090 Source host policy: built-in SaaS allowed by default; D-085 single-host restriction retired (2026-10-27, accepted)
+(Renumbered from D-089 at the m8.6→m8.7 train merge: D-089 was already taken by the M8.5 review-fix decision,
+which merges to develop first; this M8.7 decision, merging last, takes the next free number.)
+Context: M8.7 ships the provider-neutral connection/identity model (V22), so a workspace may hold GitLab
+(self-managed + gitlab.com), GitHub and public repositories. D-085 had forbidden adding a second GitLab host
+until M8.7 shipped (identity was the bare GitLab project id); V22 makes identity = workspace + provider + host +
+provider's id, so that restriction is no longer needed.
+Decision:
+ - The outbound-host allowlist (SSRF guard, D-018; `GitLabHostPolicy`) now allows the built-in SaaS hosts
+   `github.com`, `api.github.com` and `gitlab.com` BY DEFAULT. They can be switched off with
+   `SECSCAN_SOURCE_ALLOW_BUILTIN_SAAS=false` for an egress-locked deployment (D-033).
+ - Self-managed hosts remain deny-by-default and are opted in via `SECSCAN_GITLAB_ALLOWED_HOSTS` (unchanged).
+ - D-085's "do not add a second GitLab host (incl. gitlab.com)" restriction is RETIRED now that M8.7 ships;
+   a workspace may connect any number of allowed hosts across providers. https-only and never-follow-redirects
+   are unchanged; TLS is always verified.
+Consequences: gitlab.com and github.com work out of the box; an operator can still lock egress to self-managed
+hosts only. `GitLabHostPolicy` keeps its name for now (it is the shared source-host allowlist); a rename is
+cosmetic and deferred.
+
+## D-089 M8.5 review fixes — same-branch orphan close + language scope (2026-10-27, accepted)
+Context: the /review-pr M8.5 round (D-086 train) found that the OD-19 ignored-orphan handling only fired on a
+branch switch, so a finding that genuinely disappears on the SAME branch (e.g. a SAST snippet shift) left a
+stale ignored row to accumulate; and that the static language detector counted data/markup formats as languages.
+Decision (refinement of D-083 / D-081, not a new rule):
+ - Reconcile closes a stale ignored orphan the moment it disappears on ANY authoritative scan of the tracked
+   branch (re-derivable hold, scanner succeeded + authoritative, fingerprint absent, not a frozen identity, not
+   a sub-issue-scope manual ignore): reason BRANCH_CHANGED when the scanner is re-baselining, else
+   SOLVED_NOT_DETECTED. The OD-19 one-off retire pass is therefore only a retroactive cleanup of orphans that
+   accumulated before this shipped; its ITs seed that legacy state directly. Domain rule 3 is unchanged (a
+   failed/non-authoritative scanner still closes nothing; a superseded secret key id / uncovered EOL is frozen).
+ - `lang_detect.py` counts only programming languages; data/markup formats (YAML, XML, JSON, SQL, Markdown,
+   CSV, .properties/.ini/.toml) are not reported, so `repository.languages` matches GitLab's language set
+   (HCL kept). A detection failure still never fails the scan and never clears stored languages.
+Consequences: no migration, no fingerprint change, no API contract change. Status still changes only through
+reconcile and the D-063 carve-outs, each with a triage_event.
+
+## D-088 D-074 errata — the shipped level-1 type labels (2026-10-27, accepted)
+Context: D-074 described the level-1 type names as "Vulnerable dependency", "Hardcoded secret", "Insecure
+code", "Infrastructure misconfiguration", "End-of-life runtime". The UI actually shipped (S10f) a different,
+final wording. Per the log no-edit rule, D-074's text stands; this entry is the authority for the shipped
+labels, which the M8.5 level-2 taxonomy sits beneath.
+Decision (errata): the shipped level-1 labels in `ui/src/lib/labels.ts` (`TYPE_LABEL`) are:
+ - `sca` → "Vulnerable dependency"
+ - `sast` → "Code weakness"
+ - `secret` → "Exposed secret"
+ - `iac` → "Infrastructure config"
+ - `eol` → "Outdated runtime"
+These are correct and unchanged; M8.5 adds only the level-2 category + optional OWASP 2025 name beneath them
+(D-083). Documentation accuracy only; no behaviour change.
+
+## D-087 IaC per-check_id severity override table (V20), scoring-only, global (2026-10-27, accepted)
+Context: M8.5 (D-083 OD-27). OSS Checkov checks carry no severity, so every IaC finding scores base MEDIUM
+(D-054). A maintained per-`check_id` override lets a specific check be scored CRITICAL/HIGH/MEDIUM/LOW.
+Decision: migration **V20** adds `iac_severity_override (check_id pk, severity, note, created_at)`. It is a
+global config table with **no `workspace_id`** (D-050 family, beside `kev_entry`/`epss_score`/`fix_time_config`/
+`eol_cycle`); its `IacSeverityOverrideRepository.findById(checkId)` lookup is added to the CLAUDE.md domain-rule-1
+exception list. The override is read by `SubIssueScorer` for IaC findings and fed to the pure `Scoring` as
+`ScoreInput.iacSeverityOverride`; it replaces the default MEDIUM base at scan time and on re-score (D-049). It is
+**scoring-only** — never a status change, never a `triage_event` — and `check_id` is unchanged as the IaC
+fingerprint/rule input (not a new fingerprint input). The table ships **empty**: a row is added only for a
+`check_id` confirmed in real Checkov output (never guessed, D-061 pattern). There is **no UI** to manage overrides
+yet (known gap). Proven by `ScoringTest.iacBaseUsesCheckIdOverrideWhenPresent` and
+`IacSeverityOverrideIT` (score changes, status unchanged, 0 triage_event).
+Consequences: one new global table; IaC scores become tunable without a status/fingerprint risk.
+
+## D-086 M8.x train execution model (2026-10-27, accepted)
+Context: M8.5, M8.6 and M8.7 (D-081 (1)(2)(3)) are planned together and approved once, then built back to back.
+This needs an execution model that keeps CLAUDE.md's "one milestone per session" and WORKFLOW's review/merge
+discipline while allowing a single combined plan.
+Decision (accepted by Sajal 2026-10-27; full text in `docs/plans/M8x-train-brief.md`):
+ - One combined Phase A plan for all three milestones; the architect approves it once.
+ - CLAUDE.md "don't start the next milestone in the same session" is KEPT: each milestone runs in its own
+   fresh session, started by the human. Continuity lives on disk: `docs/plans/M8x-train-brief.md` (source of
+   truth, incl. the "Approved plan changes" section), `docs/plans/M8x-train-state.md`, and per-milestone work
+   logs under `docs/reports/`.
+ - Branches are STACKED (deviation from WORKFLOW "branch from develop"): `feature/m8.6-ui-uplift` from the HEAD
+   of `feature/m8.5-correctness-taxonomy`; `feature/m8.7-multi-source` from the HEAD of `feature/m8.6-ui-uplift`.
+ - Review is per milestone after all three are built (`/review-pr` in fresh sessions). A fix to an earlier
+   branch is committed there and MERGED FORWARD (`git merge`, never rebase/force-push) into the later branches.
+   Human merges into develop/main in order m8.5 → m8.6 → m8.7.
+ - Real-data walkthroughs are deferred to the end of the train (listed per report under "Pending manual
+   walkthrough"); ib-api-v2 is onboarded only then (deviation from D-083's M8.1-baseline expectation).
+Consequences: the migration/identity/UI work proceeds as one reviewed train; the "3 real repos" and
+multi-provider walkthroughs happen once at the end against the fully built stack.
+
+## D-082 M9 scheduling deferred after containers and git-history secrets (2026-10-27, accepted)
+Context: D-081 put M9 right after M8.7. Nothing in M8.5–M8.7 depends on scheduling.
+Decision: the order is M8.5 → M8.6 → M8.7 → container image scanning → git-history secrets + author → M9.
+Until M9, scans are manual (the Scan button). Container scanning ships with manual scan/re-check only; its
+nightly re-check moves into M9. OD-5 (worker hosting) is decided at the container spike instead of "before M9".
+M9 keeps every existing brief item: provider-aware poller, `effectiveBranch()` snapshot onto `scan.branch`,
+`BRANCH_CHANGED` excluded from fix metrics, intel startup sync.
+Consequences: findings go stale between manual scans, so the UI must show a "last scan" age (M8.6).
+Revisit when: stale findings become a problem in daily use, or a client needs automatic scanning.
+Supersedes the order in D-081 (its scope list stays valid).
+
+## D-083 M8.5 decisions (closes OD-22, OD-27) (2026-10-27, accepted)
+Context: M8.5 (D-081 (1)) needed its open items settled before `/start-milestone`.
+Decision:
+ - **OD-22 = A:** D-075 is met on **core-keycloak + notification + ib-api-v2** (`notification` counts as the third
+   real repository). Each is walked through twice: a baseline at the start of M8.5 on the M8.1 build (no code
+   change), and at the end on the M8.5 build (SQL = API = UI).
+ - **OD-27:** the IaC per-`check_id` severity override ships in M8.5 as **V20** (keeps D-077 numbering; no
+   out-of-order migration). Scoring-only.
+ - **OD-19 fix = D-073 parts (1) + (2):** an ignored finding absent from a scan where its scanner succeeded and was
+   authoritative is solved when its hold is re-derivable, routed through the D-063 resolver, writing a
+   `triage_event`; plus a one-off retire pass for rows already accumulated (no migration). This also covers M8.1
+   D-1 (branch with no manifests) and ignored-absent after a branch switch, using `BRANCH_CHANGED` when the cause
+   is a branch switch. Part (3) (structural SAST match key) is out of scope. Rules unchanged: a failed or
+   non-authoritative scanner closes nothing; every status change writes a `triage_event`.
+ - **Feed "New · 7d"** counts only findings first seen on the repository's currently tracked branch.
+ - **Level-2 taxonomy ships as V21:** each issue group gets a level-2 category derived from stored data
+   (SCA = ecosystem, secret = secret type, SAST = weakness class from CWE, IaC = platform, EOL = runtime), plus
+   optional OWASP Top 10 2025 category names (names only, no OWASP text — CC BY-SA). Backfilled for existing rows,
+   exposed in feed/group/sub-issue views, usable as a feed filter. Also add the D-074 errata correcting its level-1
+   label text to the shipped labels in `ui/src/lib/labels.ts`.
+Consequences: closes OD-22 and OD-27; M8.5's migrations are V20 (IaC override) and V21 (taxonomy).
+
+## D-084 M8.6 decisions (closes OD-25, OD-26) (2026-10-27, accepted)
+Context: M8.6 (D-081 (2)) needed its navigation and deep-link decisions settled.
+Decision:
+ - **OD-25:** the app shell moves to a left sidebar navigation.
+ - **OD-26:** amend D-067 — the UI may build links to a file line or commit on the source host ONLY from: the
+   stored connection host, the stored project path, a validated 40-hex `scan.commit_sha`, and a URL-encoded
+   repo-relative path + integer line. Never from finding text or scanner output. Covered by a guard/unit test. All
+   other D-067 rules unchanged.
+Consequences: closes OD-25 and OD-26; D-067's security baseline is unchanged except this one scoped amendment.
+
+## D-085 M8.7 decisions (adds and closes OD-30, OD-31) (2026-10-27, accepted)
+Context: M8.7 (D-080, D-081 (3)) needed the GitHub access and public-repository models settled; two new open
+decisions (OD-30, OD-31) are added and resolved here.
+Decision:
+ - **OD-30:** GitHub access starts with a fine-grained personal access token, read-only Contents + Metadata,
+   entered only in the UI; a GitHub App is later.
+ - **OD-31:** public repositories are added by URL and cloned anonymously over HTTPS; branch listing via the
+   provider's unauthenticated API with rate-limit handling; no search/listing of public repositories.
+ - **Migration V22** generalises the GitLab connection into a provider-neutral source connection and makes
+   repository identity = workspace + provider + host + the provider's id; existing rows are backfilled as GitLab on
+   their current host, keeping their ids and findings.
+ - Until M8.7 ships: do NOT add a second GitLab host (incl. gitlab.com) to `SECSCAN_GITLAB_ALLOWED_HOSTS` —
+   repository identity is still the bare GitLab project id.
+Consequences: adds and closes OD-30 and OD-31; M8.7 owns V22 and the provider-neutral connection/identity model.
+
+## D-081 Roadmap after M8.1 (OD-24 = A) (2026-10-26, accepted)
+Context: the 2026-10-26 intake added UI uplift, multi-provider sources, container image scanning and git-history
+secret items on top of the M8.5 commitments (D-073, D-074, D-075).
+Decision, in order:
+ (1) M8.5 correctness + taxonomy: OD-19 family (incl. M8.1 D-1 and absent-but-ignored after a branch switch),
+     level-2 taxonomy, D-074 errata, Feed "New · 7d" branch semantics, IaC human titles (check_name), re-score on
+     unignore (M8 D-2), languages refresh, A5 ITs, housekeeping rows, and the D-075 real-repo walkthrough. UI
+     polish is moved OUT of M8.5.
+ (2) M8.6 UI uplift: new app shell, Repositories list redesign (clickable rows), repository detail page
+     (issues / scans / settings, coverage banner), issue side panel clarity (summary, how-to-fix, sub-issues
+     grouped by location), secret context (type-specific fix guidance, link to file line and commit). Compact
+     side-panel locations moves here from M8.5.
+ (3) M8.7 sources: gitlab.com + GitHub + public repositories in one workspace (D-080).
+ (4) M9 scheduling as planned, provider-aware (poller per provider; still snapshots effectiveBranch()).
+ (5) Container image scanning: registry-agnostic (any OCI registry incl. self-hosted), public images
+     first-class, spike before build. Milestone number assigned when scheduled.
+ (6) Secrets in git history + author attribution: later, needs its own lifecycle decision.
+Consequences: M9's poller is built once, provider-aware; M8.6 screens leave room for a provider icon; deferred
+register rows move as listed in step 5.
+Revisit when: a deadline needs the UI first (then swap M8.5 and M8.6).
+
+## D-080 Workspaces are not per provider; one workspace holds many source connections (OD-23 = C) (2026-10-26, accepted)
+Context: SecScan moves from self-managed GitLab only to self-managed GitLab + gitlab.com + GitHub + public
+repositories. Aikido ties each workspace to one Git provider (multiple providers = multiple workspaces, no
+cross-workspace feed).
+Decision: a workspace may hold any number of source connections of any provider; their repositories share one
+feed, rollups and ignore rules. Repository identity becomes provider + host + the provider's id (not the bare
+GitLab project id). Multi-workspace (a switcher) is a later tenancy/team feature tied to M10 users and roles,
+never a per-provider split.
+Consequences: a future migration generalises connection and repository identity; one adapter per provider
+(GitLab exists, GitHub new); host policy per connection; all hard rules unchanged (workspace_id, D-004, D-030,
+TLS always verified, tokens entered only in the UI).
+Revisit when: a client needs hard data separation before M10, or a provider cannot fit the generic connection
+model.
+
 ## D-079 M8.1 errata (review clarifications; D-076/D-078 text unchanged) (2026-10-25, accepted)
 Context: the /review-pr round surfaced small inaccuracies/clarifications in D-076/D-078 wording. Those entries are
 not edited (log-integrity rule); this entry is the authority for the corrections.
@@ -1251,9 +1858,9 @@ Decision: `workspace_id` on every business table from day one.
   finished in M4b
 - OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
-- OD-5 Hosting for the worker — needed before M9
+- OD-5 Hosting for the worker — decided at the container spike (D-082)
 - OD-6 Product name
-- OD-9 Admin intel endpoints are unauthenticated-by-role (deferred to M10). `AdminIntelController`
+- OD-9 — RESOLVED by D-094 (M8.10: `/api/v1/admin/**` is operator-only). Admin intel endpoints were unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
   role/authority gating yet because roles are an M10 concern (D-010). The endpoints are read-mostly maintenance
   (re-fetch a public feed, recompute derived scores; no secret exposure, no status/fingerprint change — D-049).
@@ -1292,7 +1899,8 @@ Decision: `workspace_id` on every business table from day one.
   - **M9 commit poller must snapshot `effectiveBranch()` (D-2, D-076):** when M9 adds commit polling / scheduled
     scans, the enqueue path MUST resolve `repository.effectiveBranch()` (the configured `scan_branch`, else the
     current GitLab default refreshed per A6) and snapshot it onto `scan.branch`, exactly like `ScanService
-    .startManual` — so scheduled scans honour the chosen branch and re-baseline correctly.
+    .startManual` — so scheduled scans honour the chosen branch and re-baseline correctly. **M9 poller must be
+    provider-aware (D-080):** build one poller per provider; it still snapshots `effectiveBranch()`.
   - **Absent-but-ignored on a branch switch → M8.5 (OD-19 family, D-076):** when `scanBranch` switches, an
     *ignored* finding that is absent on the new branch stays ignored (rule 3), not solved — the same
     absent-but-ignored shape as OD-19. Resolve it together with OD-19 in M8.5 (route the ignored-and-absent close
@@ -1315,7 +1923,8 @@ Decision: `workspace_id` on every business table from day one.
     human, not raw rule ids.
   - **Languages refresh on each scan → later:** re-derive a repository's detected languages on every scan (today
     they are not refreshed per scan).
-  - **Side panel less repetitive → later:** group affected locations more compactly in the side panel.
+  - **Side panel less repetitive (compact side-panel locations) → M8.6 (D-081 (2)):** group affected locations
+    more compactly in the side panel.
   - **Theme (light/dark) preference persistence → M10 (user settings):** the S10e light theme is not yet persisted
     per user; it lands with M10 user settings.
   - **RESOLVED by SF-1 — the "Medium 65" stale panel header was a UI CACHE bug, not backend staleness.** The
@@ -1338,6 +1947,94 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.15 deferred register (recorded 2026-11-07, D-104):
+  - **Additional SAST engines (Joern, Bearer):** deferred. M8.15 keeps the single Opengrep engine. CodeQL was
+    rejected on licence; Joern (dataflow/CPG) and Bearer (privacy/security) are candidate second engines for a
+    later milestone once the single-engine coverage + noise profile is understood from the scorecard.
+  - **Thicker Kotlin/Scala rule coverage:** the stock packs are thin (Kotlin 14, Scala 27 rules). Custom MIT
+    rules for common Kotlin/Scala (e.g. Ktor/Spring-Kotlin, Play/Akka) weaknesses are a later add.
+  - **Non-security rules in the existing java/csharp/js/ts packs:** NOT excluded in M8.15 (S2 touches new packs
+    only). Removing/denying an existing rule would make reconcile "solve" its live findings (reads as fixed).
+    Needs a **"rule retired ≠ fixed"** decision (a dedicated terminal state / reason code so retiring a rule does
+    not masquerade as a fix) before any exclusion is applied to the four original packs.
+  - **Four C# `ssrf` rules share one check_id (`opengrep-rules.csharp.lang.security.ssrf.ssrf`)** — pre-existing
+    in the D-053 `csharp` pack (four `ssrf.yaml` files under `csharp/lang/security/ssrf/`, all `id: ssrf`;
+    the filename is not part of the check_id). Opengrep loads four rule definitions but one distinct check_id,
+    so hits on the identical normalized snippet at the same file merge to one SAST fingerprint, and distinct
+    snippets stay distinct findings under the shared rule id. Left as-is: giving each a unique id would change
+    the check_id and churn existing SAST fingerprints (check_id is a fingerprint input, D-053). Noted so a
+    future pack bump / rename weighs the fingerprint churn.
+  - **`formatted-sql-string` per-file Timeout on very large files — RESOLVED (M8.15 S6 follow-up):** measured on
+    the real `ib-api` repo, `java.lang.security.audit.formatted-sql-string` exceeded Opengrep's default 5 s
+    per-rule timeout on 1–2 large files, dropping their matches. Fixed by running with `--timeout 60`
+    (0 timeout-skipped files on ib-api; findings 70→88) and, as a safety net for any file that still times out
+    or parse-errors on another repo, the skipped-file FREEZE (those files' findings are never false-solved) +
+    `SAST_FILES_SKIPPED` warning. See the D-104 "per-rule timeout + skipped files" decision above.
+  - **`django.*` rules fire on non-Django (Flask) code — framework gating per repo:** on the Flask app
+    `plexicus/simplest-sast-vulnerable`, Django injection rules (`django…tainted-sql-string`,
+    `django…raw-html-format`, `django…sql-injection-db-cursor-execute`) fire alongside the Flask ones. M8.15
+    handles the SAME-LINE duplicates via the D-061 winner map (keep Flask, drop Django), but
+    `django…sql-injection-db-cursor-execute` fires **alone** (plexicus `app.py:49`, no same-line winner) so it
+    can't be de-duplicated safely and stays as a Django-on-Flask false positive. Proper fix: gate framework rule
+    packs by the repo's detected framework (e.g. don't run `django.*` when only Flask is imported) — needs a
+    per-repo framework detector; deferred.
+  - **OD-2 Java SAST depth:** the scorecard (`docs/reports/SAST_SCORECARD.md`) shows the Java weakness is driven
+    by **existing-rule false positives** in `sqli`/`cmdi` (FPR 0.52/0.54, recall already ~1.0) and by **missed
+    cross-file (inter-procedural, inter-file) taint flows**, neither of which M8.15's additive custom rules can
+    fix. Decide — on the scorecard numbers — between a **Joern** (CPG, inter-procedural) trial, **Opengrep
+    interfile** analysis (`--interfile`, heavier/slower), and **CodeQL** (rejected on licence so far); and whether
+    to retire/tune noisy pack rules once the `rule retired ≠ fixed` decision lands.
+- M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
+  - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
+    milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;
+    a broader token is accepted (GitHub fine-grained PATs expose no scopes at all). Until then the homepage
+    claims only SecScan's behaviour ("asks only for read access and never pushes or changes anything").
+- M8.x train `/review-pr` deferred register (recorded 2026-10-28, for a later milestone):
+  - **Feed category-filter options ignore sibling filters (M8.6 N4):** `GET /issue-groups/categories` computes its
+    distinct level-2 categories + counts honouring only `repositoryId` + `view` + `includeInactive` — NOT the
+    currently-applied type/band/provider/search filters. So the category dropdown can offer a category whose
+    count, once combined with the other active filters, is zero. Accepted as-is (the dropdown is a convenience,
+    not an oracle; the list itself always reflects every filter). Revisit if users find empty-result categories
+    confusing — thread the sibling filters into `categoryCounts` then.
+  - **Repository "unresolved dependencies" count capped at 200 (M8.6 N5):** the repository rollup/coverage figure
+    for unresolved dependencies is clamped at 200 to bound the aggregate; a repository with more than 200 shows
+    "200" (effectively "200+"). Accepted for display; revisit by rendering it as "200+" or lifting the cap if a
+    real repository legitimately exceeds it.
+  - **Remove the `repository_fill_identity` trigger once all inserts are explicit (SF-2):** V22 added a
+    BEFORE INSERT trigger as a compatibility shim so legacy GitLab insert paths needed no change (it defaults
+    `provider`='gitlab' and fills `provider_repo_id` from `gitlab_project_id` only when that is non-null, and
+    `host` from the connection). Once every insert path sets provider/host/provider_repo_id explicitly (the
+    GitHub/public paths already do), drop the trigger + its function in a new migration so identity is never
+    implicitly derived. Until then the NOT NULL identity columns + the SF-2 `providerlessNonGitlabInsertFails`
+    guard keep a bad insert from being stored.
+  - **Relative-time E2E date-boundary flake (M8.x train):** a relative-time assertion (e.g. "9 hours ago" /
+    "3 days ago") can flip when the e2e run crosses a day/boundary between seeding and assertion (observed as a
+    one-off on a 3rd consecutive run; a re-run was clean). Accepted as a known flake; harden later by freezing the
+    clock in the e2e or asserting a tolerant range rather than an exact phrase.
+- Post-M8.1 deferred register moves (recorded 2026-10-26, D-080/D-081):
+  - **Sajal's UI polish list (2026-10-25 walkthrough feedback) → M8.6 (D-081 (2)):** carried with the compact
+    side-panel locations row above.
+  - **secret git-history scanning → the D-081 (6) milestone (later):** full git-history secret scan (the D-025
+    gap) plus author attribution; needs its own lifecycle decision (OD-29).
+  - **container image scanning → the D-081 (5) milestone:** registry-agnostic OCI (any registry incl.
+    self-hosted), public images first-class, spike before build; milestone number assigned when scheduled.
+  - **GitHub / gitlab.com / public repositories → M8.7 (D-080):** multiple source connections of any provider
+    in one workspace, one shared feed.
+- Post-M8.1 open decisions (recorded 2026-10-26; OD-30/OD-31 added 2026-10-27):
+  - **OD-22 Which real repositories satisfy D-075** (is `notification` the 3rd real repo?) [M8.5, first task] —
+    RESOLVED by D-083 (OD-22 = A: core-keycloak + notification + ib-api-v2).
+  - **OD-25 App shell navigation:** left sidebar vs restyled top nav [M8.6] — RESOLVED by D-084 (left sidebar).
+  - **OD-26 Deep links to a file line / commit on the source host:** amend D-067 (links only from stored host +
+    project + validated commit SHA + encoded path) [M8.6] — RESOLVED by D-084.
+  - **OD-27 Migration numbering if the IaC severity override (V20 per D-077) is not in M8.5:** Flyway would need
+    out-of-order to add V20 after V21 [M8.5] — RESOLVED by D-083 (IaC override ships as V20 in M8.5).
+  - **OD-28 Container scan engine + registry auth model** (spike decides) [containers].
+  - **OD-29 Git-history secrets:** lifecycle (cannot be solved by deletion) + author attribution privacy (name
+    only vs name + email) [later].
+  - **OD-30 GitHub access model** (fine-grained PAT vs GitHub App) [M8.7] — RESOLVED by D-085 (fine-grained PAT
+    first, read-only Contents + Metadata, UI-only; GitHub App later).
+  - **OD-31 Public repositories** (how added, cloned and branch-listed) [M8.7] — RESOLVED by D-085 (added by URL,
+    cloned anonymously over HTTPS, branch listing via the unauthenticated API; no public-repo search/listing).
 
 ## D-021 M1b real-GitLab check deferred to M2 (2026-10-13, accepted; DONE 2026-10-14)
 Context: M1b logic is covered by WireMock + Testcontainers tests; M1 already proved real GitLab connectivity.

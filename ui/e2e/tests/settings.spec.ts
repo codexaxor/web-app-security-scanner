@@ -47,3 +47,15 @@ test("the EPSS toggle moves the low-EPSS finding between Focus and Ignored", asy
   await expect.poll(() => lowEpssStatus(request), { timeout: 20000 }).toBe("open");
   expect(await inFocusFeed(request)).toBe(true);
 });
+
+test("Workspace settings shows plain-language EPSS text and links to the LOW_EPSS Ignored filter", async ({
+  page,
+}) => {
+  await signIn(page, "/settings");
+  await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
+  await expect(page.getByText(/estimates how likely a vulnerability is to be exploited/i)).toBeVisible();
+
+  await page.getByTestId("low-epss-link").click();
+  await expect(page).toHaveURL(/\/ignored\?reason=LOW_EPSS/);
+  await expect(page.getByTestId("reason-filter")).toBeVisible();
+});

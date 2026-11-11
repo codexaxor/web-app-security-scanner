@@ -1,20 +1,10 @@
 /* Component styles (S10c). Depends on tokens.css + base.css. One class per design-system component. */
 
-/* ---------- app shell ---------- */
+/* ---------- app shell (D-084/OD-25: left sidebar) ---------- */
 .app {
+  display: grid;
+  grid-template-columns: 232px 1fr;
   min-height: 100vh;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  padding: var(--sp-2) var(--sp-4);
-  min-height: 56px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 .brand {
   display: inline-flex;
@@ -26,57 +16,349 @@
   color: var(--text);
 }
 .brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--accent), var(--status-solved));
+  flex: none;
+  color: var(--shell-accent);
 }
-.nav {
-  display: flex;
-  gap: var(--sp-1);
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-wrap: wrap;
+.brand-name {
+  font-weight: 750;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
 }
-.nav-link {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 var(--sp-3);
+
+/* keyboard: jump straight to main content, first tab stop */
+.skip-link {
+  position: absolute;
+  left: var(--sp-2);
+  top: -48px;
+  z-index: 60;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  color: var(--muted);
-  font-weight: 550;
-  text-decoration: none;
+  transition: top 0.12s ease;
 }
-.nav-link:hover {
-  color: var(--text);
-  background: var(--surface-2);
-  text-decoration: none;
+.skip-link:focus-visible {
+  top: var(--sp-2);
 }
-.nav-link.active {
-  color: var(--accent);
-  background: var(--status-new-bg);
-  font-weight: 650;
+
+/* The sidebar is the grid CELL: its navy background stretches to the full grid-row height (which is at least
+ * 100vh, taller when the page content is taller), so the navy chrome never stops mid-page (S11.1). The nav
+ * itself lives in .sidebar-inner, which is sticky and 100vh with its own scroll. */
+.sidebar {
+  border-right: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  z-index: var(--z-drawer);
 }
-.topbar-user {
+.sidebar-inner {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-3);
+  overflow-y: auto;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--shell-text);
+}
+.sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+.sidenav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* S11.5: a plain muted section label (not a toggle button) above each group. */
+.sidenav-section {
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--shell-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sidenav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidenav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  color: var(--muted);
-  font-size: var(--fs-sm);
+  height: 38px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius);
+  color: var(--shell-muted);
+  font-weight: 550;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.sidenav-link:hover {
+  color: var(--shell-text);
+  background: var(--shell-surface);
+  text-decoration: none;
+}
+.sidenav-link.active {
+  color: var(--shell-active-text);
+  background: var(--shell-active-bg);
+  font-weight: 650;
+}
+.sidenav-link.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--shell-accent);
+}
+.sidenav-icon {
+  font-size: 19px;
   flex: none;
-  margin-left: auto;
+}
+.sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--shell-border);
+}
+/* S11.5: the one control that collapses the whole sidebar to icons. */
+.sidebar-collapse {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.sidebar-collapse:hover {
+  background: var(--shell-surface);
+  color: var(--shell-text);
+}
+/* Collapsed sidebar (desktop only): a narrow icon rail — labels, section titles and the brand/user text hide. */
+@media (min-width: 1025px) {
+  .app.sidebar-collapsed {
+    grid-template-columns: 64px 1fr;
+  }
+  .sidebar-collapsed .sidenav-label,
+  .sidebar-collapsed .brand-name,
+  .sidebar-collapsed .sidenav-section,
+  .sidebar-collapsed .user-menu-name,
+  .sidebar-collapsed .user-menu-caret {
+    display: none;
+  }
+  .sidebar-collapsed .sidebar-inner {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+  .sidebar-collapsed .sidebar-brand,
+  .sidebar-collapsed .sidenav-link,
+  .sidebar-collapsed .user-menu-trigger,
+  .sidebar-collapsed .sidebar-collapse {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+.theme-control {
+  width: 100%;
 }
 .theme-control button {
+  flex: 1;
   height: 28px;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-1);
   font-size: var(--fs-xs);
   font-weight: 600;
 }
+
+/* user menu (footer of the navy sidebar) */
+.user-menu {
+  position: relative;
+}
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-text);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.user-menu-trigger:hover {
+  background: var(--shell-surface);
+}
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--shell-accent);
+  color: var(--shell-bg);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+}
+.user-menu-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.user-menu-caret {
+  font-size: 15px;
+  color: var(--shell-muted);
+}
+.user-menu-pop {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-palette);
+}
+.user-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.user-menu-heading {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.content:focus {
+  /* main is a programmatic focus target (skip link, palette close after navigation) — not an interactive
+     control, so no ring around the whole page (M8.11 review SF-4). */
+  outline: none;
+}
 .content {
   max-width: var(--content-max);
+  width: 100%;
   margin: 0 auto;
-  padding: var(--sp-6) var(--sp-4) var(--sp-8);
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
+}
+
+/* top app-bar + off-canvas drawer — only below the sidebar breakpoint */
+.appbar {
+  display: none;
+}
+.appbar-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+  border: 1px solid var(--shell-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--shell-text);
+  cursor: pointer;
+}
+.appbar-menu:hover {
+  background: var(--shell-surface);
+}
+.appbar .brand {
+  color: var(--shell-text);
+}
+.scrim {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .app {
+    grid-template-columns: 1fr;
+    /* M8.10 self-review D-1: on a page shorter than the viewport the implicit rows (app bar, content) shared the
+     * min-height: 100vh slack, so the app bar stretched into a tall empty band (M8.11 Settings 390 showed it
+     * too). Pack the rows at the top instead. */
+    align-content: start;
+  }
+  .appbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    height: var(--appbar-h); /* fixed, so sticky table headers can offset by exactly this (N-3) */
+    border-bottom: 1px solid var(--shell-border);
+    background: var(--shell-bg);
+    color: var(--shell-text);
+    position: sticky;
+    top: 0;
+    z-index: 30;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 264px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.16s ease;
+    box-shadow: var(--shadow-2);
+  }
+  .app.nav-open .sidebar {
+    transform: none;
+  }
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    border: none;
+    padding: 0;
+    background: rgba(8, 12, 16, 0.5);
+    cursor: default;
+  }
+  .content {
+    padding: var(--sp-4) var(--sp-4) var(--sp-6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }
 
 /* sign-in */
@@ -92,6 +374,55 @@
   justify-content: center;
   margin-bottom: var(--sp-6);
 }
+.signin-brand .brand-mark {
+  color: var(--accent);
+}
+/* M8.13: the brand on /login and /signup is a link home — keep it looking like the wordmark. */
+a.signin-brand {
+  color: var(--text);
+  text-decoration: none;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+a.signin-brand:hover .brand {
+  text-decoration: underline;
+}
+.auth-shell-home {
+  margin: var(--sp-4) 0 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+/* Login card (M8.11): the sign-in form sits in a surface card for a polished, focused screen. */
+.signin-form {
+  max-width: none;
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+/* The room M8.11 reserved under the form: M8.10's "Create account" link (and the sign-up page's way back). */
+.signin-footer {
+  min-height: var(--sp-5);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+/* M8.10 self-review D-2: a button that acts as a link in the card footer reads like the footer's real links
+ * (normal weight, footer size) instead of the bold .btn-link default. */
+.signin-footer .btn-link {
+  font-weight: inherit;
+  font-size: inherit;
+}
+/* M8.10 sign-up / awaiting-approval cards reuse the sign-in card; a field hint sits under its input. */
+.signin-form .field-hint {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+.signin-form .signin-note {
+  margin: 0;
+}
 
 /* ---------- page header ---------- */
 .page-header {
@@ -99,7 +430,9 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
 }
 .page-header .subtitle {
   color: var(--muted);
@@ -202,6 +535,14 @@
   border-radius: var(--radius-lg);
   padding: var(--sp-4);
   box-shadow: var(--shadow-1);
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+/* Linked cards (e.g. the Dashboard band tiles) lift on hover; static cards are unaffected. */
+a.card:hover,
+.card-link:hover {
+  box-shadow: var(--shadow-2);
+  border-color: var(--border-strong);
+  text-decoration: none;
 }
 .card-head {
   display: flex;
@@ -238,12 +579,12 @@ a.stat-link:hover .stat-num {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
   box-shadow: var(--shadow-1);
 }
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .table th,
 .table td {
@@ -252,7 +593,17 @@ a.stat-link:hover .stat-num {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
+/* S11.3: compact rows (~44–48px) — tighter vertical padding on body cells; the header keeps its padding. */
+.table td {
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
+/* Sticky header (design pass, item 2) — the wrapper no longer clips, so the header sticks to the viewport as
+ * the page scrolls; corners are rounded on the edge cells instead of by overflow:hidden. */
 .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--surface-2);
   font-size: var(--fs-xs);
   text-transform: uppercase;
@@ -260,19 +611,84 @@ a.stat-link:hover .stat-num {
   color: var(--muted);
   font-weight: 650;
 }
+/* 721–1024px: the sticky navy app-bar occupies the top of the viewport, so the sticky header sticks just below
+ * it instead of sliding underneath (M8.11 review N-3). At <= 720px headers are static (wide tables scroll). */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .table thead th {
+    top: var(--appbar-h);
+  }
+}
+.table thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+.table thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+.table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius-lg);
+}
+.table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius-lg);
+}
 .table tbody tr:last-child td {
   border-bottom: none;
 }
+/* Whole-row click via a REAL link (M8.11, approved change #4): the row's primary cell holds a .row-link whose
+ * ::after is stretched over the whole row, so left-click anywhere on the row follows the link while Enter,
+ * middle-click and Ctrl/⌘-click all work as a normal anchor. No onClick-only <tr>. Other interactive controls
+ * in the row sit above the overlay (z-index) so they remain independently clickable. */
 .table tbody tr.row-click {
+  position: relative;
   cursor: pointer;
 }
 .table tbody tr.row-click:hover td,
-.table tbody tr.row-click:focus-visible td {
+.table tbody tr.row-click:focus-within td {
   background: var(--surface-2);
 }
-.table tbody tr.row-click:focus-visible {
+.row-link {
+  color: inherit;
+  text-decoration: none;
+}
+.row-link:hover {
+  text-decoration: none;
+}
+/* A real <button> that opens an in-page panel (not navigation), stretched over the row like .row-link (S11.9). */
+.row-link-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-link::after,
+.row-link-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.row-link:focus-visible,
+.row-link-btn:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.table tbody tr.row-click td :is(a, button, input, select, label, .rowmenu):not(.row-link):not(.row-link-btn) {
+  position: relative;
+  z-index: 1;
+}
+/* The full repository path is reference text people copy: keep it ABOVE the row-link overlay so it can be
+ * selected (a click on the path selects text instead of navigating; the name link and the rest of the row
+ * still open the repository) — M8.11 review N-8. */
+.table tbody tr.row-click td .repo-path {
+  position: relative;
+  z-index: 1;
+  width: fit-content; /* only the text itself sits above the overlay, not the empty rest of the cell */
+  cursor: text;
+  user-select: text;
 }
 .cell-num {
   text-align: right;
@@ -363,6 +779,99 @@ a.stat-link:hover .stat-num {
   opacity: 0.6;
 }
 
+/* ---------- severity count chips (design pass item 2; severity ONLY) ---------- */
+.sev-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.sev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.sev-chip-label {
+  letter-spacing: 0.01em;
+}
+.sev-chip-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+.sev-chip.sev-critical {
+  color: var(--sev-critical);
+  background: var(--sev-critical-bg);
+  border-color: var(--sev-critical);
+}
+.sev-chip.sev-high {
+  color: var(--sev-high);
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high);
+}
+.sev-chip.sev-medium {
+  color: var(--sev-medium);
+  background: var(--sev-medium-bg);
+  border-color: var(--sev-medium);
+}
+.sev-chip.sev-low {
+  color: var(--sev-low);
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low);
+}
+/* zero counts read as muted/neutral — never a severity color */
+.sev-chip.is-zero {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+/* ---------- loading skeletons (design pass item 2) ---------- */
+.skeleton {
+  display: inline-block;
+  width: 100%;
+  height: 1em;
+  min-height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+  vertical-align: middle;
+}
+.skeleton-row td {
+  border-bottom: 1px solid var(--border);
+}
+.skeleton-lines {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+.skeleton-lines .skeleton {
+  height: 14px;
+}
+.skeleton-lines .skeleton:last-child {
+  width: 60%;
+}
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* ---------- status chip ---------- */
 .chip {
   display: inline-flex;
@@ -432,12 +941,39 @@ a.stat-link:hover .stat-num {
 }
 .repo-path {
   display: block;
-  max-width: 320px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+
+/* L1: the Repositories name cell — line 1 (badge + name + "· branch") never wraps (the name truncates), the
+   full path is line 2 (truncated, full path in a title tooltip). Identical at 1280 and 1440. */
+.repo-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+}
+.repo-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.repo-line .provider-badge,
+.repo-line .branch-label,
+.repo-line .chip {
+  flex: none; /* only the name shrinks/truncates */
+}
+.repo-line .repo-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
 }
 
 /* KEV / attribution small markers */
@@ -637,12 +1173,134 @@ button.health-item {
 }
 
 /* ---------- toolbar / filters ---------- */
+/* ---------- page template (S11.2): top bar + toolbar groups + KPI strip ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.topbar-left {
+  min-width: 0;
+  flex: 1;
+}
+.topbar-here {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.topbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: text;
+  flex: none;
+  transition: border-color var(--transition-fast);
+}
+.topbar-search:hover {
+  border-color: var(--accent);
+}
+.topbar-search-icon {
+  font-size: 16px;
+  flex: none;
+}
+.topbar-search-text {
+  flex: 1;
+  text-align: left;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-search-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+/* S11.10: KPI cards share a row height (grid stretch); centre their content so short cards (a single number,
+ * a last-scan line) don't leave an empty gap at the bottom. */
+.kpi-strip > .card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+/* KPI card icon (S11.8) */
+.kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 16px;
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.stat-card-warn .kpi-icon,
+.stat-card-warn .stat-num {
+  color: var(--sev-high);
+}
+/* type-bar icon (S11.8) — coloured per finding type via an inline CSS var on the wrapper */
+.hbar-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  margin-right: var(--sp-1);
+}
+.hbar-label {
+  display: inline-flex;
+  align-items: center;
+}
+/* a repository name used as a link inside a table cell */
+.repo-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+.repo-name-link:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 .toolbar {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+.toolbar-main {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: var(--sp-4);
+  flex: 1;
+  min-width: 0;
+}
+.toolbar-right {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex: none;
 }
 .toolbar select,
 .toolbar input[type="text"],
@@ -1032,6 +1690,73 @@ button.health-item {
   font-weight: 650;
   color: var(--text-2);
 }
+.empty-action {
+  margin-top: var(--sp-2);
+}
+
+/* ---------- first-run checklist (M8.11 item 5) ---------- */
+.checklist {
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.checklist-head {
+  margin-bottom: var(--sp-3);
+}
+.checklist-head .section-head {
+  margin: 0;
+}
+.checklist-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.checklist-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.checklist-step.done {
+  background: var(--status-solved-bg);
+  border-color: transparent;
+}
+.checklist-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+.checklist-step.done .checklist-marker {
+  background: var(--status-solved);
+  color: var(--accent-contrast);
+}
+.checklist-body {
+  flex: 1;
+  min-width: 0;
+}
+.checklist-label {
+  font-weight: 650;
+  color: var(--text);
+}
+.checklist-desc {
+  font-size: var(--fs-sm);
+}
 
 /* row title + muted subtitle */
 .stack-tight {
@@ -1041,12 +1766,16 @@ button.health-item {
 .mono-sub {
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  word-break: break-all;
+  /* L2: rule ids never break mid-word — one line, truncated with … (full id in the title tooltip). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 /* advisory / description subtitles stay in the body font (never monospace) */
 .subtitle-text {
   font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word; /* L2: wrap at word boundaries, never mid-word */
 }
 
 /* ---------- pager ---------- */
@@ -1058,6 +1787,29 @@ button.health-item {
   margin-top: var(--sp-3);
   color: var(--muted);
   font-size: var(--fs-sm);
+  flex-wrap: wrap;
+}
+/* S11.2/S11.3: the pager lives in the content-card footer, not floating below the card. */
+.table-wrap > .pager {
+  margin-top: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.pager-range {
+  margin-right: auto; /* range on the left, controls on the right */
+}
+.pager-size {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.pager-nav {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
 }
 
 /* ---------- responsive ---------- */
@@ -1073,6 +1825,39 @@ button.health-item {
   }
   .hbar {
     grid-template-columns: 120px 1fr 40px;
+  }
+  /* First-run checklist (M8.11): at phone width the CTA wraps to its own full-width line. */
+  .checklist {
+    padding: var(--sp-4);
+  }
+  .checklist-step {
+    flex-wrap: wrap;
+  }
+  .checklist-body {
+    min-width: 0;
+  }
+  .checklist-step .btn {
+    width: 100%;
+  }
+  /* Command palette: full-bleed-ish on small screens, anchored nearer the top. */
+  .palette-backdrop {
+    padding: var(--sp-6) var(--sp-3) var(--sp-3);
+  }
+  /* S11: the top-bar search collapses to an icon-only button so the top bar fits phone width. */
+  .topbar-search {
+    min-width: 0;
+    max-width: none;
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+  .topbar-search-text,
+  .topbar-search-kbd {
+    display: none;
+  }
+  /* S11.10: a consistent, no-overflow 2-column KPI grid on phones (minmax(0,…) lets cards shrink to fit). */
+  .kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1116,4 +1901,684 @@ button.health-item {
 .branch-name {
   flex: 1;
   overflow-wrap: anywhere;
+}
+
+/* ---------- M8.6: inline-svg icon base, search field, row menu, repo page ---------- */
+.icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+/* search input with a leading icon */
+.search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.search-field .search-icon {
+  position: absolute;
+  left: var(--sp-2);
+  font-size: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.search-field input[type="search"] {
+  height: 34px;
+  min-width: 220px;
+  padding: 0 var(--sp-2) 0 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+/* row / header overflow (⋮) menu */
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+/* M8.10 self-review D-3: a pair of row buttons (Approve / Reject) stays on one line, right-aligned. */
+.cell-actions .row {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+/* M8.10 operator tables: a long email / workspace name truncates (full value in the title tooltip) instead of
+ * forcing the table wider. */
+.op-ident {
+  display: block;
+  max-width: 32ch;
+}
+.rowmenu {
+  position: relative;
+  display: inline-block;
+}
+.rowmenu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rowmenu-trigger:hover,
+.rowmenu-trigger[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.rowmenu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 25;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  text-align: left;
+}
+.rowmenu-item,
+.rowmenu-item-wrap > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px var(--sp-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.rowmenu-item:hover,
+.rowmenu-item-wrap > button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.rowmenu-item-wrap > button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* repository page header */
+.breadcrumb {
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.breadcrumbs {
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.breadcrumbs a {
+  color: var(--muted);
+}
+.breadcrumbs a:hover {
+  color: var(--accent);
+}
+.breadcrumbs [aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.breadcrumb-sep {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ---------- ⌘K command palette ---------- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh var(--sp-4) var(--sp-4);
+  background: rgba(8, 12, 24, 0.5);
+}
+.palette {
+  width: 100%;
+  max-width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.palette-search-icon {
+  font-size: 18px;
+  color: var(--muted);
+  flex: none;
+}
+.palette-input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md);
+  outline: none;
+}
+.palette-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.palette-list {
+  margin: 0;
+  padding: var(--sp-2);
+  list-style: none;
+  overflow-y: auto;
+}
+.palette-empty {
+  padding: var(--sp-4);
+  text-align: center;
+  color: var(--muted);
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.palette-item.active {
+  background: var(--status-new-bg);
+  color: var(--accent);
+}
+.palette-item-icon {
+  font-size: 18px;
+  flex: none;
+  color: var(--muted);
+}
+.palette-item.active .palette-item-icon {
+  color: var(--accent);
+}
+.palette-item-label {
+  font-weight: 600;
+  flex: none;
+  max-width: 45%;
+}
+.palette-item-sub {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-left: auto;
+}
+.repo-header-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.repo-lastscan {
+  margin-top: calc(-1 * var(--sp-2));
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- M8.6: repo page tabs, coverage banner, issue-table cells ---------- */
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  margin: var(--sp-4) 0;
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.coverage-banner {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+.coverage-banner .coverage-icon {
+  font-size: 18px;
+  color: var(--warn);
+  margin-top: 2px;
+}
+.coverage-banner ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.settings-card {
+  padding: var(--sp-4);
+}
+.type-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.type-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  flex: none;
+}
+.category-tag {
+  font-size: var(--fs-xs);
+}
+.location-cell {
+  /* L2: location on its own line (truncated from the START), "+N more" chip below it. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.location-path {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Truncate from the START so the file name stays visible ("…/terraform/networking.tf"). */
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.more-chip {
+  font-size: var(--fs-xs);
+}
+
+/* ---------- M8.6: issue side panel (gauge, sections, location grouping, nav) ---------- */
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.panel-firstseen {
+  font-size: var(--fs-xs);
+  margin-top: 2px;
+}
+.panel-nav {
+  gap: var(--sp-1);
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.icon-btn:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.category-chip {
+  font-weight: 600;
+}
+
+.gauge {
+  --gauge-color: var(--border-strong);
+  width: 60px;
+  height: 60px;
+  flex: none;
+  border-radius: 50%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  grid-auto-flow: row;
+  background: conic-gradient(var(--gauge-color) calc(var(--pct, 0) * 1%), var(--surface-3) 0);
+}
+.gauge::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.gauge-score {
+  position: relative;
+  z-index: 1;
+  font-weight: 750;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.gauge-band {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.gauge-critical {
+  --gauge-color: var(--sev-critical);
+}
+.gauge-high {
+  --gauge-color: var(--sev-high);
+}
+.gauge-medium {
+  --gauge-color: var(--sev-medium);
+}
+.gauge-low {
+  --gauge-color: var(--sev-low);
+}
+
+.panel-section {
+  margin-bottom: var(--sp-4);
+}
+.panel-h3 {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+}
+.panel-text {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.loc-group {
+  margin-top: var(--sp-4);
+}
+.loc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-bottom: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 650;
+  font-size: var(--fs-sm);
+}
+
+/* ---------- M8.6: source-host deep links (file / commit) ---------- */
+.source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+}
+.source-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Provider badge (M8.7): an inline monogram chip keyed by data-provider; no icon library (D-066). */
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.25rem;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  vertical-align: middle;
+}
+.provider-badge[data-provider="github"] {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.provider-badge[data-provider="gitlab"] {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* M8.8 D-091: a persistent red banner across the top when the server runs in demo mode. Solid danger red with
+   white text for AA contrast in both themes; spans the full width above the app shell. */
+.demo-ribbon {
+  grid-column: 1 / -1;
+  background: var(--danger);
+  color: var(--danger-contrast);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: 6px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+/* ---------- M8.8 item 6: inline errors + toast system ---------- */
+.inline-error {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-4);
+}
+
+/* One fixed, polite aria-live region, bottom-right, above everything. */
+.toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-2, 0 6px 20px rgba(0, 0, 0, 0.18));
+  animation: toast-in 160ms ease-out;
+}
+.toast-message {
+  flex: 1;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.toast-success {
+  border-color: var(--ok);
+  border-left: 4px solid var(--ok);
+}
+.toast-info {
+  border-left: 4px solid var(--accent);
+}
+.toast-error {
+  border-color: var(--error-border);
+  border-left: 4px solid var(--danger);
+}
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* ---------- M8.8 item 7: Sources wizard ---------- */
+.help-box {
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  display: grid;
+  gap: var(--sp-2);
+}
+.help-box strong {
+  color: var(--text);
+}
+.help-box p {
+  margin: 0;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.rowmenu-item.danger {
+  color: var(--danger);
+}
+
+/* M8.8 item 9: the Ignored reason-filter chip (from the Workspace settings LOW_EPSS link). */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2, var(--surface));
+  font-size: var(--fs-sm);
+}
+
+/* M8.8 item 10: busy buttons show a spinner (reduced-motion → a static ring). */
+.btn.is-busy {
+  position: relative;
+  color: transparent !important;
+}
+.btn.is-busy::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid currentcolor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  color: var(--accent-contrast);
+  animation: btn-spin 0.6s linear infinite;
+}
+.btn-secondary.is-busy::after,
+.btn-ghost.is-busy::after {
+  color: var(--text);
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.is-busy::after {
+    animation: none;
+    border-top-color: currentcolor;
+    opacity: 0.5;
+  }
+}
+
+/* L5: Sources wizard — form + help box; the help box moves to a right-hand column at ≥1280, stacked below
+   on narrower screens. */
+.source-wizard {
+  display: grid;
+  gap: var(--sp-4);
+}
+@media (min-width: 1280px) {
+  .source-wizard {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+  }
 }

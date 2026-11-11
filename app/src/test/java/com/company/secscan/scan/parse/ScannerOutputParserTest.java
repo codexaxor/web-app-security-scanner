@@ -552,6 +552,8 @@ class ScannerOutputParserTest {
                 .orElseThrow();
         assertThat(failed.filePath()).isEqualTo("main.tf");            // leading slash stripped
         assertThat(failed.packageName()).isEqualTo("aws_security_group.open"); // resource in the package column
+        // D-083: Checkov's check_name is carried in advisory_summary (→ the IaC title).
+        assertThat(failed.advisorySummary()).isEqualTo("Ensure every security group rule has a description");
 
         // D-037: the inline-skipped check is RECOVERED and promoted to a finding.
         RawFinding recovered = findings.stream().filter(f -> f.ruleId().equals("CKV_AWS_21")).findFirst()
@@ -568,6 +570,23 @@ class ScannerOutputParserTest {
         assertThat(docker.packageName()).doesNotStartWith("/").doesNotEndWith(".").doesNotContain("//");
         // A Terraform resource is already clean and is left untouched.
         assertThat(failed.packageName()).isEqualTo("aws_security_group.open");
+    }
+
+    @org.junit.jupiter.api.Test
+    void languagesJsonParsedInOrderAndMissingFileIsEmpty(@TempDir Path outDir) throws Exception {
+        Path file = outDir.resolve("languages.json");
+        java.nio.file.Files.writeString(file, "{\"languages\":[\"Java\",\"Kotlin\",\"TypeScript\"],\"status\":\"ok\"}");
+        assertThat(parser.readLanguages(file)).containsExactly("Java", "Kotlin", "TypeScript");
+        // A missing file (detector did not run) → empty, so the worker leaves stored languages unchanged.
+        assertThat(parser.readLanguages(outDir.resolve("absent.json"))).isEmpty();
+        // An error document with an empty list → empty.
+        Path err = outDir.resolve("err.json");
+        java.nio.file.Files.writeString(err, "{\"languages\":[],\"status\":\"error\"}");
+        assertThat(parser.readLanguages(err)).isEmpty();
+        // N-4: a non-"ok" status is honoured even when the array is non-empty — the stored languages are kept.
+        Path stale = outDir.resolve("stale.json");
+        java.nio.file.Files.writeString(stale, "{\"languages\":[\"Java\"],\"status\":\"error\"}");
+        assertThat(parser.readLanguages(stale)).isEmpty();
     }
 
     @org.junit.jupiter.api.Test

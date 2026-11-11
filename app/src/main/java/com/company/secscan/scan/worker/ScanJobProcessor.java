@@ -1,6 +1,6 @@
 package com.company.secscan.scan.worker;
 
-import com.company.secscan.config.TokenCipherHolder;
+import com.company.secscan.source.SourceCredentials;
 import com.company.secscan.gitlab.GitLabClient;
 import com.company.secscan.gitlab.GitLabError;
 import com.company.secscan.gitlab.GitLabException;
@@ -56,7 +56,7 @@ public class ScanJobProcessor {
     private final ScanJobRepository jobs;
     private final RepositoryRepository repositories;
     private final GitlabConnectionRepository connections;
-    private final TokenCipherHolder cipher;
+    private final SourceCredentials credentials;
     private final GitLabClient client;
     private final RepositoryConnectionGuard guard;
     private final ScannerLauncher launcher;
@@ -64,16 +64,19 @@ public class ScanJobProcessor {
     private final ScanStateService state;
     private final ScannerProperties props;
     private final GitLabHostPolicy hostPolicy;
+    private final com.company.secscan.source.ProviderRegistry providers;
+    private final ActiveScans activeScans;
 
     public ScanJobProcessor(ScanRepository scans, ScanJobRepository jobs, RepositoryRepository repositories,
-                            GitlabConnectionRepository connections, TokenCipherHolder cipher, GitLabClient client,
+                            GitlabConnectionRepository connections, SourceCredentials credentials, GitLabClient client,
                             RepositoryConnectionGuard guard, ScannerLauncher launcher, ScannerOutputParser parser,
-                            ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy) {
+                            ScanStateService state, ScannerProperties props, GitLabHostPolicy hostPolicy,
+                            com.company.secscan.source.ProviderRegistry providers, ActiveScans activeScans) {
         this.scans = scans;
         this.jobs = jobs;
         this.repositories = repositories;
         this.connections = connections;
-        this.cipher = cipher;
+        this.credentials = credentials;
         this.client = client;
         this.guard = guard;
         this.launcher = launcher;
@@ -81,6 +84,8 @@ public class ScanJobProcessor {
         this.state = state;
         this.props = props;
         this.hostPolicy = hostPolicy;
+        this.providers = providers;
+        this.activeScans = activeScans;
     }
 
     public void process(UUID jobId) {
@@ -93,6 +98,20 @@ public class ScanJobProcessor {
         }
         UUID workspaceId = job.getWorkspaceId();
         Scan scan = scans.findByIdAndWorkspaceId(job.getScanId(), workspaceId).orElseThrow();
+        // M8.14: register this scan as live BEFORE any per-scan workspace dir or scanner container exists, and
+        // clear it (in finally) only AFTER both are gone, so ScanReaper never mistakes an in-flight scan for a
+        // crash/restart leftover. One worker per instance id is assumed (D-102).
+        String activeKey = scan.getId().toString();
+        activeScans.markActive(activeKey);
+        try {
+            processClaimed(job, workspaceId, scan);
+        } finally {
+            activeScans.clear(activeKey);
+        }
+    }
+
+    private void processClaimed(ScanJob job, UUID workspaceId, Scan scan) {
+        UUID jobId = job.getId();
         Repository repo = repositories.findByIdAndWorkspaceId(scan.getRepositoryId(), workspaceId).orElseThrow();
         GitlabConnection conn = repo.getConnectionId() == null ? null
                 : connections.findByIdAndWorkspaceId(repo.getConnectionId(), workspaceId).orElse(null);
@@ -127,11 +146,44 @@ public class ScanJobProcessor {
             }
         }
 
-        String token = isLocal(conn) ? null : cipher.require().decrypt(conn.getTokenCiphertext());
+        // No token for a local fixture clone; a public (credential_kind none) connection resolves to null
+        // (anonymous) via the shared helper. A token-kind connection with a blank/missing ciphertext is a broken
+        // connection — fail the scan permanently (SF-5b), reconcile nothing, do not retry.
+        String token;
+        try {
+            token = isLocal(conn) ? null : credentials.tokenFor(conn);
+        } catch (com.company.secscan.source.MissingCredentialException e) {
+            state.failPermanently(workspaceId, jobId, scan.getId(), "CONNECTION_TOKEN_MISSING",
+                    "Connection needs a new token.");
+            return;
+        } catch (com.company.secscan.source.UnreadableCredentialException e) {
+            // M8.10 S12: rotated key / damaged ciphertext — permanent (a retry cannot fix it), reconcile nothing.
+            state.failPermanently(workspaceId, jobId, scan.getId(),
+                    com.company.secscan.source.UnreadableCredentialException.CODE, e.getMessage());
+            return;
+        }
 
         ScanWorkspace ws;
+        String scanKey = scan.getId().toString();
         try {
-            ws = ScanWorkspace.create(Path.of(props.getWorkRoot()), scan.getId().toString());
+            // Review S1: a dir left by an earlier, dead run of THIS scan (crash before the reaper ran) is replaced —
+            // but only if this run is the scan's sole holder, decided under ActiveScans' lock so neither the reaper
+            // nor a concurrent run of the same scan can interleave. A dir held by another live run is left alone.
+            ws = activeScans.underLock(() -> ScanWorkspace.create(Path.of(props.getWorkRoot()),
+                    props.getInstanceId(), scanKey, activeScans.holders(scanKey) == 1));
+        } catch (ScanWorkspace.WorkspaceBusyException e) {
+            state.failOrRequeue(workspaceId, jobId, scan.getId(), "scan workspace busy: " + e.getMessage());
+            return;
+        } catch (java.io.UncheckedIOException e) {
+            if (e.getCause() instanceof java.nio.file.FileAlreadyExistsException) {
+                // A leftover that could not be cleared (or a race): transient, never a permanent config failure.
+                state.failOrRequeue(workspaceId, jobId, scan.getId(),
+                        "scan workspace already exists and could not be replaced");
+                return;
+            }
+            state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",
+                    "scan work root not writable (" + props.getWorkRoot() + "): " + e.getMessage());
+            return;
         } catch (RuntimeException e) {
             // Config error (work root missing / not writable by the worker user): fail once, do not retry.
             state.failPermanently(workspaceId, jobId, scan.getId(), "WORK_ROOT_NOT_WRITABLE",
@@ -215,16 +267,18 @@ public class ScanJobProcessor {
      */
     private boolean probeProvisionalAccess(Repository repo, GitlabConnection conn, String token, UUID workspaceId,
                                            UUID jobId, UUID scanId) {
-        if (!repo.isProvisional() || isLocal(conn)) {
+        // The D-020 provisional-reassignment probe is GitLab group/project reachability (RepositoryConnectionGuard);
+        // GitHub/public repos have no equivalent multi-connection reassignment, so they simply proceed.
+        if (!repo.isProvisional() || isLocal(conn) || !"gitlab".equals(repo.getProvider())) {
             return true;
         }
         try {
             client.projectLanguages(conn.getBaseUrl(), token, repo.getGitlabProjectId());
-            guard.confirm(conn.getId());
+            guard.confirm(workspaceId, conn.getId());
             return true;
         } catch (GitLabException e) {
             if (accessDenied(e.getError())) {
-                guard.deactivate(conn.getId());
+                guard.deactivate(workspaceId, conn.getId());
                 state.resolveNoAccess(workspaceId, jobId, scanId,
                         "connection cannot reach repository: " + e.getError());
             } else {
@@ -252,10 +306,13 @@ public class ScanJobProcessor {
         // The branch to clone was snapshotted onto the scan at enqueue (D-076); fall back to the repo default for
         // any legacy scan row with no branch.
         String branch = scan.getBranch() != null ? scan.getBranch() : repo.getDefaultBranch();
+        // git basic-auth username for a token clone: GitHub wants x-access-token, GitLab oauth2 (D-014).
+        String cloneAuthUser = "github".equals(repo.getProvider()) ? "x-access-token" : "oauth2";
         return new ScannerLaunchSpec(scan.getId().toString(), props.getImage(), cloneUrl,
                 branch, props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
                 props.getTmpfsSize(), props.getMemory().toBytes(), props.getCpus(), props.getPidsLimit(),
-                networkDisabled, ws.ownerUserSpec(), props.getTimeout());
+                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser, props.getInstanceId(),
+                props.isTaintIntrafile());
     }
 
     private static String httpsCloneUrl(String baseUrl, String pathWithNamespace) {
@@ -287,19 +344,24 @@ public class ScanJobProcessor {
      * </ul>
      */
     BranchVerdict branchVerdict(Repository repo, GitlabConnection conn, String token, String branch) {
+        com.company.secscan.source.SourceProvider adapter = providers.require(repo.getProvider());
+        boolean branchExists;
         try {
-            client.getBranch(conn.getBaseUrl(), token, repo.getGitlabProjectId(), branch);
+            branchExists = adapter.branchExists(conn.getBaseUrl(), token, repo.getProviderRepoId(), branch);
+        } catch (com.company.secscan.source.ProviderException e) {
+            // Any non-404 error (401/403/5xx/timeout/redirect) → proceed rather than wrongly flag the branch gone.
+            return BranchVerdict.TRANSIENT;
+        }
+        if (branchExists) {
             return BranchVerdict.OK;
-        } catch (GitLabException e) {
-            if (e.getError() != GitLabError.BRANCH_NOT_FOUND) {
-                return BranchVerdict.TRANSIENT;
-            }
-            try {
-                client.getProject(conn.getBaseUrl(), token, repo.getGitlabProjectId());
-                return BranchVerdict.MISSING;              // project reachable, branch genuinely gone
-            } catch (GitLabException projectError) {
-                return BranchVerdict.PROJECT_UNREACHABLE;  // 404 was the project / no access, not the branch
-            }
+        }
+        // Branch not found — is the repository itself reachable? Reachable → the branch is genuinely gone;
+        // unreachable (404 / no access / other) → a distinct project failure, never a branch-missing flag.
+        try {
+            adapter.getRepository(conn.getBaseUrl(), token, repo.getProviderRepoId());
+            return BranchVerdict.MISSING;
+        } catch (com.company.secscan.source.ProviderException projectError) {
+            return BranchVerdict.PROJECT_UNREACHABLE;
         }
     }
 

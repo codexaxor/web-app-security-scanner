@@ -61,7 +61,7 @@ class SensitivityRescoreConcurrencyIT extends AbstractGitLabIT {
         toSolve.solve();
         subIssues.save(toSolve);
         var solvedAt = subIssues.findById(solvedId).orElseThrow().getSolvedAt();
-        repoService.patch(repo.getId(), "high", null, null); // triggers rescoreRepository
+        repoService.patch(Workspace.DEFAULT_ID, repo.getId(), "high", null, null, null); // triggers rescoreRepository
 
         SubIssue afterSolved = subIssues.findById(solvedId).orElseThrow();
         assertThat(afterSolved.getStatus()).isEqualTo(SubIssue.STATUS_SOLVED);

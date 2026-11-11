@@ -82,38 +82,49 @@ class ScanMigrationIT {
     @Test
     @Transactional
     void claimReturnsRunnableJobsOldestFirstAndSkipsFutureOnes() {
-        UUID repoA = seedRepository(203L, "svc/a");
-        UUID repoB = seedRepository(204L, "svc/b");
-        UUID repoC = seedRepository(205L, "svc/c");
+        // D-097 (M8.10): at most the oldest queued job per workspace is claimable, so "oldest first across the
+        // queue" is proven with two workspaces; a second runnable job of the SAME workspace is held back.
+        UUID wsOther = jdbc.queryForObject(
+                "insert into workspace (id, name) values (gen_random_uuid(), 'Claim order') returning id", UUID.class);
+        UUID repoA = seedRepository(Workspace.DEFAULT_ID, 203L, "svc/a");
+        UUID repoB = seedRepository(wsOther, 204L, "svc/b");
+        UUID repoC = seedRepository(Workspace.DEFAULT_ID, 205L, "svc/c");
+        UUID repoD = seedRepository(Workspace.DEFAULT_ID, 206L, "svc/d");
 
-        UUID older = enqueue(repoA, Instant.now().minusSeconds(60));
-        UUID newer = enqueue(repoB, Instant.now().minusSeconds(10));
-        enqueue(repoC, Instant.now().plusSeconds(600)); // run_after in the future → not yet runnable
+        UUID older = enqueue(Workspace.DEFAULT_ID, repoA, Instant.now().minusSeconds(60));
+        UUID newer = enqueue(wsOther, repoB, Instant.now().minusSeconds(10));
+        UUID sameWorkspaceSecond = enqueue(Workspace.DEFAULT_ID, repoD, Instant.now().minusSeconds(5));
+        enqueue(Workspace.DEFAULT_ID, repoC, Instant.now().plusSeconds(600)); // run_after in the future
 
         List<ScanJob> claimed = jobs.claimable(10);
 
         assertThat(claimed).extracting(ScanJob::getId).containsExactly(older, newer);
+        assertThat(claimed).extracting(ScanJob::getId).doesNotContain(sameWorkspaceSecond);
     }
 
-    private UUID enqueue(UUID repoId, Instant runAfter) {
-        Scan scan = scans.saveAndFlush(Scan.manual(Workspace.DEFAULT_ID, repoId));
-        ScanJob job = new ScanJob(Workspace.DEFAULT_ID, scan.getId());
+    private UUID enqueue(UUID workspaceId, UUID repoId, Instant runAfter) {
+        Scan scan = scans.saveAndFlush(Scan.manual(workspaceId, repoId));
+        ScanJob job = new ScanJob(workspaceId, scan.getId());
         job.requeue(runAfter);
         return jobs.saveAndFlush(job).getId();
     }
 
     private UUID seedRepository(long projectId, String path) {
+        return seedRepository(Workspace.DEFAULT_ID, projectId, path);
+    }
+
+    private UUID seedRepository(UUID workspaceId, long projectId, String path) {
         UUID connId = UUID.randomUUID();
         // A distinct group id/path per call so the per-group unique index (V5) is not tripped by the seed.
         jdbc.update("insert into gitlab_connection "
                         + "(id, workspace_id, base_url, target_type, group_full_path, gitlab_group_id, "
                         + "token_ciphertext) values (?, ?, 'http://localhost', 'group', ?, ?, 'ct')",
-                connId, Workspace.DEFAULT_ID, "svc-" + projectId, projectId);
+                connId, workspaceId, "svc-" + projectId, projectId);
         UUID repoId = UUID.randomUUID();
         jdbc.update("insert into repository "
                         + "(id, workspace_id, connection_id, gitlab_project_id, path_with_namespace) "
                         + "values (?, ?, ?, ?, ?)",
-                repoId, Workspace.DEFAULT_ID, connId, projectId, path);
+                repoId, workspaceId, connId, projectId, path);
         return repoId;
     }
 

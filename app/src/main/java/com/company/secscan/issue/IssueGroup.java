@@ -54,6 +54,14 @@ public class IssueGroup {
     @Column(name = "fix_time_minutes")
     private Integer fixTimeMinutes;
 
+    /** Level-2 category derived from stored data (D-083/D-074); descriptive, never a fingerprint input. */
+    @Column(name = "level2_category")
+    private String level2Category;
+
+    /** Optional OWASP Top 10:2025 category NAME (names only, CC BY-SA); null when no confident mapping. */
+    @Column(name = "owasp_category")
+    private String owaspCategory;
+
     @Column(name = "first_seen_at", insertable = false, updatable = false)
     private Instant firstSeenAt;
 
@@ -95,6 +103,23 @@ public class IssueGroup {
     /** M5 rollup: the sum of open sub-issues' fix times in minutes (null when no sub-issue is open). */
     public void setFixTimeMinutes(Integer fixTimeMinutes) {
         this.fixTimeMinutes = fixTimeMinutes;
+    }
+
+    /** M8.5 taxonomy (D-083): the level-2 category and optional OWASP 2025 name (descriptive). */
+    public void setLevel2Category(String level2Category) {
+        this.level2Category = level2Category;
+    }
+
+    public void setOwaspCategory(String owaspCategory) {
+        this.owaspCategory = owaspCategory;
+    }
+
+    public String getLevel2Category() {
+        return level2Category;
+    }
+
+    public String getOwaspCategory() {
+        return owaspCategory;
     }
 
     public UUID getId() {

@@ -4,7 +4,8 @@
 
 services:
   postgres:
-    image: postgres:16
+    # Digest-pinned for reproducibility (M8.5 housekeeping); bump the tag + digest together.
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-secscan}
       POSTGRES_USER: ${POSTGRES_USER:-secscan}
@@ -35,6 +36,16 @@ services:
       SECSCAN_BOOTSTRAP_ADMIN_EMAIL: ${SECSCAN_BOOTSTRAP_ADMIN_EMAIL:-}
       SECSCAN_BOOTSTRAP_ADMIN_PASSWORD: ${SECSCAN_BOOTSTRAP_ADMIN_PASSWORD:-}
       SECSCAN_GITLAB_ALLOWED_HOSTS: ${SECSCAN_GITLAB_ALLOWED_HOSTS:-}
+      # D-092 session cookie: Secure by default; never false on a shared/production host (SF-6).
+      SECSCAN_SESSION_COOKIE_SECURE: ${SECSCAN_SESSION_COOKIE_SECURE:-true}
+      # D-091 demo mode (SF-6): OFF by default; never enable on a shared/production host.
+      SECSCAN_DEMO_MODE: ${SECSCAN_DEMO_MODE:-false}
+      SECSCAN_DEMO_USERNAME: ${SECSCAN_DEMO_USERNAME:-admin}
+      SECSCAN_DEMO_PASSWORD: ${SECSCAN_DEMO_PASSWORD:-}
+      # D-098 client IP: X-Forwarded-For is honoured only from this peer — the ui nginx at its pinned address
+      # (review SF-3: never the whole subnet, which would include the Docker gateway that host-port traffic
+      # arrives from). The app's own default (outside compose) is loopback.
+      SECSCAN_TRUSTED_PROXIES: ${SECSCAN_TRUSTED_PROXIES:-${SECSCAN_UI_IP:-10.203.0.10}}
     ports:
       # Loopback only (local dev); do not expose the API to the network.
       - "127.0.0.1:8080:8080"
@@ -63,6 +74,10 @@ services:
       SECSCAN_FINGERPRINT_KEY: ${SECSCAN_FINGERPRINT_KEY:-}
       # Scan work root — see the bind below; MUST be the same absolute path on host and in the worker.
       SECSCAN_SCANNER_WORK_ROOT: ${SECSCAN_SCAN_WORK_ROOT:-/var/lib/secscan/scans}
+      # D-102: ownership tag stamped on scanner containers AND the name of this worker's sub-tree of the work root
+      # (<workRoot>/<instanceId>/<scanId>); the reaper reaps ONLY this instance's leftovers. The smoke stack sets
+      # "smoke", so dev and smoke can share one work root and never reap each other.
+      SECSCAN_INSTANCE_ID: ${SECSCAN_INSTANCE_ID:-dev}
     # The worker runs non-web (no HTTP server), so it publishes no port.
     # NOTE: the scanner image must exist on the host daemon first:
     #   docker build -t secscan-scanner:8.21.2 scanner-image/
@@ -92,8 +107,21 @@ services:
     ports:
       # Loopback only (local dev).
       - "127.0.0.1:5173:80"
+    networks:
+      default:
+        # D-098 / review SF-3: the one address the api trusts for X-Forwarded-For. Must lie inside
+        # SECSCAN_COMPOSE_SUBNET; override both together.
+        ipv4_address: ${SECSCAN_UI_IP:-10.203.0.10}
     depends_on:
       - api
+
+networks:
+  default:
+    # M8.10 (D-098): a pinned subnet so the ui nginx gets a fixed address (SECSCAN_UI_IP) the api can trust.
+    # Override with SECSCAN_COMPOSE_SUBNET (and SECSCAN_UI_IP) if it clashes with a local/VPN route. The smoke (10.203.1.0/24) and e2e (10.203.2.0/24) stacks use their own.
+    ipam:
+      config:
+        - subnet: ${SECSCAN_COMPOSE_SUBNET:-10.203.0.0/24}
 
 volumes:
   postgres-data:

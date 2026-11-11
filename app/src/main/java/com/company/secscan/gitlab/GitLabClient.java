@@ -195,10 +195,14 @@ public class GitLabClient {
                 .build();
         JdkClientHttpRequestFactory rf = new JdkClientHttpRequestFactory(httpClient);
         rf.setReadTimeout(READ_TIMEOUT);
-        return RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl(apiBase(baseUrl))
-                .defaultHeader("PRIVATE-TOKEN", token)
-                .requestFactory(rf)
+                .requestFactory(rf);
+        if (token != null && !token.isBlank()) {
+            // Anonymous (public-repository) calls send no token; authenticated calls use PRIVATE-TOKEN (D-014).
+            builder = builder.defaultHeader("PRIVATE-TOKEN", token);
+        }
+        return builder
                 // A redirect is surfaced as a clear error, never followed.
                 .defaultStatusHandler(HttpStatusCode::is3xxRedirection, (request, response) -> {
                     throw new GitLabException(GitLabError.UNEXPECTED_REDIRECT,
@@ -233,8 +237,11 @@ public class GitLabClient {
                             "The token is not authorized (403); it is likely missing a required scope.", e);
                 case 404:
                     throw new GitLabException(notFoundCategory, switch (notFoundCategory) {
-                        case GROUP_NOT_FOUND -> "Group not found, or the token cannot see it.";
-                        case PROJECT_NOT_FOUND -> "Project not found, or the token cannot see it.";
+                        // M8.8 item 7: the usual cause is a partial path — nudge toward the full path / pasted URL.
+                        case GROUP_NOT_FOUND -> "Group not found, or the token cannot see it. Use the full path "
+                                + "including all parent groups, or paste the URL from your browser.";
+                        case PROJECT_NOT_FOUND -> "Project not found, or the token cannot see it. Use the full path "
+                                + "including all parent groups, or paste the URL from your browser.";
                         default -> "GitLab resource not found (404).";
                     }, e);
                 case 429:

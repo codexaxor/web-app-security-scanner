@@ -42,7 +42,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
         gitlab = new GitLabWireMock();
         // Save a group connection pointing at the mock.
         gitlab.stubVersion().stubTokenSelf("token-self.json").stubGroup("services");
-        connectionService.create(gitlab.baseUrl(), TOKEN, "group", "services");
+        connectionService.create(Workspace.DEFAULT_ID, gitlab.baseUrl(), TOKEN, "group", "services");
         connId = connections.findByWorkspaceIdAndGitlabGroupId(Workspace.DEFAULT_ID, GROUP_ID).orElseThrow()
                 .getId();
         // Group projects + languages for the selectable ones.
@@ -61,7 +61,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void listingExcludesArchivedAndDeletionAndFlagsEmpty() {
-        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 50);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(Workspace.DEFAULT_ID, connId, 0, 50);
 
         // 8 projects minus archived (106) and marked-for-deletion (107) = 6; empty (108) listed but not selectable.
         assertThat(page.totalElements()).isEqualTo(6);
@@ -81,7 +81,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void listingPaginatesServerSide() {
-        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 2);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(Workspace.DEFAULT_ID, connId, 0, 2);
 
         assertThat(page.content()).hasSize(2);
         assertThat(page.totalElements()).isEqualTo(6);
@@ -90,7 +90,8 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void selectPersistsRepositoriesPerWorkspace() {
-        List<RepositoryView> selected = repositoryService.select(connId, List.of(101L, 102L, 103L)).repositories();
+        List<RepositoryView> selected = repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(101L, 102L,
+                103L)).repositories();
         assertThat(selected).hasSize(3);
         assertThat(selected).allMatch(v -> v.connectionId().equals(connId));
         assertThat(selected).allMatch(v -> "group".equals(v.connectionTargetType()));
@@ -109,21 +110,21 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void cannotSelectEmptyRepository() {
-        assertThatThrownBy(() -> repositoryService.select(connId, List.of(108L)))
+        assertThatThrownBy(() -> repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(108L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("empty repository");
     }
 
     @Test
     void cannotSelectArchivedProject() {
-        assertThatThrownBy(() -> repositoryService.select(connId, List.of(106L)))
+        assertThatThrownBy(() -> repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(106L)))
                 .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
     void reportsAddedVsAlreadySelectedCounts() {   // B1
-        repositoryService.select(connId, List.of(101L, 102L));
-        var result = repositoryService.select(connId, List.of(101L, 103L));
+        repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(101L, 102L));
+        var result = repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(101L, 103L));
         assertThat(result.added()).isEqualTo(1);            // 103 is new
         assertThat(result.alreadySelected()).isEqualTo(1);  // 101 was already selected
         assertThat(result.repositories()).hasSize(2);
@@ -131,13 +132,14 @@ class RepositorySelectionIT extends AbstractGitLabIT {
 
     @Test
     void reselectingADetachedRepositoryReactivatesItAndCountsItReactivated() {   // SF-3 / D-020
-        repositoryService.select(connId, List.of(101L));                    // added, active
+        repositoryService.select(Workspace.DEFAULT_ID, connId, List.of(101L));                    // added, active
         Repository repo = repositories.findByWorkspaceIdAndGitlabProjectId(Workspace.DEFAULT_ID, 101L)
                 .orElseThrow();
         repo.detachAndDeactivate("NO_ACCESSIBLE_CONNECTION");                // its connection was removed
         repositories.save(repo);
 
-        var result = repositoryService.select(connId, List.of(101L));       // re-selected through a connection
+        var result = repositoryService.select(Workspace.DEFAULT_ID, connId,
+                List.of(101L));       // re-selected through a connection
 
         assertThat(result.reactivated()).isEqualTo(1);
         assertThat(result.added()).isZero();
@@ -152,7 +154,7 @@ class RepositorySelectionIT extends AbstractGitLabIT {
         gitlab.stubProjects(GROUP_ID, "[{\"id\":201,\"path_with_namespace\":\"services/locked\","
                 + "\"default_branch\":null,\"empty_repo\":false,\"archived\":false}]");
 
-        PagedResponse<ProjectView> page = repositoryService.listProjects(connId, 0, 50);
+        PagedResponse<ProjectView> page = repositoryService.listProjects(Workspace.DEFAULT_ID, connId, 0, 50);
         ProjectView locked = page.content().stream()
                 .filter(p -> p.gitlabProjectId() == 201).findFirst().orElseThrow();
         assertThat(locked.selectable()).isFalse();
