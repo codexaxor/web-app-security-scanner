@@ -34,5 +34,8 @@ public record ScannerLaunchSpec(
         String cloneAuthUser,
         // Ownership tag stamped on the container (label secscan.instance) so ScanReaper reaps only THIS
         // instance's leftovers, never another stack's (D-102 / M8.14).
-        String instanceId) {
+        String instanceId,
+        // Pass --taint-intrafile to Opengrep (D-104, M8.15 S4). Default on in production; flipped off↔on only by
+        // TaintRescanStabilityIT to prove fingerprint stability. Delivered as the SAST_TAINT_INTRAFILE env var.
+        boolean taintIntrafile) {
 }

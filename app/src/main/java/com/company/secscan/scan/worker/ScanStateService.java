@@ -6,6 +6,7 @@ import com.company.secscan.issue.EolEnricher;
 import com.company.secscan.issue.ReconcileService;
 import com.company.secscan.repository.Repository;
 import com.company.secscan.repository.RepositoryRepository;
+import com.company.secscan.scan.SastLanguageCoverage;
 import com.company.secscan.scan.Scan;
 import com.company.secscan.scan.ScanFinding;
 import com.company.secscan.scan.ScanFindingRepository;
@@ -143,6 +144,47 @@ public class ScanStateService {
                     "The dev/test scope inventory failed; prior dev/test auto-ignores were frozen this scan.",
                     null));
         }
+        // SAST coverage gap (M8.15 S5, D-104/D-030): a detected CODE language with no Opengrep pack is surfaced,
+        // not hidden. Computed from the just-detected languages (empty detection => nothing to say). The message
+        // lists the languages so it reads as a complete coverage-banner line; Vue/Svelte are included (change #7).
+        List<String> uncoveredLangs = SastLanguageCoverage.uncovered(parsed.languages());
+        if (!uncoveredLangs.isEmpty()) {
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_LANGUAGE_UNCOVERED",
+                    "SAST has no rule pack for " + String.join(", ", uncoveredLangs)
+                            + ", so code in " + (uncoveredLangs.size() == 1 ? "that language" : "those languages")
+                            + " was not analyzed for code issues.", null));
+        }
+        // SAST partial coverage (M8.15 S6 follow-up, D-104/D-030; review S1/S2/N2). FROZEN files — Opengrep could
+        // not fully analyze them (Timeout, full parse error, size limit, unreadable, other analysis error), so their
+        // findings closed nothing in reconcile (via TriageContext below) — raise SAST_FILES_SKIPPED naming the count,
+        // the DISTINCT normalized error types (at most 5, then "+N more") and up to 10 repo-relative paths (then
+        // "and N more"). Repo-relative paths are shown (a fingerprint input, shown throughout the UI); never a
+        // container path, line range, message or source text (D-053/S1). Files Opengrep only PARTIALLY parsed were
+        // analyzed and reconciled normally: they never raise this warning on their own and are mentioned inside it
+        // only as "partially parsed (N)" (owner decision, review S2). A failed SAST run carries no skipped files.
+        List<com.company.secscan.scan.parse.SastSkippedFile> skipped = parsed.sastSkippedFiles();
+        if (!skipped.isEmpty()) {
+            List<String> types = skipped.stream().flatMap(sf -> sf.errorTypes().stream())
+                    .distinct().sorted().toList();
+            int shownTypes = Math.min(5, types.size());
+            String typeList = types.isEmpty() ? "errors"
+                    : String.join(", ", types.subList(0, shownTypes))
+                            + (types.size() > shownTypes ? ", +" + (types.size() - shownTypes) + " more" : "");
+            List<String> paths = skipped.stream().map(
+                    com.company.secscan.scan.parse.SastSkippedFile::path).sorted().toList();
+            int shown = Math.min(10, paths.size());
+            String pathList = String.join(", ", paths.subList(0, shown))
+                    + (paths.size() > shown ? ", and " + (paths.size() - shown) + " more" : "");
+            int partial = parsed.sastPartiallyParsedFiles();
+            warnings.save(new ScanWarning(scan.getWorkspaceId(), repositoryId, scanId, "SAST_FILES_SKIPPED",
+                    "Opengrep could not fully analyze " + skipped.size() + " file"
+                            + (skipped.size() == 1 ? "" : "s") + " in the last scan (" + typeList
+                            + "); existing code findings in "
+                            + (skipped.size() == 1 ? "that file" : "those files")
+                            + " were left unchanged (not marked solved): " + pathList + "."
+                            + (partial > 0 ? " Also partially parsed (" + partial
+                                    + "): analyzed, findings reconciled normally." : ""), null));
+        }
         if (!toPersist.isEmpty()) {
             log.debug("Scan {} stored {} finding(s)", scanId, toPersist.size());
         }
@@ -165,9 +207,11 @@ public class ScanStateService {
                 || (parsed.config().present() && Boolean.TRUE.equals(parsed.config().includeDevDependencies()));
         boolean epssAutoIgnore = workspaces.findById(workspaceId)
                 .map(com.company.secscan.workspace.Workspace::isEpssAutoIgnoreEnabled).orElse(false);
+        List<String> sastSkippedPaths = parsed.sastSkippedFiles().stream()
+                .map(com.company.secscan.scan.parse.SastSkippedFile::path).toList();
         com.company.secscan.issue.TriageContext triage = new com.company.secscan.issue.TriageContext(
                 parsed.config(), parsed.declaredScopes(), effectiveIncludeDev, epssAutoIgnore,
-                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests());
+                parsed.scopeInventoryFailed(), parsed.unreadableScopeManifests(), sastSkippedPaths);
         reconcile.reconcile(scanId, workspaceId, triage);
 
         jobs.findByIdAndWorkspaceId(jobId, workspaceId).ifPresent(job -> {

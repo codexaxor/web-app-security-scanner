@@ -14,6 +14,178 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-104 SAST coverage: six more language packs, noise control, taint, locale (2026-11-07, accepted)
+Context: a scan of `github.com/plexicus/simplest-sast-vulnerable @77baa1b` gave **0 Python SAST findings**
+because D-053 bakes only java/csharp/javascript/typescript language packs from opengrep/opengrep-rules
+@`f1d2b562b414783763fd02a6ed2736eaed622efa` (the AikidoSec pack is tiny). The architect verified Opengrep
+1.31.0 + that commit's `python/` pack finds SQLi, `os.system`, SSTI, pickle, `yaml.load`, `subprocess
+shell=True` and XXE at ERROR, and that Opengrep crashed with a `UnicodeDecodeError` loading rules under a
+non-UTF-8 locale. M8.15 widens SAST coverage without touching any fingerprint input.
+Decision (extends D-053; does NOT supersede it):
+- **Rule packs:** bake `python, go, php, ruby, kotlin, scala` from the **SAME pinned commit** `f1d2b56` — the SHA
+  is NOT bumped, because every `check_id` is a SAST fingerprint input (D-053) and a bump would re-fingerprint and
+  churn existing findings. New loaded check_ids (distinct): python 375, go 82, php 61, ruby 92, kotlin 14,
+  scala 27 (≈651 new; ≈1039 distinct across ten packs). **Licence:** these packs are **Commons Clause** (restricts
+  resale/SaaS) — the SAME flag D-053 already raised for the open "SAST rule licensing before any SaaS" SPEC item
+  and the D-005 note; INTERNAL USE OK, does NOT block M8.15. **NEVER** `semgrep/semgrep-rules`. Kotlin (14) and
+  Scala (27) coverage is **thin** (noted in the scorecard).
+- **Bake only rule YAML** (`*.yaml`/`*.yml`, excluding `*.test.yaml`/`*.test.yml`, which load 0 rules) — never the
+  packs' test SOURCE files (`.py`/`.go`/`.php`/`.html`). This also fixes the existing four packs (they `cp -r` the
+  whole dir today, shipping ~930 untrusted test-source files). The existing four packs' LOADED check_id set is
+  proven **identical** before/after the YAML-only change (opengrep `--verbose --max-log-list-entries` list
+  diffed: 388 distinct, unchanged), so no fingerprint churn.
+- **Deny-list (noise control):** a baked, commented `scanner-image/opengrep-denylist.txt` of **full check_ids**
+  (`opengrep-rules.<pack>.<dotted-dir>.<id>`, never short ids — `eval-detected` exists in both js and python).
+  Applied via Opengrep `--exclude-rule` (confirmed present on 1.31.0; `results[]` post-filter kept as fallback).
+  For audit/non-audit twins (e.g. `dangerous-system-call` vs `dangerous-system-call-audit`) we **DENY the `-audit`
+  twin** rather than extend the D-061 winner map — the audit twin fires on different lines than its base, so the
+  winner map (same-file co-occurrence only) would not suppress it. The deny-list may contain **only ids from the
+  six NEW packs**: denying an existing java/csharp/js/ts rule would make reconcile "solve" its live findings
+  (reads as fixed) — a separate decision, out of scope here. The final list is captured from REAL scanner output
+  (hit counts on the recall fixture + plexicus + one real repo; audit-only-hit evidence), never guessed, and
+  human-approved (mirrors D-061's "seeded from real output"). **Finalized (S2, from plexicus@77baa1b + PyGoat +
+  DVWA; a real Celloscope repo was waived by the architect):** `scanner-image/opengrep-denylist.txt` = **20**
+  full check_ids — the **8 audit twins with a base rule** (php `assert-use-audit` + 7 python `dangerous-*-audit`;
+  the base keeps the real-risk subset), the **11 `wp-*-audit`** WordPress-plugin audit rules, and
+  `python.flask.security.audit.avoid_app_run_with_bad_host` (binding `0.0.0.0` is normal in containers). The **3
+  `dangerous-asyncio-*-audit` orphans are KEPT** (no base rule → denying loses all async exec/shell coverage for
+  zero observed noise).
+- **Category exclusion (noise control, NEW six packs only):** the packs load non-security categories too (of 651
+  distinct new check_ids: 528 security, **122** in best-practice/compatibility/correctness/maintainability/
+  performance, 1 "other" = `python.flask.caching.flask-cache-query-string` (`caching`), KEPT). At scan time
+  Opengrep also `--exclude-rule`s every new-pack rule whose `metadata.category` ∈ {best-practice, **compatibility**,
+  correctness, maintainability, performance}. `compatibility` (the 25 python36/37 + django-compat version-portability
+  rules) was added in an M8.15 follow-up — version portability is not a security risk in a scanned repo; the single
+  `caching` rule is kept. The list is **generated** by `scanner-image/gen_category_exclusions.py` into the committed
+  `scanner-image/opengrep-excluded-by-category.txt` (per-pack: python 108, go 11, ruby 2, scala 1, php 0, kotlin 0);
+  `:app:opengrepExclusionsInImageTest` regenerates it in-image and **fails the build on any diff** so category
+  changes are reviewed. Rules with "other"/missing categories are KEPT. Both lists are applied via `--exclude-rule` (confirmed to take the full check_id on 1.31.0)
+  with a `run-scan.sh` `results[]` post-filter fallback; the in-image test proves every listed id is a real
+  loaded check_id (no dead/typo), belongs to no existing pack, and is actually removed from a trigger scan.
+- **Locale:** run Opengrep under `LANG=C.UTF-8 LC_ALL=C.UTF-8` so loading a rule with non-ASCII text cannot crash
+  with `UnicodeDecodeError`.
+- **Cross-function taint:** pass `--taint-intrafile` (intra-file inter-procedural taint; confirmed on 1.31.0). It
+  changes neither `rule_id`, `file_path` nor the normalized-snippet hash, so a rescan with the flag on does not
+  churn existing findings (0 triage_events for findings seen by both; taint-only NEW findings are allowed).
+  Default-on via `ScannerProperties.taintIntrafile` (delivered as `SAST_TAINT_INTRAFILE` → `run-scan.sh`). The
+  live `TaintRescanStabilityIT` flips OFF→ON on one commit of `fixtures/sast-taint` and proved matched findings
+  keep identical fingerprints with **0 triage_events** (observed 4 matched, 0 rescan events, 2 taint-only-new JS
+  findings). Measured taint marginal cost is ~2 s (~7 %) on PyGoat; the before→after SAST-time rise (≈2.3–2.5× on
+  small repos, from ~12 s to ~25–30 s) is dominated by the six new packs' rule set, not taint, and absolute times
+  are far below the 30-min timeout.
+- **Scan-time budget (resolved on a real Celloscope Java repo, `ib-api` @`807b6aa`, 2594 Java files):** SAST
+  wall time **119 s → 194 s** isolated (**1.63×**, +75 s; full-pipeline SAST step 203 s); full scan **276.5 s
+  (~4.6 min)** — SCA 54 s, SAST 203 s, the rest <5 s. Stop rule ("SAST >2× **and** +>60 s, **or** full scan
+  >15 min") **not triggered** (ratio <2×; full scan ≪15 min) → proceeded to S5/S6. Note (deferred register):
+  `java.lang.security.audit.formatted-sql-string` hit Opengrep's per-file **Timeout** (5 s/rule/file) on 1–2
+  large files under the heavier 10-pack+taint run (24→14 hits on this repo); a recall gap on very large files,
+  not an exclusion/taint-logic effect — revisit raising `--timeout` if it recurs.
+- **Uncovered-language warning (D-030):** reusing `lang_detect.py`, `ScanStateService` raises
+  `SAST_LANGUAGE_UNCOVERED` after each scan listing the detected SAST-eligible CODE languages that have no
+  Opengrep pack; the message names them and reads as a complete coverage-banner line (the UI shows it verbatim).
+  The pure classifier is `core` `SastLanguageCoverage`, three buckets covering every `lang_detect.py` name:
+  **covered** (the 10 packs: java/csharp/js/ts/python/go/php/ruby/kotlin/scala); **uncovered-eligible, reported**
+  (Groovy, Rust, C, C++, Swift, PowerShell, **Vue, Svelte**); **not-SAST, never reported** (HTML, CSS/SCSS/Sass/
+  Less, FreeMarker, Shell, Dockerfile, HCL — Shell has no pack and would be noise on nearly every repo;
+  Dockerfile/HCL are covered by the IaC engine, not Opengrep). An unrecognised name is NOT reported, so a future
+  detector name can't manufacture a false banner. **Vue/Svelte are reported (measured, change #7):** on Opengrep
+  1.31.0 the js/ts rules TARGET `.vue`/`.svelte` (they appear in `paths.scanned`, 182 rules applied) but produce
+  ZERO findings even for a top-level `eval()`/`document.write()` that fires three JS rules in a `.js` file — so
+  their `<script>` code is effectively unanalyzed.
+- **Recall fixture (S6):** `fixtures/sast-recall` has a vulnerable file per NEW pack AND existing-pack cases —
+  Java/Spring (JDBC + JPA SQLi, formatted-SQL-string, `ProcessBuilder` command injection, XXE, actuator) and
+  JS/TS (express SQLi, XSS sink, `eval`) — plus negatives and three canary cases (`ruby/secret.rb`,
+  `java/application.properties` → `custom.hardcoded-connection-string`, `python/flask_secret.py` → Flask
+  `SECRET_KEY`), each an obviously-fake secret. `:app:sastRecallInImageTest` scans it the PRODUCTION way (real
+  `run-scan.sh` over a file:// clone, in the built image, default build) and asserts: every expected
+  `(check_id, file)` fires (29, across all six new packs + java/javascript/typescript), no finding on a
+  `negative/` file, NO denied/category-excluded id ever appears, and **no canary value appears anywhere in
+  `/out` or the scanner logs**. **Corrected in the M8.15 review (B1):** stripping only `extra.lines`/
+  `extra.metavars` was NOT enough — three more Opengrep fields carry scanned source text: `extra.message` (rules
+  interpolate metavariables; `ruby…brakeman.check-rails-secret-yaml` puts the `secret_key_base` VALUE into it),
+  `extra.fix` (autofix text rewritten from the match) and `extra.dataflow_trace` (taint source/sink snippets;
+  also emitted by the four original packs). The `run-scan.sh` sanitize is now an **allow-list** of the fields the
+  worker reads (`check_id`, `path`, `start`/`end` positions, `extra.severity`, `extra.metadata`,
+  `extra.snippet_sha256`), so an unknown/new field is dropped by default; `sastRecallInImageTest` asserts the
+  allow-list structurally and plants a canary in each of the three fields. No fingerprint input changes (the
+  snippet hash is still computed from `extra.lines` in-container; the worker never read the dropped fields).
+- **Per-rule timeout + skipped files close nothing (S6 follow-up):** Opengrep's default per-rule timeout is
+  **5.0 s** (`--timeout`; max seconds one rule may run on one file, 0 = no limit) with `--timeout-threshold 3`
+  (max rules that may time out on a file before the WHOLE file is skipped, 0 = no limit). At 5 s a slow rule
+  (e.g. `formatted-sql-string`) times out on large files and SILENTLY DROPS its matches there, so a real finding
+  could vanish for a non-fix reason. `run-scan.sh` now runs with **`--timeout 60 --timeout-threshold 3`** (60 s
+  clears every file on the repos measured, incl. `ib-api`'s 2594 Java files → 0 timeout-skipped files; a
+  pathological rule×file is still bounded far under the 30-min container timeout; threshold 3 kept as a safety
+  valve). Any file Opengrep still reports in `errors[]` (any type) is carried to the worker as a **skipped file**
+  — PATHS + error-TYPE classifications only, never a message or source (D-053/S1) — in `opengrep.json`
+  `skippedFiles[]`. The skipped set is **two sources merged**: Opengrep's `errors[]` (per-rule `Timeout`,
+  `ParseError`) AND `paths.skipped[]` entries whose reason is a **size limit or read/parse failure**
+  (`exceeded_size_limit`, `insufficient_permissions`, `analysis_failed_parser_or_internal_error`). Skips BY
+  DESIGN are NOT frozen — gitignore/semgrepignore/cli-flag matches, `always_skipped`, and `wrong_language`
+  (no rule applies → nothing to lose), plus our own `EXCLUDED_PATH`/D-059 path exclusions (a worker-side triage
+  concern, never an Opengrep skip). (`paths.skipped` is only emitted when `opengrep scan` runs with `--verbose`,
+  which run-scan.sh now passes. **M8.15 review B3:** the `--verbose` run log QUOTES scanned source on a parse
+  error, so it is written to `/work/opengrep-verbose.log` (tmpfs) and NEVER tailed/printed/copied; when SAST fails
+  run-scan.sh prints only `opengrep failed (exit N); error types: <normalized names>` — the previous
+  `tail -c 4000` of the log would have put source text into the stored `scan_task.log_excerpt`. Proven on the
+  failure path by `sastFailureCanaryInImageTest` (canary absent from `/out`/stdout/stderr, present only in the
+  in-container verbose log) and `SastFailureCanaryIT` (real worker pipeline, test-only image whose `opengrep`
+  exits 2 after a real scan: canary in no `scan`/`scan_task`/`scan_warning`/`scan_finding`/`sub_issue` row).) At reconcile,
+  every OPEN **or IGNORED** SAST finding whose file is skipped is **frozen** (left untouched —
+  never solved, no `triage_event`), exactly like the EOL coverage guard. (**M8.15 review B2:** IGNORED is
+  included because the D-083 reconcile path solves an absent ignored finding held by a re-derivable cause —
+  `DUPLICATE_RULE`, a path/rule ignore — unless its fingerprint is frozen; a SOLVED finding is NOT frozen, so a
+  re-detection in a skipped file still reopens it. And because `DUPLICATE_RULE` (D-061) is derived from THIS
+  scan's per-file rule ids — incomplete for a skipped file — `TriageApplier` treats that cause as a FROZEN SOURCE
+  for a SAST finding in a skipped file (like the config/scope freezes): never unignored, re-solved or downgraded.
+  `SastSkippedFileReconcileIT`.); SAST findings in fully-scanned
+  files reconcile normally, and the scan raises `SAST_FILES_SKIPPED` (count + types + up to 10 repo-relative
+  paths, then "and N more"; paths are a fingerprint input and shown throughout the UI, so they are not withheld —
+  only the message/snippet are, D-053/S1), mapped in the coverage banner (D-030). This enforces domain rule 3
+  (a scanner that did not fully cover a file closes nothing there)
+  at FILE granularity. ib-api scanned twice in production config is bit-identical: same `(check_id, file,
+  fingerprint)` set both runs.
+  **Refined in the M8.15 review (S1/S2/S3; S2 = owner decision), from REAL Opengrep 1.31.0 output
+  (`app/src/test/resources/samples/opengrep/skipped/`):** Opengrep lists EVERY errored file — including one it only
+  partially parsed — as `paths.skipped` `analysis_failed_parser_or_internal_error`, so that reason alone is not a
+  full-failure signal, and `PartialParsing` means the file WAS analyzed. Classification (`sast_skipped_files` in
+  `secscan-lib.sh`): **FROZEN** = an `errors[]` type other than `PartialParsing` (`Timeout`, the full parse failures
+  `Syntax error`/`Other syntax error`, `Too many matches`, out-of-memory, any unknown type — fail safe), a
+  `paths.skipped` `exceeded_size_limit`/`insufficient_permissions`, or `analysis_failed_parser_or_internal_error`
+  on a path with NO `errors[]` entry (unexplained — fail safe). **PARTIALLY PARSED** (`PartialParsing` and nothing
+  that freezes) = scanned → NOT frozen, reconciled normally, only COUNTED (`partiallyParsedFiles`); it is
+  mentioned inside `SAST_FILES_SKIPPED` only as "partially parsed (N)" and never raises the warning on its own (so
+  the banner's "findings were left unchanged" stays true). `Too many matches`/out-of-memory are not in the owner's
+  literal list but are analysis failures that drop matches for a non-fix reason, so they freeze (flagged in the
+  review report). Error types are reduced to their variant NAME (`["PartialParsing",[<container paths + line
+  ranges>]]` → `PartialParsing`; leading `[A-Za-z0-9 _.-]` run, ≤48 chars — in-container and again in the parser),
+  deduped, and capped at 5 in the message ("+N more"), so no container path or line range reaches any message.
+  Only paths under the checkout are kept. **Fail closed:** a report that cannot be classified (unparsable,
+  `errors` not an array, `paths.skipped` absent — it is always an array under `--verbose`) marks SAST **failed**
+  (closes nothing, no results emitted), never "ok with nothing skipped". A failed SAST task carries no skipped
+  files (the parser reads them only from a succeeded task), so `SAST_FILES_SKIPPED` never fires on a failed run.
+  Proven by `sastSkippedFilesInImageTest` (real sample, fail-closed unit + end-to-end), `ScannerOutputParserSastSkippedTest`
+  and `SastSkippedFileReconcileIT`.
+- **Scorecard + custom MIT rules (S7):** `scorecard/score_benchmark.py` (committed; benchmarks never committed)
+  scores the production config against OWASP BenchmarkJava v1.2 (`d4f6f3a`, GPL-2.0), Juice Shop (`717f5ef`, MIT)
+  and NodeGoat (`c5cb68a`, Apache-2.0), static only. Six MIT rules in `scanner-image/opengrep-rules-custom/` cover
+  the weakest **addressable** categories (full tables in `docs/reports/SAST_SCORECARD.md`): Java
+  `servlet-trust-boundary-session` (CWE-501, the weakest category 0.22 → 0.33), `mybatis-dollar-sql-injection`
+  (CWE-89), `servlet-reflected-xss-inline` (CWE-79); JS `nodejs-nosql-where-injection` (CWE-943),
+  `nodejs-ssrf-http-client` (CWE-918), `nodejs-unsafe-yaml-load` (CWE-502) — the three JS classes were 0-detection
+  on Juice Shop/NodeGoat before. Categories whose weakness is existing-rule **FPR** (sqli/cmdi/ldapi/pathtraver)
+  are NOT targeted — adding rules can't lower FPR and retiring a pack rule is out of scope (`rule retired ≠
+  fixed`). Real-world noise check: all three Java rules fire **0** times on ib-api (0 FP). Each rule has a
+  positive + negative fixture in `fixtures/sast-custom/`, asserted in the default build by
+  `:app:customRulesInImageTest` (+ the live `CustomSastRulesIT`).
+- **Out of scope (recorded here):** (a) **generic hardcoded-password / hardcoded-secret SAST detection** — a
+  **product decision** to NOT add it (secret detection is Betterleaks' job, D-036; value-based secret matching
+  stays in-container per D-059 B1); (b) **any new SAST engine** — CodeQL rejected on licence; Joern and Bearer
+  deferred (added to the deferred register).
+Consequences: SAST covers ten languages with controlled noise and no fingerprint churn; the Commons-Clause SaaS
+flag now covers the wider rule set; thin Kotlin/Scala coverage and the uncovered-language gaps are shown, not
+hidden.
+
 ## D-103 Public homepage + route-based sign-in (2026-11-07, accepted)
 Context: M8.13 adds a public marketing homepage. Until now the app shell rendered the sign-in gate (and, M8.10,
 the sign-up form at `/signup`) IN PLACE of any route when signed out, so "/" could not be a public page.
@@ -1775,6 +1947,43 @@ Decision: `workspace_id` on every business table from day one.
     finding that is unignored by removing a rule keeps whatever score it had when it was ignored until the next
     scan reconcile or a re-score trigger (e.g. a sensitivity change or intel refresh) recomputes it. Acceptable
     for M8 (score is display/ordering, not status); M8.5 can re-score a just-unignored finding inline.
+- M8.15 deferred register (recorded 2026-11-07, D-104):
+  - **Additional SAST engines (Joern, Bearer):** deferred. M8.15 keeps the single Opengrep engine. CodeQL was
+    rejected on licence; Joern (dataflow/CPG) and Bearer (privacy/security) are candidate second engines for a
+    later milestone once the single-engine coverage + noise profile is understood from the scorecard.
+  - **Thicker Kotlin/Scala rule coverage:** the stock packs are thin (Kotlin 14, Scala 27 rules). Custom MIT
+    rules for common Kotlin/Scala (e.g. Ktor/Spring-Kotlin, Play/Akka) weaknesses are a later add.
+  - **Non-security rules in the existing java/csharp/js/ts packs:** NOT excluded in M8.15 (S2 touches new packs
+    only). Removing/denying an existing rule would make reconcile "solve" its live findings (reads as fixed).
+    Needs a **"rule retired ≠ fixed"** decision (a dedicated terminal state / reason code so retiring a rule does
+    not masquerade as a fix) before any exclusion is applied to the four original packs.
+  - **Four C# `ssrf` rules share one check_id (`opengrep-rules.csharp.lang.security.ssrf.ssrf`)** — pre-existing
+    in the D-053 `csharp` pack (four `ssrf.yaml` files under `csharp/lang/security/ssrf/`, all `id: ssrf`;
+    the filename is not part of the check_id). Opengrep loads four rule definitions but one distinct check_id,
+    so hits on the identical normalized snippet at the same file merge to one SAST fingerprint, and distinct
+    snippets stay distinct findings under the shared rule id. Left as-is: giving each a unique id would change
+    the check_id and churn existing SAST fingerprints (check_id is a fingerprint input, D-053). Noted so a
+    future pack bump / rename weighs the fingerprint churn.
+  - **`formatted-sql-string` per-file Timeout on very large files — RESOLVED (M8.15 S6 follow-up):** measured on
+    the real `ib-api` repo, `java.lang.security.audit.formatted-sql-string` exceeded Opengrep's default 5 s
+    per-rule timeout on 1–2 large files, dropping their matches. Fixed by running with `--timeout 60`
+    (0 timeout-skipped files on ib-api; findings 70→88) and, as a safety net for any file that still times out
+    or parse-errors on another repo, the skipped-file FREEZE (those files' findings are never false-solved) +
+    `SAST_FILES_SKIPPED` warning. See the D-104 "per-rule timeout + skipped files" decision above.
+  - **`django.*` rules fire on non-Django (Flask) code — framework gating per repo:** on the Flask app
+    `plexicus/simplest-sast-vulnerable`, Django injection rules (`django…tainted-sql-string`,
+    `django…raw-html-format`, `django…sql-injection-db-cursor-execute`) fire alongside the Flask ones. M8.15
+    handles the SAME-LINE duplicates via the D-061 winner map (keep Flask, drop Django), but
+    `django…sql-injection-db-cursor-execute` fires **alone** (plexicus `app.py:49`, no same-line winner) so it
+    can't be de-duplicated safely and stays as a Django-on-Flask false positive. Proper fix: gate framework rule
+    packs by the repo's detected framework (e.g. don't run `django.*` when only Flask is imported) — needs a
+    per-repo framework detector; deferred.
+  - **OD-2 Java SAST depth:** the scorecard (`docs/reports/SAST_SCORECARD.md`) shows the Java weakness is driven
+    by **existing-rule false positives** in `sqli`/`cmdi` (FPR 0.52/0.54, recall already ~1.0) and by **missed
+    cross-file (inter-procedural, inter-file) taint flows**, neither of which M8.15's additive custom rules can
+    fix. Decide — on the scorecard numbers — between a **Joern** (CPG, inter-procedural) trial, **Opengrep
+    interfile** analysis (`--interfile`, heavier/slower), and **CodeQL** (rejected on licence so far); and whether
+    to retire/tune noisy pack rules once the `rule retired ≠ fixed` decision lands.
 - M8.13 deferred register (recorded 2026-11-07, `/review-pr M8.13`):
   - **GitLab token setup should warn/refuse tokens carrying api or write_repository scopes — backend, separate
     milestone.** Today `GitLabConnectionService` only checks that `read_api` + `read_repository` are present;

@@ -32,13 +32,22 @@ export const WARNING_BANNERS: Record<string, string> = {
   SECSCAN_CONFIG_NO_REASON: "An ignore entry in .secscan.yml was skipped because it had no reason.",
   SECSCAN_CONFIG_OUTSIDE_CLONE: "An ignore path in .secscan.yml pointed outside the repository and was skipped.",
   SCANNER_IMAGE_MISSING: "A scanner was unavailable for the last scan, so some findings were not updated.",
+  SAST_FILES_SKIPPED:
+    "Some files could not be fully analyzed for code issues in the last scan, so their findings were left unchanged.",
 };
+
+/**
+ * Codes whose banner text is DYNAMIC (it names the languages/items in the warning's own message), so the message
+ * is shown verbatim instead of a fixed map entry. SAST_LANGUAGE_UNCOVERED lists the uncovered languages (M8.15
+ * S5): the server already phrases its message as a complete banner line.
+ */
+const DYNAMIC_MESSAGE_CODES = new Set<string>(["SAST_LANGUAGE_UNCOVERED"]);
 
 export interface CoverageInput {
   /** The latest scan's per-scanner outcomes. */
   tasks: { scanner: string; status: string }[];
-  /** The latest scan's warning codes (one entry per warning row; duplicates are meaningful for counts). */
-  warningCodes: string[];
+  /** The latest scan's warnings (one entry per warning row; duplicates are meaningful for counts). */
+  warnings: { code: string; message: string }[];
 }
 
 /**
@@ -56,17 +65,20 @@ export function coverageBanners(input: CoverageInput): string[] {
     }
   }
 
-  const unresolved = input.warningCodes.filter((c) => c === "UNRESOLVED_PATH").length;
+  const unresolved = input.warnings.filter((w) => w.code === "UNRESOLVED_PATH").length;
   if (unresolved > 0) {
     out.push(`${unresolved} ${unresolved === 1 ? "dependency" : "dependencies"} could not be resolved.`);
   }
 
   const seen = new Set<string>();
-  for (const code of input.warningCodes) {
-    const msg = WARNING_BANNERS[code];
-    if (msg && !seen.has(code)) {
+  for (const { code, message } of input.warnings) {
+    if (seen.has(code)) continue;
+    // A dynamic-message code (e.g. SAST_LANGUAGE_UNCOVERED) shows its own message, which names the languages;
+    // every other mapped code shows its fixed banner text. Unmapped codes are never surfaced raw.
+    const text = DYNAMIC_MESSAGE_CODES.has(code) ? message?.trim() : WARNING_BANNERS[code];
+    if (text) {
       seen.add(code);
-      out.push(msg);
+      out.push(text);
     }
   }
 

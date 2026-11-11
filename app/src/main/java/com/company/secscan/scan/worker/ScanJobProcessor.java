@@ -311,7 +311,8 @@ public class ScanJobProcessor {
         return new ScannerLaunchSpec(scan.getId().toString(), props.getImage(), cloneUrl,
                 branch, props.getCloneDepth(), ws.outDir(), tokenFile, localSource,
                 props.getTmpfsSize(), props.getMemory().toBytes(), props.getCpus(), props.getPidsLimit(),
-                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser, props.getInstanceId());
+                networkDisabled, ws.ownerUserSpec(), props.getTimeout(), cloneAuthUser, props.getInstanceId(),
+                props.isTaintIntrafile());
     }
 
     private static String httpsCloneUrl(String baseUrl, String pathWithNamespace) {

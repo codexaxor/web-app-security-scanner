@@ -1,0 +1,15 @@
+rules:
+  - id: nodejs-unsafe-yaml-load
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "js-yaml load() is called on a non-literal value. Before js-yaml 4, load() used the unsafe schema (custom YAML types can execute code / inject objects, CWE-502). Pin js-yaml >= 4 or pass a safe schema, and never load untrusted YAML with custom types."
+    metadata:
+      cwe: ["CWE-502: Deserialization of Untrusted Data"]
+      category: security
+      license: MIT
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($X)
+          - pattern: jsyaml.load($X)
+      - pattern-not: yaml.load("...")
+      - pattern-not: jsyaml.load("...")

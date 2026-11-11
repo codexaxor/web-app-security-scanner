@@ -313,14 +313,53 @@ SAST_RAW="$WORK/opengrep-raw.json"
 # (D-023/D-027). We compute the normalized-snippet SHA-256 HERE and write a sanitized report to /out with the
 # raw lines/metavars stripped (S1); only the hash leaves the container.
 SAST_TMP=/opt/sast-exec
-OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" opengrep --version 2>/dev/null | head -1)"
+# Locale (D-104, M8.15 S3): the opengrep CLI (Python) reads rule YAML with the locale's preferred encoding, so
+# under a non-UTF-8 locale (e.g. LC_ALL=C) a rule containing non-ASCII text crashes with a UnicodeDecodeError
+# ('ascii' codec ...). Force C.UTF-8 for every opengrep invocation so non-ASCII rules load. Scoped to opengrep
+# (not exported) so the other tools' behaviour is unchanged. Proven by opengrepLocaleInImageTest.
+OPENGREP_VERSION="$(HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" LANG=C.UTF-8 LC_ALL=C.UTF-8 opengrep --version 2>/dev/null | head -1)"
+# SAST noise control (D-104, M8.15 S2): exclude the baked deny-list + category-exclusion check_ids via
+# --exclude-rule. Both lists are NEW-pack-only (never an existing java/csharp/js/ts rule — that would make
+# reconcile "solve" the removed rule's live findings). '#' comments and blank lines are stripped; ids are
+# full check_ids (no spaces/globs). A results[] post-filter below is the fallback, because opengrep silently
+# ignores an unknown --exclude-rule id, so a typo would otherwise pass through.
+SAST_EXCLUDE_IDS="$WORK/sast-exclude-ids.txt"
+cat /etc/secscan/opengrep-denylist.txt /etc/secscan/opengrep-excluded-by-category.txt 2>/dev/null \
+    | sed 's/#.*$//' | awk 'NF{$1=$1; print}' | sort -u > "$SAST_EXCLUDE_IDS"
+OPENGREP_EXCLUDE_ARGS=""
+while IFS= read -r _xid; do
+    [ -n "$_xid" ] && OPENGREP_EXCLUDE_ARGS="$OPENGREP_EXCLUDE_ARGS --exclude-rule $_xid"
+done < "$SAST_EXCLUDE_IDS"
+echo "opengrep: excluding $(wc -l < "$SAST_EXCLUDE_IDS" | tr -d ' ') check_ids (deny-list + category exclusions)" >&2
+# Cross-function taint (D-104, M8.15 S4): --taint-intrafile adds intra-file inter-procedural taint findings.
+# On by default; the worker sets SAST_TAINT_INTRAFILE=0 only for TaintRescanStabilityIT's OFF scan. It changes
+# no fingerprint input, so turning it on does not churn existing findings.
+OPENGREP_TAINT_ARG=""
+if [ "${SAST_TAINT_INTRAFILE:-1}" = "1" ]; then
+    OPENGREP_TAINT_ARG="--taint-intrafile"
+fi
+# Per-file rule timeout (D-104, M8.15 S6 follow-up). Opengrep 1.31.0 defaults: --timeout 5.0 s (max time one rule
+# may run on one file; 0 = no limit) and --timeout-threshold 3 (max rules that may time out on a file before the
+# WHOLE file is skipped; 0 = no limit). At the 5 s default a slow rule (e.g. formatted-sql-string) times out on
+# large files, silently DROPPING its matches there — so a real finding can vanish for a non-fix reason. We raise
+# the per-rule timeout to 60 s (clears every file on real repos we measured; a pathological rule×file is still
+# bounded well under the 30-min container timeout) and keep the threshold at 3 as a safety valve. Any file still
+# reported in errors[] is carried to the worker as a skipped file and its findings are frozen, never solved.
+OPENGREP_TIMEOUT_ARGS="--timeout ${SAST_RULE_TIMEOUT:-60} --timeout-threshold ${SAST_TIMEOUT_THRESHOLD:-3}"
 START="$(date +%s)"
 set +e
+# shellcheck disable=SC2086 # $OPENGREP_EXCLUDE_ARGS MUST word-split into individual --exclude-rule <id> args.
 ( cd /etc/secscan && HOME="$SAST_TMP" TMPDIR="$SAST_TMP" XDG_CACHE_HOME="$SAST_TMP" \
-    opengrep scan --config opengrep-rules --json-output="$SAST_RAW" \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    opengrep scan --config opengrep-rules $OPENGREP_EXCLUDE_ARGS $OPENGREP_TAINT_ARG $OPENGREP_TIMEOUT_ARGS \
+    --verbose --json-output="$SAST_RAW" \
     --disable-version-check --disable-nosem --x-ignore-semgrepignore-files "$CHECKOUT" ) \
-    >"$WORK/opengrep.log" 2>&1
+    >"$WORK/opengrep-verbose.log" 2>&1
 SAST_EXIT=$?
+# --verbose makes Opengrep populate paths.skipped[{path, reason}] in the JSON (it is otherwise omitted). Its run
+# log QUOTES SCANNED SOURCE (a parse error prints "`<source line>` was unexpected"), so it goes to
+# $WORK/opengrep-verbose.log (tmpfs, dies with the container) and is NEVER tailed, printed or copied — not to
+# /out and not to stdout/stderr, which the worker stores as the scan_task log excerpt (M8.15 review B3).
 set -e
 END="$(date +%s)"
 SAST_DUR_MS=$(( (END - START) * 1000 ))
@@ -331,25 +370,59 @@ if { [ "$SAST_EXIT" -eq 0 ] || [ "$SAST_EXIT" -eq 1 ]; } \
 else
     SAST_STATUS=failed
 fi
+# Skipped / partially-analyzed files (D-104, M8.15 S6 follow-up; review S1/S2/S3): classified by
+# sast_skipped_files (secscan-lib.sh) from errors[] + paths.skipped into FROZEN files (Timeout, full parse error,
+# size limit, unreadable, other/unknown analysis error → the worker freezes their SAST findings and raises
+# SAST_FILES_SKIPPED) and a COUNT of files Opengrep only partially parsed (PartialParsing = analyzed → reconciled
+# normally). Repo-relative paths + normalized error-type NAMES only — never a message, line range or source text
+# (D-053/S1). Skips BY DESIGN are never frozen (gitignore/semgrepignore/cli-flag matches, always_skipped,
+# wrong_language; our EXCLUDED_PATH/D-059 exclusions are worker-side triage). FAIL CLOSED: if the report cannot be
+# classified, SAST is marked FAILED (closes nothing) — never "ok with nothing skipped". Runs BEFORE the sanitize
+# below, so a failed classification also emits no results.
+SAST_SKIPPED="$WORK/sast-skipped.json"
+if [ "$SAST_STATUS" = "ok" ] && ! sast_skipped_files "$SAST_RAW" "$CHECKOUT/" "$SAST_SKIPPED" 2>/dev/null; then
+    echo "opengrep: could not classify skipped/partially-analyzed files; SAST marked failed so it closes nothing" >&2
+    SAST_STATUS=failed
+fi
+[ "$SAST_STATUS" = "ok" ] || printf '{"skippedFiles":[],"partiallyParsedFiles":0}' > "$SAST_SKIPPED"
 # --- Sanitize SAST (mirror the secret sanitize, D-023/S1): per result, compute the NORMALIZED-snippet SHA-256
 # (lines trimmed, internal whitespace collapsed, blank lines dropped — same algorithm as the old Java
-# SnippetNormalizer, which this replaces) and emit a cleaned result with extra.lines/metavars/fingerprint
-# REMOVED and extra.snippet_sha256 added. The raw matched lines never reach /out. ---
+# SnippetNormalizer, which this replaces) and emit a cleaned result built from an ALLOW-LIST of fields (M8.15
+# review B1) with extra.snippet_sha256 added. The raw matched lines — and every other source-carrying field
+# (message, fix, dataflow_trace) — never reach /out. ---
 : > "$WORK/sast.ndjson"
 if [ "$SAST_STATUS" = "ok" ]; then
-    jq -c '.results[]?' "$SAST_RAW" 2>/dev/null | while IFS= read -r result; do
+    # Post-filter fallback (D-104): drop any result whose check_id is in the exclude list, in case
+    # --exclude-rule did not take (e.g. an id opengrep did not recognize). Belt-and-suspenders with the flag.
+    jq -c --rawfile ex "$SAST_EXCLUDE_IDS" \
+        '(($ex | split("\n") | map(select(length > 0))) as $deny | .results[]?
+          | select(((.check_id // "") as $c | $deny | index($c)) | not))' \
+        "$SAST_RAW" 2>/dev/null | while IFS= read -r result; do
         snippet="$(printf '%s' "$result" | jq -r '.extra.lines // ""')"
         hash="$(printf '%s' "$snippet" | awk 'NF>0{$1=$1;print}' | sha256sum | cut -d' ' -f1)"
         unset snippet
+        # ALLOW-LIST (M8.15 review B1): emit ONLY the fields the worker reads — check_id, path, start/end
+        # positions, extra.severity, extra.metadata (static rule metadata) and the snippet hash. Every other
+        # Opengrep field can carry scanned SOURCE text and is dropped: extra.lines/metavars (matched lines),
+        # extra.message (rules interpolate metavariables, e.g. ruby check-rails-secret-yaml puts the
+        # secret_key_base VALUE into it), extra.fix (autofix text rewritten from the matched source) and
+        # extra.dataflow_trace (taint source/sink/intermediate source snippets). A new Opengrep field is
+        # therefore dropped by default instead of leaking.
         printf '%s' "$result" | jq -c --arg h "$hash" \
-            'del(.extra.lines, .extra.metavars, .extra.fingerprint) | .extra.snippet_sha256 = $h' \
+            '{check_id, path,
+              start: (.start | {line, col, offset}), end: (.end | {line, col, offset}),
+              extra: {severity: .extra.severity, metadata: .extra.metadata, snippet_sha256: $h}}' \
             >> "$WORK/sast.ndjson"
     done
 fi
-jq -s '{results: ., errors: []}' "$WORK/sast.ndjson" > "$SAST_JSON"
-if [ "$SAST_STATUS" = "failed" ] && [ -s "$WORK/opengrep.log" ]; then
-    echo "opengrep failed (exit $SAST_EXIT); last output follows:" >&2
-    tail -c 4000 "$WORK/opengrep.log" >&2 || true
+jq -s --slurpfile sk "$SAST_SKIPPED" \
+    '{results: ., errors: [], skippedFiles: ($sk[0].skippedFiles // []),
+      partiallyParsedFiles: ($sk[0].partiallyParsedFiles // 0)}' \
+    "$WORK/sast.ndjson" > "$SAST_JSON"
+if [ "$SAST_STATUS" = "failed" ]; then
+    # B3: ONLY a sanitized summary — the exit code and the distinct NORMALIZED Opengrep error-type names
+    # (sast_error_summary: never a message, path, line range or source text). The verbose run log stays in-container.
+    echo "opengrep failed (exit $SAST_EXIT); error types: $(sast_error_summary "$SAST_RAW")" >&2
 fi
 
 # --- IaC scan (Checkov over the clone; fully offline, D-054) ---

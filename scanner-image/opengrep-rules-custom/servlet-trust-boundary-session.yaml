@@ -1,0 +1,19 @@
+rules:
+  - id: servlet-trust-boundary-session
+    languages: [java]
+    severity: WARNING
+    message: "Untrusted request data is stored across a trust boundary into the HTTP session (CWE-501). Validate/canonicalize request values before placing them in the session."
+    metadata:
+      cwe: ["CWE-501: Trust Boundary Violation"]
+      category: security
+      license: MIT
+    mode: taint
+    pattern-sources:
+      - pattern: (javax.servlet.http.HttpServletRequest $R).getParameter(...)
+      - pattern: (javax.servlet.http.HttpServletRequest $R).getParameterValues(...)
+      - pattern: (javax.servlet.http.HttpServletRequest $R).getHeader(...)
+      - pattern: (javax.servlet.http.HttpServletRequest $R).getHeaders(...)
+      - pattern: (javax.servlet.http.Cookie $C).getValue(...)
+    pattern-sinks:
+      - pattern: $S.setAttribute($K, ...)
+      - pattern: $S.putValue($K, ...)

@@ -24,23 +24,35 @@ import java.util.Set;
  */
 public record TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
                             boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed,
-                            List<String> unreadableScopeManifests) {
+                            List<String> unreadableScopeManifests, List<String> sastSkippedFiles) {
 
     private static final String SEP = "\u0000";
     private static final TriageContext EMPTY =
-            new TriageContext(SecscanConfig.absent(), List.of(), false, false, false, List.of());
+            new TriageContext(SecscanConfig.absent(), List.of(), false, false, false, List.of(), List.of());
 
     public TriageContext {
         config = config == null ? SecscanConfig.absent() : config;
         declaredScopes = declaredScopes == null ? List.of() : List.copyOf(declaredScopes);
         unreadableScopeManifests = unreadableScopeManifests == null ? List.of()
                 : List.copyOf(unreadableScopeManifests);
+        // M8.15 S6 follow-up (D-104): repo-relative files Opengrep could not fully analyze this scan; their SAST
+        // findings are frozen at reconcile so a partial file never false-solves (domain rule 3).
+        sastSkippedFiles = sastSkippedFiles == null ? List.of() : List.copyOf(sastSkippedFiles);
+    }
+
+    /** 6-arg (no SAST skipped-file set) for callers predating the M8.15 S6 freeze. */
+    public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
+                         boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed,
+                         List<String> unreadableScopeManifests) {
+        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, scopeInventoryFailed,
+                unreadableScopeManifests, List.of());
     }
 
     /** 5-arg (no per-manifest unreadable set) for callers predating SF1/SF3. */
     public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev,
                          boolean epssAutoIgnoreEnabled, boolean scopeInventoryFailed) {
-        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, scopeInventoryFailed, List.of());
+        this(config, declaredScopes, effectiveIncludeDev, epssAutoIgnoreEnabled, scopeInventoryFailed, List.of(),
+                List.of());
     }
 
     /** 4-arg (scope inventory OK) for the common case. */
@@ -52,6 +64,17 @@ public record TriageContext(SecscanConfig config, List<DeclaredScope> declaredSc
     /** Back-compatible 3-arg (EPSS toggle off) for callers predating the LOW_EPSS wiring. */
     public TriageContext(SecscanConfig config, List<DeclaredScope> declaredScopes, boolean effectiveIncludeDev) {
         this(config, declaredScopes, effectiveIncludeDev, false, false, List.of());
+    }
+
+    /** The repo-relative files Opengrep could not fully analyze this scan (M8.15 S6), normalized. */
+    public Set<String> sastSkippedFilesNormalized() {
+        Set<String> out = new HashSet<>();
+        for (String f : sastSkippedFiles) {
+            if (f != null) {
+                out.add(PathExclusion.normalize(f));
+            }
+        }
+        return out;
     }
 
     /** The repo-relative manifest paths whose scope could not be read this scan (SF3), normalized. */

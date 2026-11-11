@@ -1,0 +1,15 @@
+rules:
+  - id: mybatis-dollar-sql-injection
+    languages: [java]
+    severity: ERROR
+    message: "MyBatis mapper uses ${...} string substitution instead of #{...} bind parameters, so request data is concatenated into SQL (SQL injection, CWE-89). Use #{...} for values."
+    metadata:
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      category: security
+      license: MIT
+      references: ["https://mybatis.org/mybatis-3/sqlmap-xml.html#Parameters"]
+    pattern-either:
+      - patterns:
+          - pattern-regex: '@(Select|Update|Insert|Delete)\s*\(\s*"[^"]*\$\{[^}]+\}'
+    paths:
+      include: ["*.java"]

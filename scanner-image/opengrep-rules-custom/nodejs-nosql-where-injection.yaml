@@ -1,0 +1,15 @@
+rules:
+  - id: nodejs-nosql-where-injection
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "A MongoDB $where query is built by string concatenation/template interpolation, so request data runs as JavaScript in the database (NoSQL injection, CWE-943). Use query operators with bound values, never $where with untrusted input."
+    metadata:
+      cwe: ["CWE-943: Improper Neutralization of Special Elements in Data Query Logic"]
+      category: security
+      license: MIT
+      references: ["https://owasp.org/www-community/attacks/Server_side_code_injection"]
+    pattern-either:
+      - pattern: '{..., $where: "..." + $X, ...}'
+      - pattern: '{..., $where: `...${$X}...`, ...}'
+      - pattern: '{..., "$where": "..." + $X, ...}'
+      - pattern: '{..., "$where": `...${$X}...`, ...}'

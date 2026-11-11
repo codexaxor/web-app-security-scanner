@@ -23,6 +23,13 @@ public class ScannerProperties {
 
     private String image = "secscan-scanner:8.21.2";
     private String workRoot = "/tmp/secscan/scans";
+    /**
+     * Pass {@code --taint-intrafile} to Opengrep (intra-file inter-procedural taint; D-104, M8.15 S4). Default
+     * on. It changes no SAST fingerprint input (rule id / file path / normalized-snippet hash), so turning it on
+     * does not churn existing findings — it only adds taint-tracked findings. TaintRescanStabilityIT flips this
+     * OFF then ON on the same commit and proves the matched findings keep identical fingerprints (0 triage_events).
+     */
+    private boolean taintIntrafile = true;
     private String tmpfsSize = "2g";
     private DataSize memory = DataSize.ofGigabytes(4);
     private double cpus = 2.0;
@@ -143,6 +150,14 @@ public class ScannerProperties {
 
     public void setCloneDepth(int cloneDepth) {
         this.cloneDepth = cloneDepth;
+    }
+
+    public boolean isTaintIntrafile() {
+        return taintIntrafile;
+    }
+
+    public void setTaintIntrafile(boolean taintIntrafile) {
+        this.taintIntrafile = taintIntrafile;
     }
 
     public int getMaxParallel() {

@@ -523,6 +523,52 @@ ordering, sub-tree isolation, live-span, stuck-dir and refcount behaviours are p
 `ScanPollerTest`, `ScanJobProcessorLifecycleTest`, `ScanWorkspaceTest` and `ActiveScansTest` in the default build.
 See `docs/reports/M8.14.md`.
 
+## M8.15 SAST coverage
+
+**Scope (D-104; scanner image + a thin worker/UI touch).** Opengrep ships rules for only
+java/csharp/javascript/typescript, so a Python/Go/PHP/Ruby/Kotlin/Scala repo gets 0 SAST findings
+(`plexicus/simplest-sast-vulnerable @77baa1b` → 0 Python findings). M8.15 widens coverage without changing any
+fingerprint input:
+- **Six more language packs** (python, go, php, ruby, kotlin, scala) from the **same pinned commit**
+  `f1d2b56` — the SHA is NOT bumped (every `check_id` is a fingerprint input; a bump would churn findings). Only
+  rule YAML is baked (never the packs' test source files); the existing four packs switch to the same YAML-only
+  bake with a **proven-identical** loaded check_id set.
+- **Noise control:** a baked deny-list of full check_ids (NEW packs only) applied via `--exclude-rule`; audit
+  twins are denied (not merged via the D-061 winner map). Final list captured from real output and human-approved.
+- **Locale:** Opengrep runs under `C.UTF-8` so a non-ASCII rule cannot crash it.
+- **Cross-function taint:** `--taint-intrafile`, which does not change any fingerprint.
+- **Uncovered-language warning:** `SAST_LANGUAGE_UNCOVERED` lists detected SAST-eligible languages with no pack,
+  shown in the coverage banner (D-030). Shell/Dockerfile/HCL are excluded (no SAST pack / covered by IaC).
+- **Recall fixture + scorecard:** our own multi-language fixture proves the new packs in the default build; an
+  OWASP-benchmark scorecard (BenchmarkJava, Juice Shop, NodeGoat, scanned statically from local clones, never
+  built/run) drives 3 Java + 3 JS custom MIT rules for the weakest categories.
+Out of scope (D-104): generic hardcoded-password SAST detection (product decision); any new SAST engine
+(CodeQL rejected on licence; Joern/Bearer deferred).
+
+**Done when:**
+- Scanning a Python/Go/PHP/Ruby/Kotlin/Scala **and** Java/JavaScript/TypeScript fixture yields its expected
+  `(rule_id, file)` SAST findings and none on the negatives, through the real image in the default build
+  (`sastRecallInImageTest`); no raw source line/metavar and no planted canary value leaves `/out` (D-053 S1).
+- A file Opengrep cannot fully analyze (a per-rule `Timeout`, a FULL parse failure, a size-limit or unreadable
+  skip, another analysis error) CLOSES NOTHING: its existing open or ignored SAST findings are left untouched at
+  reconcile (not solved, no `triage_event`) and the scan raises a `SAST_FILES_SKIPPED` coverage warning (count +
+  normalized error types + repo-relative paths), shown in the banner (`SastSkippedFileReconcileIT`). A file
+  Opengrep only PARTIALLY parsed was analyzed: it reconciles normally and is only counted ("partially parsed (N)")
+  (M8.15 review S2). Classification is proven on real Opengrep output and fails closed
+  (`sastSkippedFilesInImageTest`, `ScannerOutputParserSastSkippedTest`). Opengrep runs with a raised per-rule
+  `--timeout` so real repos skip no files.
+- The existing four packs' loaded check_id set is unchanged by the YAML-only bake (asserted in the build:
+  `opengrepExclusionsInImageTest` diffs Opengrep's loaded ids against the 388-id golden
+  `scanner-image/opengrep-existing-packs-check-ids.txt`, M8.15 review S4).
+- A repo whose detected language has no SAST pack raises `SAST_LANGUAGE_UNCOVERED` listing those languages, shown
+  in the coverage banner (D-030).
+- Opengrep runs under C.UTF-8 and loads a non-ASCII rule without crashing (`opengrepLocaleInImageTest`).
+- A rescan with intrafile taint enabled churns no finding seen by both scans — 0 triage_events
+  (`TaintRescanStabilityIT`, live-opengrep; run output pasted in the report).
+- `docs/reports/SAST_SCORECARD.md` records Java per-CWE TPR/FPR and JS hits/misses before and after the custom
+  rules, with a committed scoring script and the exact benchmark commits.
+See `docs/reports/M8.15.md`.
+
 ## Securing the scanner itself
 
 This tool holds a read token for every repo and a list of every weakness in them; the MVP never executes repository
