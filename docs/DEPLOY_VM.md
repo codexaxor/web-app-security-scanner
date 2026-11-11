@@ -57,6 +57,18 @@ docker build -t secscan-scanner:8.21.2 scanner-image/
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
+> **Known issue (M8.9, 2026-11-12):** a *fresh* `docker build scanner-image/` currently FAILS — the
+> Dockerfile pins exact Alpine package patch versions (`python3=3.12.15-r0`, `py3-yaml=6.0.2-r0`) that
+> Alpine has since dropped from its repo (`apk ... exit code 8`). Until the pins are refreshed (follow-up
+> fix), transfer a known-good image from a machine that already has it instead of building on the VM:
+> ```bash
+> # from a machine with secscan-scanner:8.21.2 already built:
+> docker save secscan-scanner:8.21.2 | ssh ubuntu@<vm> 'docker load'
+> # then (re)start the worker so it re-checks:
+> docker compose -f docker-compose.yml -f docker-compose.prod.yml restart worker
+> ```
+> The worker logs `Scanner environment ready; the worker will claim scan jobs.` once the image is present.
+
 Open `http://<vm-ip>/` and sign in as the bootstrap admin (`SECSCAN_BOOTSTRAP_ADMIN_EMAIL`, the
 password you set in `.env`). The admin is created on first boot only, and only while the DB has no
 users.
