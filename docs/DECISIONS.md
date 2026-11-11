@@ -14,6 +14,33 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-105 VM deploy for the internal demo (2026-11-12, accepted)
+Context: M8.9 puts SecScan on a single internal VM (`172.16.6.73`, Celloscope staff over VPN on
+`172.16.4.0/22`) for a demo. Needed to settle the deploy-readiness open questions (ARCHITECT_NOTES §5
+OD-34 who reaches it, OD-35 demo login, OD-36 demo data, OD-37 how to ship) and OD-5 (worker hosting /
+Docker socket) for this scope.
+Decision:
+- **OD-34 audience:** internal staff only. The **D-096 external-tenant gate is NOT triggered** (confirmed
+  internal-only); it still must pass before any external tenant.
+- **OD-37 ship:** build on the VM with Docker only (app image is multi-stage; scanner image is
+  `docker build scanner-image/`) — no host JDK/Node, no registry. Source delivered by `rsync` of the
+  working tree (no GitHub auth on the VM). Deploy a **pinned commit**, not `main` (main is not a release
+  marker — ARCHITECT_NOTES §3): this deploy is `develop @ 64b03d4` + the M8.9 overlay/nginx fix.
+- **OD-36 data:** fresh/empty DB; repos re-added via the UI during the live check.
+- **OD-35 login:** bootstrap admin (`sajal@celloscope.net`, password set in the VM `.env` only). Demo
+  mode stays OFF (forbidden on a shared host).
+- **Networking:** only the ui is network-facing (`0.0.0.0:80`); api/postgres stay loopback-only.
+  A new `docker-compose.prod.yml` overlay adds that port + restart policies; the VM `.env` (from
+  `.env.prod.example`, gitignored) holds fresh AES/HMAC keys and the admin password, generated on the VM.
+- **TLS waiver:** plain HTTP, no certificate (operator declined). `SECSCAN_SESSION_COOKIE_SECURE=false`,
+  so the session cookie is cleartext on the internal subnet — accepted for an internal demo ONLY.
+- **OD-5 / Docker socket (D-026):** the worker mounts `/var/run/docker.sock` on the VM; host-root-
+  equivalent risk accepted in writing for this internal demo. Revisit before any external exposure.
+- **Deploy-path fix:** the ui nginx now re-resolves the `api` service at request time (Docker DNS
+  `127.0.0.11`), so an api-only restart no longer breaks login. Runbook: `docs/DEPLOY_VM.md`.
+Consequences: a reproducible single-VM internal demo. Not hardened for external/multi-tenant use; the
+D-096 gate and a TLS front end are prerequisites before widening access.
+
 ## D-104 SAST coverage: six more language packs, noise control, taint, locale (2026-11-07, accepted)
 Context: a scan of `github.com/plexicus/simplest-sast-vulnerable @77baa1b` gave **0 Python SAST findings**
 because D-053 bakes only java/csharp/javascript/typescript language packs from opengrep/opengrep-rules
@@ -1858,7 +1885,7 @@ Decision: `workspace_id` on every business table from day one.
   finished in M4b
 - OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
-- OD-5 Hosting for the worker — decided at the container spike (D-082)
+- OD-5 Hosting for the worker — decided at the container spike (D-082); settled for the internal-demo VM by D-105 (single host, Docker socket accepted for internal use)
 - OD-6 Product name
 - OD-9 — RESOLVED by D-094 (M8.10: `/api/v1/admin/**` is operator-only). Admin intel endpoints were unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no
