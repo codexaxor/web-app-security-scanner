@@ -13,13 +13,24 @@ This is an **internal-demo** deployment: plain HTTP, no TLS, single host, Docker
 
 | Service | Exposure on the VM | Notes |
 |---|---|---|
-| `ui` (nginx + SPA) | `0.0.0.0:80` → container 80 | the only network-facing port; proxies `/api/` to `api` |
+| `ui` (nginx + SPA) | `172.16.6.73:80` → container 80 | the only network-facing port; proxies `/api/` to `api` |
 | `api` | `127.0.0.1:8080` | loopback only; reached by the browser via the ui proxy |
 | `postgres` | `127.0.0.1:15432` | loopback only; 15432 to dodge the VM's own Postgres on 5432 |
 | `worker` | no port | claims scan jobs, launches disposable scanner containers |
 
 The `worker` also mounts `/var/run/docker.sock` (to launch sibling scanner containers) and the scan
 work root. The scanner image `secscan-scanner:8.21.2` must exist on the VM's Docker daemon.
+
+**Bind interface:** the VM is multi-homed — besides the internal `eth0` it has several Docker bridge
+interfaces — so the ui is bound to the **specific internal IP** via `SECSCAN_HTTP_BIND=172.16.6.73` in
+`.env` (not `0.0.0.0`, which would also publish on the docker bridges). `ip -br addr` on 172.16.6.73
+(2026-11-13):
+```
+eth0             UP             172.16.6.73/22      <- the one we bind to
+docker0          DOWN           172.17.0.1/16
+br-*             UP             172.18-20.0.1/16, 10.203.0.1/24   <- docker/compose bridges
+lo               UNKNOWN        127.0.0.1/8
+```
 
 ## 1. Prerequisites (verified on 172.16.6.73, 2026-11-12)
 
