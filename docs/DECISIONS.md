@@ -27,8 +27,8 @@ Decision:
   working tree (no GitHub auth on the VM). Deploy a **pinned commit**, not `main` (main is not a release
   marker — ARCHITECT_NOTES §3): this deploy is `develop @ 64b03d4` + the M8.9 overlay/nginx fix.
 - **OD-36 data:** fresh/empty DB; repos re-added via the UI during the live check.
-- **OD-35 login:** bootstrap admin (`sajal@celloscope.net`, password set in the VM `.env` only). Demo
-  mode stays OFF (forbidden on a shared host).
+- **OD-35 login:** bootstrap admin — the operator's email + a password set in the VM `.env` only (never
+  committed). Demo mode stays OFF (forbidden on a shared host).
 - **Networking:** only the ui is network-facing (`0.0.0.0:80`); api/postgres stay loopback-only.
   A new `docker-compose.prod.yml` overlay adds that port + restart policies; the VM `.env` (from
   `.env.prod.example`, gitignored) holds fresh AES/HMAC keys and the admin password, generated on the VM.

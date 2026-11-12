@@ -60,24 +60,25 @@ sudo chown "$(id -u)":"$(id -g)" /var/lib/secscan/scans && sudo chmod 700 /var/l
 #     and SECSCAN_BOOTSTRAP_ADMIN_PASSWORD. Set SECSCAN_UID/GID to `id -u`/`id -g` and DOCKER_GID to
 #     `stat -c %g /var/run/docker.sock`.
 cp .env.prod.example .env && chmod 600 .env
-#     e.g.  openssl rand -base64 32   (keys)      openssl rand -hex 24   (db pw)
+#     e.g.  openssl rand -base64 32   (use for EVERY key AND the DB password — one command for all)
 $EDITOR .env
 
-# 2.4 Build the scanner image, then build + start the stack.
-docker build -t secscan-scanner:8.21.2 scanner-image/
+# 2.4 Scanner image. NOTE: a *fresh* `docker build scanner-image/` currently FAILS — the Dockerfile pins
+#     Alpine package patch versions (python3=3.12.15-r0, py3-yaml=6.0.2-r0) that Alpine dropped from its
+#     repo (apk exit 8). Until the pins are refreshed (follow-up fix, M8.16), transfer a known-good image
+#     from a host that already has it, and verify it by its content-hash LABEL (stable across save/load;
+#     the image Id is re-computed on load and WILL differ):
+docker save secscan-scanner:8.21.2 | ssh ubuntu@<vm> 'docker load'
+docker image inspect -f '{{ index .Config.Labels "secscan.scanner.content-hash" }}' secscan-scanner:8.21.2
+#     expect: 44bd01779241fcc61a374ff21e3b5f0858e34328ae8ddcc67d55479076ce8d28
+#     (Only once the Dockerfile is fixed:  docker build -t secscan-scanner:8.21.2 scanner-image/)
+
+# 2.5 Build the app images and start the stack.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# If the scanner image was loaded AFTER the stack started, (re)start the worker so it re-checks:
+docker compose -f docker-compose.yml -f docker-compose.prod.yml restart worker
 ```
 
-> **Known issue (M8.9, 2026-11-12):** a *fresh* `docker build scanner-image/` currently FAILS — the
-> Dockerfile pins exact Alpine package patch versions (`python3=3.12.15-r0`, `py3-yaml=6.0.2-r0`) that
-> Alpine has since dropped from its repo (`apk ... exit code 8`). Until the pins are refreshed (follow-up
-> fix), transfer a known-good image from a machine that already has it instead of building on the VM:
-> ```bash
-> # from a machine with secscan-scanner:8.21.2 already built:
-> docker save secscan-scanner:8.21.2 | ssh ubuntu@<vm> 'docker load'
-> # then (re)start the worker so it re-checks:
-> docker compose -f docker-compose.yml -f docker-compose.prod.yml restart worker
-> ```
 > The worker logs `Scanner environment ready; the worker will claim scan jobs.` once the image is present.
 >
 > **Image actually running on 172.16.6.73 (2026-11-12):** `secscan-scanner:8.21.2`, shipped via
@@ -185,7 +186,7 @@ find "$DEST" -name 'secscan-*.sql.gz' -mtime +14 -delete    # 14-day retention (
 PC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 $PC exec -T postgres psql -U secscan -c "CREATE DATABASE secscan_restore_test;"
 gunzip -c /home/ubuntu/secscan-backups/secscan-YYYY-MM-DD.sql.gz \
-  | $PC exec -T postgres psql -U secscan -d secscan_restore_test
+  | $PC exec -T postgres psql -U secscan -v ON_ERROR_STOP=1 -d secscan_restore_test
 $PC exec -T postgres psql -U secscan -d secscan_restore_test -c "select count(*) from app_user;"  # sanity
 $PC exec -T postgres psql -U secscan -c "DROP DATABASE secscan_restore_test;"                     # clean up
 ```
@@ -194,9 +195,10 @@ dump into a freshly-created empty `secscan`, then **re-run the intel syncs** —
 `epss_score` and `kev_entry` table data, so KEV and EPSS are empty after a restore and MUST be
 re-fetched; run all three for a clean refresh (EOL too):
 ```
-curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/kev/sync
-curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/epss/sync
-curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/eol/sync
+# Pass only the email with -u; curl prompts for the password (so it never lands in shell history):
+curl -u <operator-email> -X POST http://127.0.0.1/api/v1/admin/intel/kev/sync
+curl -u <operator-email> -X POST http://127.0.0.1/api/v1/admin/intel/epss/sync
+curl -u <operator-email> -X POST http://127.0.0.1/api/v1/admin/intel/eol/sync
 ```
 Until they run, scores that depend on KEV/EPSS are stale (a re-score runs automatically after each sync).
 
