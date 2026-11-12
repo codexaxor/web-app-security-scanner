@@ -109,11 +109,12 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
   loss); just avoid doing it mid-demo. The `ui`/`worker`/`postgres` restarts do not by themselves drop
   sessions, but an `up --build` that recreates `api` does.
 
-## 4. Backups (PROPOSED — not yet installed; needs operator go)
+## 4. Backups (installed 2026-11-12)
 
-> Status 2026-11-12: **no backup job is installed.** Below is the proposed nightly backup. Do not install
-> the cron entry without the operator's go. Now that the VM carries real multi-tenant user data, this
-> should be installed before the demo is relied on.
+> Status 2026-11-12: **installed on the VM** — `~/secscan-backup.sh` (`chmod 700`) + the cron entry below,
+> verified by one manual run (dump `~/secscan-backups/secscan-2026-11-12.sql.gz`, 112 K, `chmod 600`) and a
+> restore test into a scratch DB. Still **TODO: copy dumps off the VM** (destination to be provided) and
+> back up `.env` separately in a secrets vault.
 
 **What's in a dump (why it's sensitive):** the DB holds AES-256-GCM-**encrypted** GitLab tokens and
 HMAC-SHA256 secret-finding hashes — no plaintext secrets, but still sensitive, so dumps are `chmod 600`.
@@ -125,7 +126,7 @@ password manager, off the VM), **never** in the same place as the dumps.
 data re-fetchable any time via the intel sync, so it need not be backed up. A business-data dump
 (excluding those) is a few MB gzipped; a full dump is ~15–25 MB gzipped. 14-day retention ≈ <0.5 GB.
 
-**Proposed backup script** `~/secscan-backup.sh` (owner `ubuntu`, `chmod 700`):
+**Backup script** `~/secscan-backup.sh` (owner `ubuntu`, `chmod 700`):
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -143,7 +144,7 @@ find "$DEST" -name 'secscan-*.sql.gz' -mtime +14 -delete    # 14-day retention
 #   rsync -a "$DEST/" backup-host:/backups/secscan/
 ```
 
-**Proposed cron** (`/etc/cron.d/secscan-backup`, daily 02:30 — **NOT installed**):
+**Cron** (`/etc/cron.d/secscan-backup`, root-owned `644`, daily 02:30 — **installed**):
 ```
 30 2 * * *  ubuntu  /home/ubuntu/secscan-backup.sh >> /home/ubuntu/secscan-backup.log 2>&1
 ```
@@ -158,7 +159,19 @@ $PC exec -T postgres psql -U secscan -d secscan_restore_test -c "select count(*)
 $PC exec -T postgres psql -U secscan -c "DROP DATABASE secscan_restore_test;"                     # clean up
 ```
 A real disaster-recovery restore into the live DB would restore `.env` first (for the keys), then the
-dump into a freshly-created empty `secscan`, then re-run the intel sync to repopulate EPSS/KEV.
+dump into a freshly-created empty `secscan`, then **re-run the intel syncs** — the backup excludes the
+`epss_score` and `kev_entry` table data, so KEV and EPSS are empty after a restore and MUST be
+re-fetched; run all three for a clean refresh (EOL too):
+```
+curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/kev/sync
+curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/epss/sync
+curl -u <operator> -X POST http://127.0.0.1/api/v1/admin/intel/eol/sync
+```
+Until they run, scores that depend on KEV/EPSS are stale (a re-score runs automatically after each sync).
+
+**Restore verified (2026-11-12):** the day-0 dump restored into a scratch DB `secscan_restore_test` with
+0 errors and matching row counts (`workspace`/`app_user`/`repository`/`sub_issue`), then the scratch DB
+was dropped. The live DB was never touched.
 
 ## 5. Known behaviours
 
