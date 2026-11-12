@@ -1,0 +1,28 @@
+# Production/demo overlay for the VM deploy (M8.9). Layer it over the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The base file publishes postgres/api/ui on loopback only (127.0.0.1) — safe on the VM, since the
+# internal subnet can't reach loopback. This overlay adds the ONE network-facing port (the ui on the
+# LAN) and restart policies so the demo survives a VM reboot. Nothing secret lives here: fresh secrets
+# and the HTTP-mode flags come from the VM's own .env (see .env.prod.example).
+#
+# Note (Compose merge): short-syntax `ports` CONCATENATE across files, so the base ui loopback mapping
+# (127.0.0.1:5173:80) remains alongside the LAN mapping below. It's harmless. api (127.0.0.1:8080) and
+# postgres (127.0.0.1:${POSTGRES_HOST_PORT}) likewise stay loopback-only and are not network-exposed.
+
+services:
+  postgres:
+    restart: unless-stopped
+
+  api:
+    restart: unless-stopped
+
+  worker:
+    restart: unless-stopped
+
+  ui:
+    restart: unless-stopped
+    ports:
+      # Network-facing: reachable from the internal subnet at http://<vm-ip>/ (M8.9 decision: 0.0.0.0:80).
+      - "${SECSCAN_HTTP_BIND:-0.0.0.0}:${SECSCAN_HTTP_PORT:-80}:80"

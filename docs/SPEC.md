@@ -629,7 +629,7 @@ None of these block M0–M3; the first three were settled before M4. Record answ
 - [x] **Private package registries** (Nexus, Artifactory, GitLab package registry): M4 assumes public registries
   (D-032); private-registry detection is M4b.
 - [ ] **GitLab details:** self-managed or gitlab.com, version, which top-level group(s) to connect.
-- [ ] **Hosting:** which VM or host runs the worker with Docker.
+- [x] **Hosting:** internal VM `172.16.6.73` runs the full stack (api + worker + postgres + ui) with Docker Compose for the internal demo — M8.9, D-105; see `docs/DEPLOY_VM.md`. (OD-5 worker-hosting still revisited at the container spike for other environments.)
 - [ ] **SAST rule licensing** before any multi-tenant/SaaS use.
 - [ ] **Product name** (placeholder: SecScan, config file `.secscan.yml`).
 

@@ -14,6 +14,52 @@ Consequences: what this implies / what we gave up.
 
 ---
 
+## D-105 VM deploy for the internal demo (2026-11-12, accepted)
+Context: M8.9 puts SecScan on a single internal VM (`172.16.6.73`, Celloscope staff over VPN on
+`172.16.4.0/22`) for a demo. Needed to settle the deploy-readiness open questions (ARCHITECT_NOTES §5
+OD-34 who reaches it, OD-35 demo login, OD-36 demo data, OD-37 how to ship) and OD-5 (worker hosting /
+Docker socket) for this scope.
+Decision:
+- **OD-34 audience:** internal staff only. The **D-096 external-tenant gate is NOT triggered** (confirmed
+  internal-only); it still must pass before any external tenant.
+- **OD-37 ship:** build on the VM with Docker only (app image is multi-stage; scanner image is
+  `docker build scanner-image/`) — no host JDK/Node, no registry. Source delivered by `rsync` of the
+  working tree (no GitHub auth on the VM). Deploy a **pinned commit**, not `main` (main is not a release
+  marker — ARCHITECT_NOTES §3): this deploy is `develop @ 64b03d4` + the M8.9 overlay/nginx fix.
+- **OD-36 data:** fresh/empty DB; repos re-added via the UI during the live check.
+- **OD-35 login:** bootstrap admin — the operator's email + a password set in the VM `.env` only (never
+  committed). Demo mode stays OFF (forbidden on a shared host).
+- **Networking:** only the ui is network-facing (`0.0.0.0:80`); api/postgres stay loopback-only.
+  A new `docker-compose.prod.yml` overlay adds that port + restart policies; the VM `.env` (from
+  `.env.prod.example`, gitignored) holds fresh AES/HMAC keys and the admin password, generated on the VM.
+- **TLS waiver:** plain HTTP, no certificate (operator declined). `SECSCAN_SESSION_COOKIE_SECURE=false`,
+  so the session cookie (and every request) is cleartext on the internal subnet — accepted ONLY as a
+  **VPN-only internal demo** (reachable solely over the `172.16.4.0/22` VPN, Celloscope staff).
+  **Revisit — before more users join or ANY non-VPN/external access, MUST add: (1) HTTPS (TLS front end,
+  Secure cookie); (2) the D-101 restore-password-minimum; (3) pin the `api` service's `ipv4_address` on
+  the compose network (N1 — the ui's trusted-proxy IP is pinned but the api's is not; harmless on HTTP
+  today, do it with the TLS front end).** Also required before the host is reachable from outside
+  `172.16.4.0/22`. NOTE (2026-11-12): the VM already has **internal multi-tenant users** — real
+  Celloscope staff have signed up and been approved into their own "work" workspaces (tenant isolation
+  verified: a non-member sees 0 groups/repos/scans and a direct GET of another tenant's issue-group → 404).
+  Confirmed working over HTTP on the VM
+  (2026-11-12): browser login `POST /auth/login` → 200, `SECSCAN_SESSION` set without `Secure`
+  (`HttpOnly; SameSite=Strict`), `GET /auth/session` with the cookie → 200.
+- **OD-5 / Docker socket (D-026):** the worker mounts `/var/run/docker.sock` on the VM; host-root-
+  equivalent risk accepted in writing for this internal demo. Revisit before any external exposure.
+- **Deploy-path fix:** the ui nginx now re-resolves the `api` service at request time (Docker DNS
+  `127.0.0.11`), so an api-only restart no longer breaks login. Runbook: `docs/DEPLOY_VM.md`.
+- **S1 owner decision (2026-11-13, Sajal):** the VM already serves internal multi-tenant users over plain
+  HTTP with the D-101 two-character password minimum — the waiver's own condition was crossed. Accepted
+  ONLY as an interim state: (1) no NEW sign-ups are approved until HTTPS (TLS front end + Secure cookie)
+  and the restored password minimum ship as the next milestone (M8.16, target 2026-11-20); (2) existing
+  users are told to use GitLab tokens with read-only scopes (read_repository / read_api) and not to reuse
+  an important password; (3) N1 (pin the api's ipv4_address) ships with the HTTPS work. Revisit: on M8.16
+  merge, or 2026-11-20, whichever comes first — if HTTPS has not shipped by then, the owner re-decides in
+  writing.
+Consequences: a reproducible single-VM internal demo. Not hardened for external/multi-tenant use; the
+D-096 gate and a TLS front end are prerequisites before widening access.
+
 ## D-104 SAST coverage: six more language packs, noise control, taint, locale (2026-11-07, accepted)
 Context: a scan of `github.com/plexicus/simplest-sast-vulnerable @77baa1b` gave **0 Python SAST findings**
 because D-053 bakes only java/csharp/javascript/typescript language packs from opengrep/opengrep-rules
@@ -1858,7 +1904,7 @@ Decision: `workspace_id` on every business table from day one.
   finished in M4b
 - OD-3 Private package registries — RESOLVED by D-032 (public assumed in M4; private-registry detection → M4b)
 - OD-4 GitLab instance, version and groups — RESOLVED by D-013 (version read at runtime)
-- OD-5 Hosting for the worker — decided at the container spike (D-082)
+- OD-5 Hosting for the worker — decided at the container spike (D-082); settled for the internal-demo VM by D-105 (single host, Docker socket accepted for internal use)
 - OD-6 Product name
 - OD-9 — RESOLVED by D-094 (M8.10: `/api/v1/admin/**` is operator-only). Admin intel endpoints were unauthenticated-by-role (deferred to M10). `AdminIntelController`
   (`POST /api/v1/admin/intel/{kev,epss,eol}/sync`, `/rescore`) is callable by any authenticated user: there is no

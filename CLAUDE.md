@@ -54,6 +54,7 @@ docs/            SPEC, WORKFLOW, DECISIONS, reports/, reference/ (Aikido screens
 
 ```
 docker compose up --build          # full stack: postgres + api + worker + ui
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build   # VM/internal-demo deploy (M8.9); see docs/DEPLOY_VM.md
 docker compose up -d postgres      # just the DB, for the dev loop below
 scripts/compose-smoke.sh           # isolated compose smoke (own project `secscan-smoke`, own volume)
 ./gradlew build
