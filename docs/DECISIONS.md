@@ -36,8 +36,10 @@ Decision:
   so the session cookie (and every request) is cleartext on the internal subnet — accepted ONLY as a
   **VPN-only internal demo** (reachable solely over the `172.16.4.0/22` VPN, Celloscope staff).
   **Revisit — before more users join or ANY non-VPN/external access, MUST add: (1) HTTPS (TLS front end,
-  Secure cookie); (2) the D-101 restore-password-minimum.** Also required before the host is reachable from
-  outside `172.16.4.0/22`. NOTE (2026-11-12): the VM already has **internal multi-tenant users** — real
+  Secure cookie); (2) the D-101 restore-password-minimum; (3) pin the `api` service's `ipv4_address` on
+  the compose network (N1 — the ui's trusted-proxy IP is pinned but the api's is not; harmless on HTTP
+  today, do it with the TLS front end).** Also required before the host is reachable from outside
+  `172.16.4.0/22`. NOTE (2026-11-12): the VM already has **internal multi-tenant users** — real
   Celloscope staff have signed up and been approved into their own "work" workspaces (tenant isolation
   verified: a non-member sees 0 groups/repos/scans and a direct GET of another tenant's issue-group → 404).
   Confirmed working over HTTP on the VM
@@ -47,6 +49,7 @@ Decision:
   equivalent risk accepted in writing for this internal demo. Revisit before any external exposure.
 - **Deploy-path fix:** the ui nginx now re-resolves the `api` service at request time (Docker DNS
   `127.0.0.11`), so an api-only restart no longer breaks login. Runbook: `docs/DEPLOY_VM.md`.
+- **S1 — _Owner decision pending (2026-11-13)._** (Placeholder; text to be provided by the owner.)
 Consequences: a reproducible single-VM internal demo. Not hardened for external/multi-tenant use; the
 D-096 gate and a TLS front end are prerequisites before widening access.
 
