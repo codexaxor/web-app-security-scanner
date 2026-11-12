@@ -33,7 +33,12 @@ Decision:
   A new `docker-compose.prod.yml` overlay adds that port + restart policies; the VM `.env` (from
   `.env.prod.example`, gitignored) holds fresh AES/HMAC keys and the admin password, generated on the VM.
 - **TLS waiver:** plain HTTP, no certificate (operator declined). `SECSCAN_SESSION_COOKIE_SECURE=false`,
-  so the session cookie is cleartext on the internal subnet — accepted for an internal demo ONLY.
+  so the session cookie (and every request) is cleartext on the internal subnet — accepted ONLY as a
+  **VPN-only internal demo** (reachable solely over the `172.16.4.0/22` VPN, Celloscope staff).
+  **Revisit — MUST add HTTPS (TLS front end, Secure cookie) before ANY non-VPN or external access**, and
+  before the host is reachable from outside `172.16.4.0/22`. Confirmed working over HTTP on the VM
+  (2026-11-12): browser login `POST /auth/login` → 200, `SECSCAN_SESSION` set without `Secure`
+  (`HttpOnly; SameSite=Strict`), `GET /auth/session` with the cookie → 200.
 - **OD-5 / Docker socket (D-026):** the worker mounts `/var/run/docker.sock` on the VM; host-root-
   equivalent risk accepted in writing for this internal demo. Revisit before any external exposure.
 - **Deploy-path fix:** the ui nginx now re-resolves the `api` service at request time (Docker DNS

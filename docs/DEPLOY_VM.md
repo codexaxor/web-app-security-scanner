@@ -68,6 +68,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 > docker compose -f docker-compose.yml -f docker-compose.prod.yml restart worker
 > ```
 > The worker logs `Scanner environment ready; the worker will claim scan jobs.` once the image is present.
+>
+> **Image actually running on 172.16.6.73 (2026-11-12):** `secscan-scanner:8.21.2`, shipped via
+> `docker save | docker load` from the dev machine (fresh build broken as above). Identity:
+> - content-hash label `44bd01779241fcc61a374ff21e3b5f0858e34328ae8ddcc67d55479076ce8d28`
+>   (baked at build time — the stable build identity; matches the dev-machine build).
+> - image Id on the VM `sha256:a0859ea10d9609cd891c55dbb57a1a7fa3660753f027c5a6234624a42f1340ae`
+>   (the config digest is re-computed by the VM's Docker engine on load, so it differs from the dev
+>   host's image id even though the content is identical — compare the content-hash label, not the Id).
 
 Open `http://<vm-ip>/` and sign in as the bootstrap admin (`SECSCAN_BOOTSTRAP_ADMIN_EMAIL`, the
 password you set in `.env`). The admin is created on first boot only, and only while the DB has no
