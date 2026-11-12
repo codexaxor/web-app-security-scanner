@@ -49,7 +49,14 @@ Decision:
   equivalent risk accepted in writing for this internal demo. Revisit before any external exposure.
 - **Deploy-path fix:** the ui nginx now re-resolves the `api` service at request time (Docker DNS
   `127.0.0.11`), so an api-only restart no longer breaks login. Runbook: `docs/DEPLOY_VM.md`.
-- **S1 — _Owner decision pending (2026-11-13)._** (Placeholder; text to be provided by the owner.)
+- **S1 owner decision (2026-11-13, Sajal):** the VM already serves internal multi-tenant users over plain
+  HTTP with the D-101 two-character password minimum — the waiver's own condition was crossed. Accepted
+  ONLY as an interim state: (1) no NEW sign-ups are approved until HTTPS (TLS front end + Secure cookie)
+  and the restored password minimum ship as the next milestone (M8.16, target 2026-11-20); (2) existing
+  users are told to use GitLab tokens with read-only scopes (read_repository / read_api) and not to reuse
+  an important password; (3) N1 (pin the api's ipv4_address) ships with the HTTPS work. Revisit: on M8.16
+  merge, or 2026-11-20, whichever comes first — if HTTPS has not shipped by then, the owner re-decides in
+  writing.
 Consequences: a reproducible single-VM internal demo. Not hardened for external/multi-tenant use; the
 D-096 gate and a TLS front end are prerequisites before widening access.
 
