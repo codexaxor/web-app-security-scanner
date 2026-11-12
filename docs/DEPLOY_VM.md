@@ -100,18 +100,65 @@ docker build -t secscan-scanner:8.21.2 scanner-image/     # only if scanner-imag
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-## 4. Backup / restore (demo-grade)
+**Upgrade safety:**
+- `up -d --build` recreates the app containers but **keeps the named `postgres-data` volume**, so all DB
+  data (users, tenants, repos, scans, findings) survives. **Never** pass `-v` to `down`, and never
+  `docker volume rm` the postgres volume — that is the only destructive step, and it wipes everything.
+- Sessions are **in-memory** (`HttpSession`, not persisted). Recreating/restarting the **api** container
+  **signs everyone out** — every logged-in user must sign in again. This is expected and harmless (no data
+  loss); just avoid doing it mid-demo. The `ui`/`worker`/`postgres` restarts do not by themselves drop
+  sessions, but an `up --build` that recreates `api` does.
 
+## 4. Backups (PROPOSED — not yet installed; needs operator go)
+
+> Status 2026-11-12: **no backup job is installed.** Below is the proposed nightly backup. Do not install
+> the cron entry without the operator's go. Now that the VM carries real multi-tenant user data, this
+> should be installed before the demo is relied on.
+
+**What's in a dump (why it's sensitive):** the DB holds AES-256-GCM-**encrypted** GitLab tokens and
+HMAC-SHA256 secret-finding hashes — no plaintext secrets, but still sensitive, so dumps are `chmod 600`.
+Crucially, **a dump is useless without the `.env` keys** (`SECSCAN_ENCRYPTION_KEY` decrypts the tokens,
+`SECSCAN_FINGERPRINT_KEY` keys the hashes). Back `.env` up **separately and securely** (a secrets vault /
+password manager, off the VM), **never** in the same place as the dumps.
+
+**Size:** DB is ~87 MB today, but ~76 MB of that is `epss_score` (plus `kev_entry`) — global reference
+data re-fetchable any time via the intel sync, so it need not be backed up. A business-data dump
+(excluding those) is a few MB gzipped; a full dump is ~15–25 MB gzipped. 14-day retention ≈ <0.5 GB.
+
+**Proposed backup script** `~/secscan-backup.sh` (owner `ubuntu`, `chmod 700`):
 ```bash
-# Dump the DB (contains encrypted tokens + findings; store it safely).
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T postgres \
-  pg_dump -U secscan secscan | gzip > ~/secscan-backup-$(date +%F).sql.gz
-# Restore into a fresh stack:
-gunzip -c ~/secscan-backup-YYYY-MM-DD.sql.gz | \
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T postgres psql -U secscan secscan
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/ubuntu/web-app-security-scanner
+DEST=/home/ubuntu/secscan-backups           # OUTSIDE the docker volume
+install -d -m 700 "$DEST"
+umask 077
+PC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+# Business data only (skip the re-syncable intel tables to keep it small):
+$PC exec -T postgres pg_dump -U secscan --exclude-table-data='public.epss_score' \
+  --exclude-table-data='public.kev_entry' secscan \
+  | gzip > "$DEST/secscan-$(date +%F).sql.gz"
+find "$DEST" -name 'secscan-*.sql.gz' -mtime +14 -delete    # 14-day retention
+# TODO (recommended): copy the newest dump OFF the VM, e.g.
+#   rsync -a "$DEST/" backup-host:/backups/secscan/
 ```
-`.env` is **not** in the dump — back it up separately (it holds the AES/HMAC keys without which the
-stored GitLab tokens can't be decrypted).
+
+**Proposed cron** (`/etc/cron.d/secscan-backup`, daily 02:30 — **NOT installed**):
+```
+30 2 * * *  ubuntu  /home/ubuntu/secscan-backup.sh >> /home/ubuntu/secscan-backup.log 2>&1
+```
+
+**Restore — ALWAYS test into a SCRATCH database, never the live `secscan`:**
+```bash
+PC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+$PC exec -T postgres psql -U secscan -c "CREATE DATABASE secscan_restore_test;"
+gunzip -c /home/ubuntu/secscan-backups/secscan-YYYY-MM-DD.sql.gz \
+  | $PC exec -T postgres psql -U secscan -d secscan_restore_test
+$PC exec -T postgres psql -U secscan -d secscan_restore_test -c "select count(*) from app_user;"  # sanity
+$PC exec -T postgres psql -U secscan -c "DROP DATABASE secscan_restore_test;"                     # clean up
+```
+A real disaster-recovery restore into the live DB would restore `.env` first (for the keys), then the
+dump into a freshly-created empty `secscan`, then re-run the intel sync to repopulate EPSS/KEV.
 
 ## 5. Known behaviours
 

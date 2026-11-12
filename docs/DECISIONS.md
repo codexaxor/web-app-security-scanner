@@ -35,8 +35,12 @@ Decision:
 - **TLS waiver:** plain HTTP, no certificate (operator declined). `SECSCAN_SESSION_COOKIE_SECURE=false`,
   so the session cookie (and every request) is cleartext on the internal subnet — accepted ONLY as a
   **VPN-only internal demo** (reachable solely over the `172.16.4.0/22` VPN, Celloscope staff).
-  **Revisit — MUST add HTTPS (TLS front end, Secure cookie) before ANY non-VPN or external access**, and
-  before the host is reachable from outside `172.16.4.0/22`. Confirmed working over HTTP on the VM
+  **Revisit — before more users join or ANY non-VPN/external access, MUST add: (1) HTTPS (TLS front end,
+  Secure cookie); (2) the D-101 restore-password-minimum.** Also required before the host is reachable from
+  outside `172.16.4.0/22`. NOTE (2026-11-12): the VM already has **internal multi-tenant users** — real
+  Celloscope staff have signed up and been approved into their own "work" workspaces (tenant isolation
+  verified: a non-member sees 0 groups/repos/scans and a direct GET of another tenant's issue-group → 404).
+  Confirmed working over HTTP on the VM
   (2026-11-12): browser login `POST /auth/login` → 200, `SECSCAN_SESSION` set without `Secure`
   (`HttpOnly; SameSite=Strict`), `GET /auth/session` with the cookie → 200.
 - **OD-5 / Docker socket (D-026):** the worker mounts `/var/run/docker.sock` on the VM; host-root-
