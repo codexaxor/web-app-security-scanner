@@ -126,20 +126,29 @@ password manager, off the VM), **never** in the same place as the dumps.
 data re-fetchable any time via the intel sync, so it need not be backed up. A business-data dump
 (excluding those) is a few MB gzipped; a full dump is ~15–25 MB gzipped. 14-day retention ≈ <0.5 GB.
 
-**Backup script** `~/secscan-backup.sh` (owner `ubuntu`, `chmod 700`):
+**Backup script** `~/secscan-backup.sh` (owner `ubuntu`, `chmod 700`). It dumps to a `.tmp`, verifies
+the gzip, then atomically `mv`s into place; any failure removes the `.tmp`, keeps the previous good
+dumps, writes an alert to the log and a `LAST_FAILED` marker, and exits non-zero:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 cd /home/ubuntu/web-app-security-scanner
 DEST=/home/ubuntu/secscan-backups           # OUTSIDE the docker volume
+LOG=/home/ubuntu/secscan-backup.log
 install -d -m 700 "$DEST"
 umask 077
 PC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+OUT="$DEST/secscan-$(date +%F).sql.gz"
+TMP="$OUT.tmp"
+fail(){ rm -f "$TMP"; echo "$(date -Is) BACKUP FAILED: $1" | tee -a "$LOG" >&2; date -Is > "$DEST/LAST_FAILED"; exit 1; }
 # Business data only (skip the re-syncable intel tables to keep it small):
 $PC exec -T postgres pg_dump -U secscan --exclude-table-data='public.epss_score' \
-  --exclude-table-data='public.kev_entry' secscan \
-  | gzip > "$DEST/secscan-$(date +%F).sql.gz"
-find "$DEST" -name 'secscan-*.sql.gz' -mtime +14 -delete    # 14-day retention
+  --exclude-table-data='public.kev_entry' secscan 2>>"$LOG" | gzip > "$TMP" || fail "pg_dump|gzip"
+gzip -t "$TMP" 2>>"$LOG" || fail "gzip integrity check"
+mv -f "$TMP" "$OUT"       || fail "mv into place"
+rm -f "$DEST/LAST_FAILED"                                    # clear any prior failure marker
+echo "$(date -Is) backup ok: $OUT ($(du -h "$OUT" | cut -f1))" >> "$LOG"
+find "$DEST" -name 'secscan-*.sql.gz' -mtime +14 -delete    # 14-day retention (runs only after success)
 # TODO (recommended): copy the newest dump OFF the VM, e.g.
 #   rsync -a "$DEST/" backup-host:/backups/secscan/
 ```
