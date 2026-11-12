@@ -31,14 +31,14 @@ work root. The scanner image `secscan-scanner:8.21.2` must exist on the VM's Doc
 ## 2. Deploy (first time)
 
 ```bash
-# 2.1 Get the source at the pinned commit onto the VM (~/web-app-security-scanner).
-#     From the dev machine (no GitHub auth needed on the VM):
-rsync -az --delete \
-  --exclude '.git/' --exclude 'build/' --exclude '**/build/' --exclude '.gradle/' \
-  --exclude 'node_modules/' --exclude 'ui/dist/' --exclude '.env' --exclude 'scorecard/' \
-  ./ ubuntu@172.16.6.73:~/web-app-security-scanner/
-# Deploy a PINNED commit, not "main" (main is not a release marker — ARCHITECT_NOTES §3).
-# This deploy: develop @ 64b03d4 + the M8.9 overlay/nginx fix (feature/m8.9-vm-deploy @ 428e825).
+# 2.1 Ship the source at a PINNED commit to the VM via `git archive` (reproducible; records provenance;
+#     no GitHub auth needed on the VM, and no .git/working-tree cruft). From the dev machine, in the repo:
+SHA=$(git rev-parse <ref>)          # the exact commit to deploy (a release tag/commit, NOT main)
+git archive --format=tar "$SHA" \
+  | ssh ubuntu@172.16.6.73 'mkdir -p ~/web-app-security-scanner && tar -x -C ~/web-app-security-scanner'
+ssh ubuntu@172.16.6.73 "printf '%s  %s\n' $SHA \"$(date -Is)\" > ~/web-app-security-scanner/DEPLOYED_COMMIT"
+# DEPLOYED_COMMIT records EXACTLY what the VM is running (full sha + date). Deploy a pinned commit, not
+# "main" (main is not a release marker — ARCHITECT_NOTES §3). The `.env` is never shipped (it's VM-only).
 
 # 2.2 Scan work root (same absolute path on host and in the worker; owned by the worker's uid:gid).
 sudo mkdir -p /var/lib/secscan/scans
@@ -95,10 +95,21 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml down          # 
 
 ### Updating to a newer build
 ```bash
-# re-sync source from the dev machine (§2.1), then on the VM:
+# Re-ship a newer PINNED commit (this overwrites DEPLOYED_COMMIT with the new sha+date):
+SHA=$(git rev-parse <new-ref>)
+git archive --format=tar "$SHA" \
+  | ssh ubuntu@172.16.6.73 'tar -x -C ~/web-app-security-scanner'
+ssh ubuntu@172.16.6.73 "printf '%s  %s\n' $SHA \"$(date -Is)\" > ~/web-app-security-scanner/DEPLOYED_COMMIT"
+# then on the VM:
 docker build -t secscan-scanner:8.21.2 scanner-image/     # only if scanner-image/ changed
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Check what is deployed at any time:  cat ~/web-app-security-scanner/DEPLOYED_COMMIT
 ```
+
+> **Provenance caveat (current VM state):** the live VM was first brought up by an `rsync` of the dev
+> working tree (before this procedure existed), so its exact source is **unverifiable** — it is
+> `develop @ 64b03d4` + the `feature/m8.9-vm-deploy` overlay/nginx changes as shipped. `DEPLOYED_COMMIT`
+> was seeded to reflect that; the **next** `git archive` deploy restores verifiable provenance.
 
 **Upgrade safety:**
 - `up -d --build` recreates the app containers but **keeps the named `postgres-data` volume**, so all DB
